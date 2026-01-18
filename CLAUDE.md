@@ -15,8 +15,10 @@ Cinch is a radically simple CI system:
 
 - **Pricing:** $9/month flat for hosted control plane, free self-hosted (MIT)
 - **Tech stack:** Go, single binary, WebSocket + JSON protocol, SQLite/Postgres
+- **Config formats:** YAML, TOML, JSON (all supported, user's choice)
+- **Containers:** Default (Docker), opt-out with `--bare-metal` or `container: none`
 - **No:** multi-step pipelines, DAGs, matrix builds, plugins, marketplace
-- **Yes:** services (docker containers), worker labels, fan-out to multiple workers
+- **Yes:** services (docker containers), worker labels, fan-out to multiple workers, scheduled/manual triggers
 
 ## Architecture
 
@@ -45,8 +47,10 @@ TBD - project is pre-code.
 
 Read these before implementing:
 - `design/00-overview.md` - Architecture overview
-- `design/08-config-format.md` - The .cinch.yaml spec
+- `design/08-config-format.md` - The config file spec (.cinch.yaml/.toml/.json)
 - `design/02-protocol.md` - WebSocket protocol between worker and server
+- `design/09-containerization.md` - Container execution, caching, devcontainer support
+- `design/10-services.md` - Service containers (postgres, redis, etc.)
 
 ## Style
 
