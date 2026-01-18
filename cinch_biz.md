@@ -43,9 +43,11 @@ Cinch is **Woodpecker with a hosted control plane option**.
 
 Same philosophy: simple, container-native, one config file. But with a key addition: you don't *have* to run the control plane yourself if you don't want to.
 
-**Free tier**: Self-host everything. MIT licensed. No limits, ever.
+**Free tier (self-hosted)**: Run everything yourself. MIT licensed. No limits, ever.
 
-**Paid tier**: We host the control plane. You run workers. Flat monthly rate.
+**Free tier (hosted)**: Public repos, your dev machine as the runner. Push code, your laptop builds it, green check appears. Close your laptop. Cost to operate: ~$0.10-0.20/user/month (just log storage and coordination).
+
+**Paid tier**: $9/month. Private repos, hosted control plane, same BYOW model. Natural upgrade when you need builds while you sleep or have a team.
 
 ## Pricing: $5 vs $10 vs $9
 
@@ -138,6 +140,31 @@ There is no moat. It's a CI tool. The "moat" is:
 3. **Switching cost** - once CI works, people don't touch it
 
 The real protection is staying small enough that it's not worth acquiring or competing with. A $300k/year business is invisible to GitHub. A $30M/year business is a threat to be crushed.
+
+## Future Upsells (Not v1)
+
+If this takes off, there's room for pay-as-you-go add-ons:
+
+**Managed Workers**
+- Spin up Fly.io (or DO, or whatever) workers on demand
+- User pays compute at cost + small margin
+- "I don't want to run my own worker" → we run it for you
+- Natural upgrade from "my laptop is the runner"
+
+**Artifact/Cache Storage**
+- S3-compatible storage for build artifacts and caches
+- User pays storage at cost + small margin
+- "I want my artifacts hosted somewhere" → we host them
+
+These are "oh shit this is working" expansions, not v1 scope. The core product is control plane + BYOW. Add-ons are for users who want to throw money at convenience.
+
+**The math:**
+- Fly.io compute: ~$0.01-0.05/min depending on size
+- Charge: cost + 20%?
+- S3 storage: ~$0.023/GB/month
+- Charge: cost + 20%?
+
+Low margin but high convenience. Users who want managed everything can get it. Users who want BYOW pay $9 flat. Everyone's happy.
 
 ## Conclusion
 
