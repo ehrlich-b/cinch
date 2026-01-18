@@ -62,7 +62,7 @@ Works with GitHub, GitLab, Forgejo, Gitea, Bitbucket. Same config, same checkmar
 
 ## Why
 
-GitHub announced they'd charge for self-hosted runner orchestration. Seemed like a good time to have an alternative that can run entirely on your own infrastructure.
+GitHub announced they'd charge for self-hosted runner orchestration (they've since postponed after backlash, but they showed their hand). Seemed like a good time to have an alternative that can run entirely on your own infrastructure.
 
 ## Pricing
 
