@@ -1,8 +1,10 @@
-# Service Containers
+# Service Containers (v0.1)
 
 ## Overview
 
-Many builds need backing services: databases, caches, message queues. Instead of requiring users to pre-provision these, cinch spins up service containers alongside the build.
+Many builds need backing services: databases, caches, message queues. Instead of requiring users to pre-provision these (or write ugly Makefile docker commands), cinch spins up service containers alongside the build.
+
+**Why this is in v0.1:** Starting postgres in a Makefile requires manual health checks, cleanup-on-failure handling, and port conflict management. This is the one thing that genuinely sucks to do yourself. Everything else can live in your Makefile.
 
 ## The Config
 

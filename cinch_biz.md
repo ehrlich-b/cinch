@@ -45,18 +45,21 @@ Same philosophy: simple, container-native, one config file. But with a key addit
 
 **Free tier (self-hosted)**: Run everything yourself. MIT licensed. No limits, ever.
 
-**Free tier (hosted)**: Public repos, your dev machine as the runner. 50 builds/month/repo, 7 day log retention, no scheduled builds. Push code, your laptop builds it, green check appears. Cost to operate: ~$0.01/repo/month.
+**Free tier (hosted)**: Public repos, unlimited builds. Your dev machine is the runner - you bring the compute, we bring the coordination. This is the Travis model, resurrected. Cost to operate: ~$0.01/repo/month (webhook relay, log storage, WebSocket coordination).
 
-**Paid tier**: $9/month/repo. Private repos, unlimited builds, 30 day log retention, scheduled builds. Natural upgrade when you need more.
+**Paid tier**: $9/month/repo. Private repos, unlimited builds, 30 day log retention, scheduled builds. The paywall is privacy, not build count.
 
-| | Free (hosted) | Paid |
+| | Public Repos | Private Repos |
 |---|---|---|
-| Public repos | ✓ | ✓ |
-| Private repos | ✗ | ✓ |
-| Builds/month | 50/repo | Unlimited |
+| Builds | Unlimited | Unlimited |
 | Log retention | 7 days | 30 days |
 | Scheduled builds | ✗ | ✓ |
-| Price | $0 | $9/repo/month |
+| Price | Free | $9/repo/month |
+
+**Why per-repo, not per-seat?**
+- Per-seat (Buildkite model) requires sales conversations: "how many engineers?"
+- Per-repo is self-serve, scales naturally, matches actual CI usage
+- A solo dev with 3 private repos pays $27. A company with 50 repos pays $450. Both feel fair.
 
 ## Pricing: $5 vs $10 vs $9
 
@@ -123,20 +126,19 @@ Is the world crying out for another CI tool? No. But the world isn't crying out 
 
 ## The Numbers to Hit
 
-**Sustainability threshold**: $5000 MRR (556 customers at $9)
-- Covers hosting costs
-- Covers my time as "worth it"
-- Proves product-market fit
+**Target**: $180K ARR = $15K MRR = **1,667 private repos at $9/month**
 
-**"Real business" threshold**: $10,000 MRR (1,112 customers at $9)
-- Sustainable solo income
-- Enough buffer for growth investments
-- Enough that I'd turn down job offers
+That's the day job replacement number. Here's the path:
 
-**"Dream" threshold**: $25,000 MRR (2,778 customers at $9)
-- Hire help for support
-- Actually take vacations
-- Comfortable indefinitely
+| Stage | Private Repos | MRR | ARR |
+|-------|---------------|-----|-----|
+| Launched | 50 | $450 | $5,400 |
+| Product-market fit | 200 | $1,800 | $21,600 |
+| Word of mouth working | 500 | $4,500 | $54,000 |
+| Real business | 1,000 | $9,000 | $108,000 |
+| **Target** | **1,667** | **$15,000** | **$180,000** |
+
+The free tier (public repos) isn't charity - it's marketing. At 1% conversion, 1,667 paid repos means ~167K free repos driving awareness. The big OSS projects using Cinch for free are paying in credibility, not cash.
 
 These are small numbers by VC standards. That's the point. I'm not building a unicorn. I'm building a tool that works, charges fairly, and doesn't betray its users.
 
@@ -186,6 +188,10 @@ It's not a bet on explosive growth. It's a bet on sustainable operation.
 
 The GitHub pricing change opened a window. People are Googling "GitHub Actions alternatives" right now. The goal is to be there when they look, with a product that's simple, honest, and priced fairly.
 
-$9/month. Flat. Forever. MIT licensed.
+**Public repos: Free. Unlimited. The Travis magic, resurrected.**
 
-**Run your commands. Get green checks. Keep your money.**
+**Private repos: $9/month/repo. Unlimited builds. No per-seat nonsense.**
+
+**Self-hosted: MIT licensed forever. When I die, you keep your CI.**
+
+Run your commands. Get green checks. Keep your money.
