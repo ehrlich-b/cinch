@@ -45,9 +45,18 @@ Same philosophy: simple, container-native, one config file. But with a key addit
 
 **Free tier (self-hosted)**: Run everything yourself. MIT licensed. No limits, ever.
 
-**Free tier (hosted)**: Public repos, your dev machine as the runner. Push code, your laptop builds it, green check appears. Close your laptop. Cost to operate: ~$0.10-0.20/user/month (just log storage and coordination).
+**Free tier (hosted)**: Public repos, your dev machine as the runner. 50 builds/month/repo, 7 day log retention, no scheduled builds. Push code, your laptop builds it, green check appears. Cost to operate: ~$0.01/repo/month.
 
-**Paid tier**: $9/month. Private repos, hosted control plane, same BYOW model. Natural upgrade when you need builds while you sleep or have a team.
+**Paid tier**: $9/month/repo. Private repos, unlimited builds, 30 day log retention, scheduled builds. Natural upgrade when you need more.
+
+| | Free (hosted) | Paid |
+|---|---|---|
+| Public repos | ✓ | ✓ |
+| Private repos | ✗ | ✓ |
+| Builds/month | 50/repo | Unlimited |
+| Log retention | 7 days | 30 days |
+| Scheduled builds | ✗ | ✓ |
+| Price | $0 | $9/repo/month |
 
 ## Pricing: $5 vs $10 vs $9
 

@@ -62,8 +62,9 @@ Works with GitHub, GitLab, Forgejo, Gitea, Bitbucket. Same config, same checkmar
 
 ## Pricing
 
-- **Self-hosted:** $0, forever. MIT licensed.
-- **Hosted (cinch.sh):** $9/month flat. Unlimited repos, workers, builds.
+- **Self-hosted:** Free forever. MIT licensed. No limits.
+- **Hosted free tier:** Public repos, 50 builds/month/repo, 7 day logs.
+- **Hosted paid:** $9/month/repo. Private repos, unlimited builds, 30 day logs, scheduled builds.
 
 ## How It Works
 
