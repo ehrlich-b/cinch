@@ -504,17 +504,22 @@ artifacts:
 
 ## Implementation Priority
 
-### Phase 1 (v0.1): Basic Docker Support
+### Phase 1 (v0.1): Minimal Container Support
 - [ ] Docker runtime implementation
-- [ ] Volume mounts for standard caches (npm, cargo, pip, go)
-- [ ] Basic devcontainer detection (just use the image)
-- [ ] `container: none` for bare metal
+- [ ] Auto-detect container: devcontainer.json > Dockerfile > default image
+- [ ] Mount workspace into container, run command, stream logs
+- [ ] Sticky worker routing (prefer same worker for warm host-level caches)
 
-### Phase 2 (v0.2): Full Devcontainer Support
+**NOT in v0.1:**
+- No artifact extraction (your Makefile uploads to S3 if needed)
+- No explicit container config override (auto-detect only)
+- No custom cache volume config (rely on host-level caching via sticky routing)
+
+### Phase 2 (v0.2): Container Config + Caching
+- [ ] Explicit `container:` config option (override auto-detect)
+- [ ] `container: none` for bare metal
+- [ ] Cache volume mounts (npm, cargo, pip, go)
 - [ ] Parse devcontainer.json properly (features, mounts, etc.)
-- [ ] Build devcontainer images with caching
-- [ ] Custom cache paths from config
-- [ ] Artifact extraction
 
 ### Phase 3 (v0.3): Advanced Features
 - [ ] Podman support

@@ -251,58 +251,56 @@ func validateConfig(c *Config) error {
 }
 ```
 
-### The Config Schema
+### The Config Schema (v0.1)
 
-Regardless of format, the schema is:
+The v0.1 philosophy: **your Makefile is the pipeline.** Cinch runs one command. Services are the one exception - because starting postgres in a Makefile sucks.
 
 ```yaml
 # Required: what to run
 command: make ci
 
-# Optional: container settings (see 09-containerization.md)
-container:
-  image: node:20-alpine           # explicit image
-  # OR
-  dockerfile: ./Dockerfile.ci      # build from this
-  # OR
-  devcontainer: true              # use .devcontainer/ (default if exists)
-  # OR
-  # container: none               # bare metal (no container)
+# Optional: which worker(s) run this (fan-out)
+workers: [linux-amd64, linux-arm64]  # creates one job per label, default: any available worker
 
-# Optional: persistent caches (mounted into container)
-cache:
-  - name: dependencies
-    path: ./node_modules
-  - name: build-cache
-    path: ./.next/cache
-
-# Optional: when to run (defaults to always)
-trigger:
-  branches: [main, develop]      # default: all branches
-  pull_requests: true            # default: true
-  paths: ["src/**", "tests/**"]  # default: all paths
-  paths_ignore: ["docs/**"]      # default: none
-  schedule: "0 0 * * *"          # cron expression for scheduled builds
-  manual: true                   # allow manual trigger from UI/API
-
-# Optional: which worker(s) run this
-workers: [linux-amd64, linux-arm64]  # fan-out: one job per label
-# OR for single worker:
-# runner:
-#   labels: [linux, amd64]       # default: any worker
-
-# Optional: limits
+# Optional: timeout
 timeout: 30m                      # default: 30m
 
-# Optional: extra env vars (non-secret)
-env:
-  CI: "true"
-  NODE_ENV: test
+# Optional: service containers (started before your command, torn down after)
+services:
+  postgres:
+    image: postgres:16
+    env:
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      cmd: pg_isready
+      timeout: 60s
+  redis:
+    image: redis:7-alpine
+```
 
-# Optional: files to extract after build
-artifacts:
-  - path: ./dist
-    name: build-output
+That's the full v0.1 surface. Container is auto-detected (devcontainer > Dockerfile > default image). Artifacts? Your makefile uploads them. Scheduled builds? Push code or wait for v0.2.
+
+**Why services but not other features?** Because the Makefile approach to services is genuinely painful (health checks, cleanup on failure, port conflicts). Everything else is doable in your Makefile without crying.
+
+### Future Config Options (NOT v0.1)
+
+These may be added based on user demand:
+
+```yaml
+# Container override (v0.1 auto-detects, explicit override is v0.2)
+container:
+  image: node:20-alpine
+  # OR
+  dockerfile: ./Dockerfile.ci
+  # OR: container: none (bare metal)
+
+# Trigger filtering (v0.2 - for now, all pushes and PRs trigger builds)
+trigger:
+  branches: [main, develop]
+  paths: ["src/**"]
+
+# Scheduled builds (v0.2 - paid feature)
+schedule: "0 0 * * *"
 ```
 
 ## File Discovery Order

@@ -228,29 +228,38 @@ This roadmap assumes AI agents working full-time (~8 hours/day) for two weeks. G
 
 ## Success Criteria for v0.1
 
+The mantra: **your Makefile is the pipeline.** Cinch runs one command. Services are the exception because Makefile postgres is pain.
+
 - [ ] Single binary contains: server, worker, CLI, web UI
 - [ ] GitHub webhooks trigger builds
 - [ ] Forgejo webhooks trigger builds
 - [ ] Status checks posted back to forges
 - [ ] Logs stream in real-time to web UI
-- [ ] **Builds run in containers by default (Docker)**
-- [ ] **Devcontainer auto-detection works**
-- [ ] **Persistent cache volumes for warm builds**
+- [ ] Devcontainer auto-detection (use project's container with zero config)
+- [ ] Fan-out to multiple workers (`workers: [linux, arm64]`)
+- [ ] Sticky worker routing (prefer last worker for warm cache)
+- [ ] **Service containers (postgres, redis) with health checks and auto-cleanup**
 - [ ] Self-hosted setup works with SQLite
 - [ ] Installation script works on Linux and macOS
-- [ ] Documentation sufficient for someone to try it
 
 ## What's NOT in v0.1
 
-- Postgres support (v0.2)
-- GitLab support (v0.2)
+**Cut to keep it minimal:**
+- Artifact extraction - your Makefile uploads to S3 if you need artifacts
+- Scheduled/manual builds - push code or wait for v0.2
+- Trigger filtering (branches, paths) - all pushes trigger builds
+- Explicit container config - auto-detect only, override in v0.2
+- Resource limits (memory, CPU)
+
+**Deferred infrastructure:**
+- Postgres support (v0.2 - SQLite is fine for self-hosted)
+- GitLab support (v0.2 - GitHub + Forgejo first)
 - Bitbucket support (v0.3)
-- Podman/Bubblewrap alternative runtimes (v0.2)
-- Resource limits (memory, CPU) (v0.2)
-- Network isolation modes (v0.2)
 - Hosted service infrastructure (v0.3)
-- User authentication in web UI (self-hosted is single-user)
-- Build badges
+
+**Nice to have:**
+- Build badges (v0.2)
+- User authentication in web UI (self-hosted is single-user for now)
 - Notifications
 
 ## Risk Mitigation

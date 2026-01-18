@@ -63,8 +63,8 @@ Works with GitHub, GitLab, Forgejo, Gitea, Bitbucket. Same config, same checkmar
 ## Pricing
 
 - **Self-hosted:** Free forever. MIT licensed. No limits.
-- **Hosted free tier:** Public repos, 50 builds/month/repo, 7 day logs.
-- **Hosted paid:** $9/month/repo. Private repos, unlimited builds, 30 day logs, scheduled builds.
+- **Public repos:** Free. Unlimited builds. This is the Travis magic, back from the dead.
+- **Private repos:** $9/month/repo. Unlimited builds, 30 day logs, scheduled builds.
 
 ## How It Works
 
