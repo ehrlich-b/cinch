@@ -89,7 +89,7 @@ Developer tools for local use.
 
 ### 4. Web UI (embedded)
 
-Single-page app embedded in the binary.
+Single-page app embedded in the binary. **The API is the product** - the bundled UI is just a convenience.
 
 **Features:**
 - Job list (with filters)
@@ -98,9 +98,13 @@ Single-page app embedded in the binary.
 - Repo configuration
 
 **Tech:**
-- Static assets embedded via `go:embed`
-- Vanilla JS or minimal framework (no build step ideal)
+- Static assets embedded via `go:embed` (Vite builds to web/dist/)
+- Minimal React 18 + Vite (no state libs, no component libs)
+- ansi-to-html for log rendering
 - Communicates via same HTTP/WebSocket API as CLI
+
+**Philosophy:**
+The web UI is just another API client. Someone could build their own frontend (Vue, htmx, terminal UI, whatever) and it would work identically. We'd encourage that. The embedded UI exists so the product works out of the box, not because it's special.
 
 ## Data Flow
 
