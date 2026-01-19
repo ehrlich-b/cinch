@@ -45,69 +45,102 @@ Same philosophy: simple, container-native, one config file. But with a key addit
 
 **Free tier (self-hosted)**: Run everything yourself. MIT licensed. No limits, ever.
 
-**Free tier (hosted)**: Public repos, unlimited builds. Your dev machine is the runner - you bring the compute, we bring the coordination. This is the Travis model, resurrected. Cost to operate: ~$0.01/repo/month (webhook relay, log storage, WebSocket coordination).
+**Free tier (hosted)**: Public repos, unlimited builds, unlimited repos. Your dev machine is the runner - you bring the compute, we bring the coordination. This is the Travis model, resurrected. Cost to operate: ~$0.01/repo/month (webhook relay, log storage, WebSocket coordination). No account required beyond forge connection.
 
-**Paid tier**: $9/month/repo. Private repos, unlimited builds, 30 day log retention, scheduled builds. The paywall is privacy, not build count.
+**Paid tier (Pro)**: $5/seat/month. Unlimited private repos, unlimited builds. The paywall is privacy, not build count.
 
-| | Public Repos | Private Repos |
-|---|---|---|
-| Builds | Unlimited | Unlimited |
-| Log retention | 7 days | 30 days |
-| Scheduled builds | ✗ | ✓ |
-| Price | Free | $9/repo/month |
+### What's a Seat?
 
-**Why per-repo, not per-seat?**
-- Per-seat (Buildkite model) requires sales conversations: "how many engineers?"
-- Per-repo is self-serve, scales naturally, matches actual CI usage
-- A solo dev with 3 private repos pays $27. A company with 50 repos pays $450. Both feel fair.
+A **seat** is a unique identity that triggered a build on a private repo within the billing period. That's it.
 
-## Pricing: $5 vs $10 vs $9
+- Detected automatically from webhook payload (`pusher.name` on GitHub, `user_username` on GitLab, equivalent on other forges)
+- No cinch user accounts required — identity comes from the forge
+- Bots/service accounts that push code count as seats
 
-### The Case for Not Going Too Low
+One SKU in Stripe: `cinch_pro_seat` @ $5/month, quantity-based. Customers purchase a quantity of seats. No tiers in the billing system — just `qty × $5`.
 
-Research says founders who price at $5/month enter the "underpricing trap":
-- Thin margins
-- Attracts bargain hunters who churn fast and demand support
-- Hard to raise prices later (15-30% churn when you do)
-- Creates a hamster wheel: lots of customers, no money
+### Pricing Page Presentation
 
-A [study in Quantitative Marketing and Economics](https://link.springer.com/journal/11129) found prices ending in "9" increase purchases by up to 24%. The psychological difference between $9 and $10 is significant - $9 feels "in the single digits" while $10 crosses into "teens."
+Present as suggested bundles for psychological anchoring, but actual billing is linear:
 
-### What Does $5 Actually Buy?
+| | Solo | Team | Business |
+|--|------|------|----------|
+| Suggested for | Just you | Small teams | Larger orgs |
+| Starting at | $5/mo | $25/mo | $75/mo |
+| Seats included | 1 | 5 | 15 |
+| Additional seats | +$5/seat | +$5/seat | +$5/seat |
+| Private repos | Unlimited | Unlimited | Unlimited |
+| Builds | Unlimited | Unlimited | Unlimited |
 
-At $5/month:
-- 100 customers = $500/month = hobby project
-- 1000 customers = $5000/month = "ramen profitable" at best
+These bundles are marketing — checkout is just "how many seats do you need?" and Stripe multiplies.
 
-At $9/month:
-- 100 customers = $900/month
-- 1000 customers = $9000/month = sustainable solo business
+### Usage Tracking & Enforcement
 
-The effort to support 100 vs 1000 customers is roughly the same until you hit scale issues. Might as well charge what makes the math work.
+**Dashboard shows:**
+- Unique contributors to private repos this billing period
+- Current seat count purchased
+- Soft warning if usage exceeds purchased seats
 
-### But $10 is Cleaner
+**Enforcement approach (soft):**
+- Builds continue even if over seat count
+- Dashboard warns: "You had 12 unique contributors this month but are paying for 5 seats. Please adjust your seat count."
+- Grace period for occasional overages (contractor pushed once, etc.)
+- Reserve right to enforce for egregious/persistent abuse
 
-$10/month:
-- Clean number
-- Easy mental math
-- "One Hamilton a month"
-- 100 customers = $1000/month
-- 1000 customers = $10,000/month
+**Not doing (for now):**
+- Auto-upgrade
+- Build blocking
+- Hard enforcement
 
-The question: does the $1 delta matter?
+**Why per-seat?**
+- Per-seat scales naturally with team size
+- Self-serve: no sales conversations, just adjust your seat count
+- A solo dev pays $5. A 15-person team pays $75. Both feel fair.
+- No metering compute, no counting repos, no complexity
 
-For a CI product targeting developers who understand costs, probably not. Developers do math. They'll compare $10/month to GitHub's per-minute billing or Buildkite's per-seat pricing and see it's cheap either way.
+## Pricing: Why $5/seat
 
-### Recommendation: $9/month
+### The Per-Seat Math
 
-Go with $9. It's:
-- Psychologically "single digits"
-- Charts better than $10 in SaaS pricing research
-- Still meaningful revenue per customer
-- Clearly cheaper than alternatives at a glance
-- Low enough that nobody needs manager approval
+At $5/seat, revenue scales with team size naturally:
 
-If it doesn't matter to the customer (and it probably doesn't), take the behavioral economics win.
+| Team Size | Monthly | Annual |
+|-----------|---------|--------|
+| Solo dev | $5 | $60 |
+| Small team (5) | $25 | $300 |
+| Medium team (15) | $75 | $900 |
+| Larger team (50) | $250 | $3,000 |
+
+This is meaningful revenue without requiring enterprise sales conversations.
+
+### Competitive Positioning
+
+| Service | Model | 15-person team cost |
+|---------|-------|---------------------|
+| **cinch.sh** | $5/seat | **$75/mo** |
+| Buildkite | $15/seat | $225/mo |
+| CircleCI | Credit-based | $50-150+/mo |
+| GitHub Actions | Free* (*for now) | $0 but lock-in risk |
+
+**Positioning statement:** "Buildkite is a full CI platform. Cinch is a webhook and a green checkmark. One-third the features, one-third the price."
+
+### Why $5 Works Now
+
+The old concern about $5 being too low assumed per-repo pricing. At $5/repo, you need thousands of repos to make meaningful revenue.
+
+Per-seat changes the math:
+- Average team has 5-15 engineers
+- Average revenue per customer: $25-75/month (not $5)
+- $5 is the *unit price*, not the customer price
+- Still low enough that nobody needs manager approval
+
+### Underpricing Risk Addressed
+
+The risk with low prices is attracting bargain hunters who churn fast. But:
+- CI is sticky — once it works, people don't touch it
+- Free tier absorbs the price-sensitive hobbyists
+- Paying customers have private repos = real projects = real teams
+- Per-seat naturally filters for customers worth having
 
 ## Why "Yet Another" CI Tool?
 
@@ -126,19 +159,19 @@ Is the world crying out for another CI tool? No. But the world isn't crying out 
 
 ## The Numbers to Hit
 
-**Target**: $180K ARR = $15K MRR = **1,667 private repos at $9/month**
+**Target**: $180K ARR = $15K MRR = **3,000 seats at $5/month**
 
-That's the day job replacement number. Here's the path:
+Assuming average team size of 10, that's ~300 paying customers. Here's the path:
 
-| Stage | Private Repos | MRR | ARR |
-|-------|---------------|-----|-----|
-| Launched | 50 | $450 | $5,400 |
-| Product-market fit | 200 | $1,800 | $21,600 |
-| Word of mouth working | 500 | $4,500 | $54,000 |
-| Real business | 1,000 | $9,000 | $108,000 |
-| **Target** | **1,667** | **$15,000** | **$180,000** |
+| Stage | Seats | Avg Team | Customers | MRR | ARR |
+|-------|-------|----------|-----------|-----|-----|
+| Launched | 100 | 5 | 20 | $500 | $6,000 |
+| Product-market fit | 400 | 8 | 50 | $2,000 | $24,000 |
+| Word of mouth working | 1,000 | 10 | 100 | $5,000 | $60,000 |
+| Real business | 2,000 | 10 | 200 | $10,000 | $120,000 |
+| **Target** | **3,000** | **10** | **300** | **$15,000** | **$180,000** |
 
-The free tier (public repos) isn't charity - it's marketing. At 1% conversion, 1,667 paid repos means ~167K free repos driving awareness. The big OSS projects using Cinch for free are paying in credibility, not cash.
+The free tier (public repos) isn't charity - it's marketing. Users start with public repos, their team grows, they add private repos, they pay. The big OSS projects using Cinch for free are paying in credibility, not cash.
 
 These are small numbers by VC standards. That's the point. I'm not building a unicorn. I'm building a tool that works, charges fairly, and doesn't betray its users.
 
@@ -153,6 +186,14 @@ There is no moat. It's a CI tool. The "moat" is:
 The real protection is staying small enough that it's not worth acquiring or competing with. A $300k/year business is invisible to GitHub. A $30M/year business is a threat to be crushed.
 
 ## Future Upsells (Not v1)
+
+### Pricing Expansions
+
+- **Volume discount at 50+ seats**: $4/seat (20% off)
+- **Annual billing**: 2 months free ($50/seat/year instead of $60)
+- **Enterprise tier for 100+ seats**: Custom pricing, SLA, priority support
+
+### Add-on Services
 
 If this takes off, there's room for pay-as-you-go add-ons:
 
@@ -175,7 +216,14 @@ These are "oh shit this is working" expansions, not v1 scope. The core product i
 - S3 storage: ~$0.023/GB/month
 - Charge: cost + 20%?
 
-Low margin but high convenience. Users who want managed everything can get it. Users who want BYOW pay $9 flat. Everyone's happy.
+Low margin but high convenience. Users who want managed everything can get it. Users who want BYOW pay $5/seat flat. Everyone's happy.
+
+## Implementation Notes
+
+- Stripe Checkout with quantity selector for seats
+- Webhook payload parsing already captures pusher identity — store and count unique values per billing period per customer
+- Dashboard needs: current seat count, unique pushers this period, upgrade/adjust CTA
+- No forge API integration needed for seat counting — data flows through existing webhook path
 
 ## Conclusion
 
@@ -190,7 +238,7 @@ The GitHub pricing change opened a window. People are Googling "GitHub Actions a
 
 **Public repos: Free. Unlimited. The Travis magic, resurrected.**
 
-**Private repos: $9/month/repo. Unlimited builds. No per-seat nonsense.**
+**Private repos: $5/seat/month. Unlimited repos. Unlimited builds.**
 
 **Self-hosted: MIT licensed forever. When I die, you keep your CI.**
 
