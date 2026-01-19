@@ -63,8 +63,8 @@ Works with GitHub, GitLab, Forgejo, Gitea, Bitbucket. Same config, same checkmar
 ## Pricing
 
 - **Self-hosted:** Free forever. MIT licensed. No limits.
-- **Public repos:** Free. Unlimited builds. This is the Travis magic, back from the dead.
-- **Private repos:** $9/month/repo. Unlimited builds, 30 day logs, scheduled builds.
+- **Public repos:** Free. Unlimited repos, unlimited builds. The Travis magic, back from the dead.
+- **Private repos:** $5/seat/month. Unlimited repos, unlimited builds. A "seat" is any unique contributor who triggers a build.
 
 ## How It Works
 
