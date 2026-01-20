@@ -1,0 +1,243 @@
+package server
+
+import (
+	"context"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/ehrlich-b/cinch/internal/protocol"
+	"github.com/ehrlich-b/cinch/internal/storage"
+)
+
+// Dispatcher manages job queue and worker assignment.
+type Dispatcher struct {
+	hub     *Hub
+	storage storage.Storage
+	ws      *WSHandler
+	log     *slog.Logger
+
+	// Job queue
+	mu      sync.Mutex
+	queue   []*QueuedJob
+	queueCh chan struct{} // signals new jobs in queue
+
+	// Control
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+}
+
+// QueuedJob represents a job waiting for a worker.
+type QueuedJob struct {
+	Job        *storage.Job
+	Labels     []string
+	Config     protocol.JobConfig
+	Repo       protocol.JobRepo
+	QueuedAt   time.Time
+	Attempts   int
+	MaxRetries int
+}
+
+// NewDispatcher creates a new job dispatcher.
+func NewDispatcher(hub *Hub, store storage.Storage, ws *WSHandler, log *slog.Logger) *Dispatcher {
+	if log == nil {
+		log = slog.Default()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Dispatcher{
+		hub:     hub,
+		storage: store,
+		ws:      ws,
+		log:     log,
+		queue:   make([]*QueuedJob, 0),
+		queueCh: make(chan struct{}, 1),
+		ctx:     ctx,
+		cancel:  cancel,
+	}
+}
+
+// Start begins the dispatch loop.
+func (d *Dispatcher) Start() {
+	d.wg.Add(2)
+	go d.dispatchLoop()
+	go d.timeoutLoop()
+}
+
+// Stop stops the dispatcher and waits for goroutines.
+func (d *Dispatcher) Stop() {
+	d.cancel()
+	d.wg.Wait()
+}
+
+// Enqueue adds a job to the queue.
+func (d *Dispatcher) Enqueue(job *QueuedJob) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	job.QueuedAt = time.Now()
+	d.queue = append(d.queue, job)
+
+	// Update job status to queued
+	ctx := context.Background()
+	if err := d.storage.UpdateJobStatus(ctx, job.Job.ID, storage.JobStatusQueued, nil); err != nil {
+		d.log.Error("failed to update job status to queued", "job_id", job.Job.ID, "error", err)
+	}
+
+	// Signal dispatch loop
+	select {
+	case d.queueCh <- struct{}{}:
+	default:
+	}
+
+	d.log.Info("job enqueued", "job_id", job.Job.ID, "labels", job.Labels)
+}
+
+// dispatchLoop continuously attempts to assign queued jobs to workers.
+func (d *Dispatcher) dispatchLoop() {
+	defer d.wg.Done()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-d.queueCh:
+			d.tryDispatch()
+		case <-ticker.C:
+			d.tryDispatch()
+		}
+	}
+}
+
+// tryDispatch attempts to assign queued jobs to available workers.
+func (d *Dispatcher) tryDispatch() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Process queue from front
+	remaining := make([]*QueuedJob, 0, len(d.queue))
+	for _, qj := range d.queue {
+		if d.tryAssign(qj) {
+			d.log.Info("job dispatched", "job_id", qj.Job.ID)
+		} else {
+			remaining = append(remaining, qj)
+		}
+	}
+	d.queue = remaining
+}
+
+// tryAssign attempts to assign a job to an available worker.
+// Returns true if successful.
+func (d *Dispatcher) tryAssign(qj *QueuedJob) bool {
+	worker := d.hub.SelectWorker(qj.Labels)
+	if worker == nil {
+		return false
+	}
+
+	// Update job with worker assignment
+	ctx := context.Background()
+	if err := d.storage.UpdateJobWorker(ctx, qj.Job.ID, worker.ID); err != nil {
+		d.log.Error("failed to update job worker", "job_id", qj.Job.ID, "error", err)
+		return false
+	}
+
+	// Build job assignment
+	assign := protocol.JobAssign{
+		JobID:  qj.Job.ID,
+		Repo:   qj.Repo,
+		Config: qj.Config,
+	}
+
+	// Send to worker
+	if err := d.ws.SendJob(worker.ID, assign); err != nil {
+		d.log.Error("failed to send job to worker", "job_id", qj.Job.ID, "worker_id", worker.ID, "error", err)
+		return false
+	}
+
+	d.log.Info("job assigned", "job_id", qj.Job.ID, "worker_id", worker.ID)
+	return true
+}
+
+// timeoutLoop checks for stale workers and timed-out jobs.
+func (d *Dispatcher) timeoutLoop() {
+	defer d.wg.Done()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-ticker.C:
+			d.checkStaleWorkers()
+			d.checkJobTimeouts()
+		}
+	}
+}
+
+// checkStaleWorkers finds and removes workers that haven't pinged recently.
+func (d *Dispatcher) checkStaleWorkers() {
+	stale := d.hub.FindStale(90 * time.Second)
+	for _, w := range stale {
+		d.log.Warn("removing stale worker", "worker_id", w.ID, "last_ping", w.LastPing)
+
+		// Mark any active jobs as error
+		for _, jobID := range w.ActiveJobs {
+			ctx := context.Background()
+			if err := d.storage.UpdateJobStatus(ctx, jobID, storage.JobStatusError, nil); err != nil {
+				d.log.Error("failed to update job status", "job_id", jobID, "error", err)
+			}
+		}
+
+		// Update worker status in storage
+		ctx := context.Background()
+		if err := d.storage.UpdateWorkerStatus(ctx, w.ID, storage.WorkerStatusOffline); err != nil {
+			d.log.Error("failed to update worker status", "worker_id", w.ID, "error", err)
+		}
+
+		d.hub.Unregister(w.ID)
+	}
+}
+
+// checkJobTimeouts marks jobs that have been queued too long.
+func (d *Dispatcher) checkJobTimeouts() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	timeout := 30 * time.Minute // Max time in queue
+	now := time.Now()
+
+	remaining := make([]*QueuedJob, 0, len(d.queue))
+	for _, qj := range d.queue {
+		if now.Sub(qj.QueuedAt) > timeout {
+			d.log.Warn("job timed out in queue", "job_id", qj.Job.ID, "queued_at", qj.QueuedAt)
+			ctx := context.Background()
+			if err := d.storage.UpdateJobStatus(ctx, qj.Job.ID, storage.JobStatusError, nil); err != nil {
+				d.log.Error("failed to update job status", "job_id", qj.Job.ID, "error", err)
+			}
+		} else {
+			remaining = append(remaining, qj)
+		}
+	}
+	d.queue = remaining
+}
+
+// QueueLength returns the current queue size.
+func (d *Dispatcher) QueueLength() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.queue)
+}
+
+// PendingJobs returns jobs currently in the queue.
+func (d *Dispatcher) PendingJobs() []*QueuedJob {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	result := make([]*QueuedJob, len(d.queue))
+	copy(result, d.queue)
+	return result
+}
