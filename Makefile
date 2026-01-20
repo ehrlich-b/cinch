@@ -1,10 +1,9 @@
-.PHONY: build test fmt lint clean web dev
+.PHONY: build build-go test fmt lint clean web web-deps web-dev dev dev-worker run check
 
-# Build the cinch binary
-build: web
-	go build -o bin/cinch ./cmd/cinch
+# Build the cinch binary (includes web assets)
+build: web build-go
 
-# Build without rebuilding web assets (for faster iteration)
+# Build just the Go binary (fast, for iteration)
 build-go:
 	go build -o bin/cinch ./cmd/cinch
 
@@ -15,11 +14,13 @@ test:
 # Format code
 fmt:
 	go fmt ./...
-	gofumpt -w .
 
 # Lint code
 lint:
 	golangci-lint run
+
+# Full pre-commit check
+check: fmt test lint
 
 # Clean build artifacts
 clean:
@@ -39,9 +40,25 @@ web-dev:
 	cd web && npm run dev
 
 # Run server in dev mode
-dev:
-	go run ./cmd/cinch server
+dev: build-go
+	./bin/cinch server
 
 # Run worker in dev mode
-dev-worker:
-	go run ./cmd/cinch worker
+dev-worker: build-go
+	./bin/cinch worker
+
+# Run a command locally (usage: make run CMD="echo hello")
+run: build-go
+	./bin/cinch run $(CMD)
+
+# Run bare metal (usage: make run-bare CMD="echo hello")
+run-bare: build-go
+	./bin/cinch run --bare-metal $(CMD)
+
+# Validate config in current directory
+validate: build-go
+	./bin/cinch config validate
+
+# Run cinch run using config file
+ci: build-go
+	./bin/cinch run

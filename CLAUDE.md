@@ -13,7 +13,7 @@ Cinch is a radically simple CI system:
 
 ## Key Decisions
 
-- **Pricing:** $9/month flat for hosted control plane, free self-hosted (MIT)
+- **Pricing:** $5/seat/month for private repos, free for public, free self-hosted (MIT)
 - **Tech stack:** Go, single binary, WebSocket + JSON protocol, SQLite/Postgres
 - **Config formats:** YAML, TOML, JSON (all supported, user's choice)
 - **Containers:** Default (Docker), opt-out with `--bare-metal` or `container: none`
@@ -34,14 +34,33 @@ Worker (your machine)              Control Plane (cinch.sh or self-hosted)
 ## Repository Structure
 
 ```
-design/           # Technical design docs (00-09)
-cinch_biz.md      # Business philosophy and pricing rationale
-README.md         # Public-facing pitch
+cmd/cinch/        # CLI entry point
+internal/
+  cli/            # CLI commands (run, etc.)
+  config/         # Config parsing (YAML/TOML/JSON)
+  worker/         # Executor, container runtime
+  server/         # HTTP server, webhooks, dispatch (TODO)
+  storage/        # Database layer (TODO)
+  protocol/       # WebSocket message types (TODO)
+  forge/          # GitHub/GitLab/Forgejo clients (TODO)
+web/              # React frontend (Vite)
+design/           # Technical design docs
 ```
 
 ## Build Commands
 
-TBD - project is pre-code.
+```bash
+make build-go     # Build Go binary (fast, for iteration)
+make build        # Build everything (Go + web assets)
+make test         # Run tests
+make fmt          # Format code
+make check        # fmt + test + lint
+
+make run CMD="echo hello"      # Run command in container
+make run-bare CMD="echo hello" # Run command bare metal
+make ci                        # Run using .cinch.yaml config
+make validate                  # Validate config file
+```
 
 ## Design Docs
 
