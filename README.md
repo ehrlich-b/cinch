@@ -60,15 +60,11 @@ See `cinch server --help` for configuration options.
 
 Works with GitHub, GitLab, Forgejo, Gitea, Bitbucket. Same config, same checkmarks.
 
-## Pricing
-
-- **Self-hosted:** Free forever. MIT licensed. No limits.
-- **Public repos:** Free. Unlimited repos, unlimited builds. The Travis magic, back from the dead.
-- **Private repos:** $5/seat/month. Unlimited repos, unlimited builds. A "seat" is any unique contributor who triggers a build.
-
 ## How It Works
 
-Your worker connects to the control plane over WebSocket. When you push, the control plane receives the webhook, dispatches the job, and your worker clones, runs the command in a container, and streams logs back. Status check posted to your forge.
+Cinch is a control plane. You bring the compute.
+
+Your worker runs on your hardware—a $5 VPS, a Fly.io machine, your gaming PC, whatever. It connects outbound to the control plane over WebSocket. When you push, the control plane receives the webhook, dispatches the job, and your worker clones, runs the command in a container, and streams logs back. Status check posted to your forge.
 
 ```
 Worker (your machine)              cinch.sh (or self-hosted)
@@ -77,6 +73,17 @@ Worker (your machine)              cinch.sh (or self-hosted)
 ├── Runs command in container      ├── Posts status checks
 └── Streams logs                   └── Serves web UI
 ```
+
+Your code never leaves your infrastructure. Only logs and status checks go to the control plane.
+
+**Why this matters:** Persistent filesystem. Docker layers, cargo/npm/go caches stay warm between builds. No more waiting for cold caches on every run.
+
+## Pricing
+
+- **Self-hosted:** Free forever. MIT licensed. Run your own control plane.
+- **Hosted control plane:** $5/seat/month for private repos. Free for public repos. A "seat" is any unique contributor who triggers a build.
+
+You pay for your own compute (VPS, electricity, etc). We just coordinate.
 
 ## Development
 
