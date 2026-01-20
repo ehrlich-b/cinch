@@ -116,8 +116,13 @@ const (
 type Repo struct {
 	ID            string
 	ForgeType     ForgeType
+	Owner         string // e.g., "user" or "org"
+	Name          string // e.g., "repo"
 	CloneURL      string
+	HTMLURL       string
 	WebhookSecret string
+	ForgeToken    string // Token for API calls (status posting, cloning private repos)
+	Command       string // Command to run (e.g., "make test")
 	CreatedAt     time.Time
 }
 

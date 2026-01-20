@@ -31,9 +31,13 @@ type Dispatcher struct {
 // QueuedJob represents a job waiting for a worker.
 type QueuedJob struct {
 	Job        *storage.Job
+	Repo       *storage.Repo // Storage repo (for forge token, webhook secret)
 	Labels     []string
-	Config     protocol.JobConfig
-	Repo       protocol.JobRepo
+	Config     protocol.JobConfig // Command, env vars, etc.
+	CloneURL   string             // Clone URL
+	Branch     string             // Branch to checkout
+	CloneToken string             // Token for cloning private repos
+	Forge      interface{}        // Forge implementation (for status posting)
 	QueuedAt   time.Time
 	Attempts   int
 	MaxRetries int
@@ -146,8 +150,13 @@ func (d *Dispatcher) tryAssign(qj *QueuedJob) bool {
 
 	// Build job assignment
 	assign := protocol.JobAssign{
-		JobID:  qj.Job.ID,
-		Repo:   qj.Repo,
+		JobID: qj.Job.ID,
+		Repo: protocol.JobRepo{
+			CloneURL:   qj.CloneURL,
+			Branch:     qj.Branch,
+			Commit:     qj.Job.Commit,
+			CloneToken: qj.CloneToken,
+		},
 		Config: qj.Config,
 	}
 
