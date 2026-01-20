@@ -1,0 +1,449 @@
+package server
+
+import (
+	"context"
+	"crypto/subtle"
+	"encoding/hex"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/ehrlich-b/cinch/internal/protocol"
+	"github.com/ehrlich-b/cinch/internal/storage"
+	"github.com/gorilla/websocket"
+	"golang.org/x/crypto/sha3"
+)
+
+const (
+	// Time allowed to write a message to the peer.
+	writeWait = 10 * time.Second
+
+	// Time allowed to read the next pong message from the peer.
+	pongWait = 90 * time.Second
+
+	// Send pings to peer with this period. Must be less than pongWait.
+	pingPeriod = 30 * time.Second
+
+	// Maximum message size allowed from peer.
+	maxMessageSize = 1 << 20 // 1MB
+
+	// Server version
+	serverVersion = "0.1.0"
+)
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow all origins for workers
+	},
+}
+
+// WSHandler handles WebSocket connections from workers.
+type WSHandler struct {
+	hub     *Hub
+	storage storage.Storage
+	log     *slog.Logger
+}
+
+// NewWSHandler creates a new WebSocket handler.
+func NewWSHandler(hub *Hub, store storage.Storage, log *slog.Logger) *WSHandler {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &WSHandler{
+		hub:     hub,
+		storage: store,
+		log:     log,
+	}
+}
+
+// ServeHTTP handles WebSocket upgrade requests.
+func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		http.Error(w, "missing token", http.StatusUnauthorized)
+		return
+	}
+
+	// Validate token
+	ctx := r.Context()
+	workerID, err := h.validateToken(ctx, token)
+	if err != nil {
+		h.log.Warn("token validation failed", "error", err)
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	// Upgrade connection
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		h.log.Error("websocket upgrade failed", "error", err)
+		return
+	}
+
+	// Create worker connection
+	worker := &WorkerConn{
+		ID:         workerID,
+		Send:       make(chan []byte, 256),
+		ActiveJobs: []string{},
+		LastPing:   time.Now(),
+	}
+
+	h.log.Info("worker connected", "worker_id", workerID)
+
+	// Send AUTH_OK
+	authOK, err := protocol.Encode(protocol.TypeAuthOK, protocol.AuthOK{
+		WorkerID:      workerID,
+		ServerVersion: serverVersion,
+	})
+	if err != nil {
+		h.log.Error("failed to encode AUTH_OK", "error", err)
+		conn.Close()
+		return
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, authOK); err != nil {
+		h.log.Error("failed to send AUTH_OK", "error", err)
+		conn.Close()
+		return
+	}
+
+	// Start read/write pumps
+	go h.writePump(conn, worker)
+	go h.readPump(conn, worker)
+}
+
+// validateToken checks the token and returns the worker ID.
+func (h *WSHandler) validateToken(ctx context.Context, token string) (string, error) {
+	// Hash the token to compare against stored hash
+	hash := hashToken(token)
+	tok, err := h.storage.GetTokenByHash(ctx, hash)
+	if err != nil {
+		return "", err
+	}
+	// Return worker ID if bound, or token ID as worker ID
+	if tok.WorkerID != nil {
+		return *tok.WorkerID, nil
+	}
+	return tok.ID, nil
+}
+
+// hashToken creates a SHA3-256 hash of the token.
+func hashToken(token string) string {
+	h := sha3.New256()
+	h.Write([]byte(token))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// TokensEqual compares two tokens in constant time.
+func TokensEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+// readPump pumps messages from the WebSocket to the hub.
+func (h *WSHandler) readPump(conn *websocket.Conn, worker *WorkerConn) {
+	defer func() {
+		h.hub.Unregister(worker.ID)
+		conn.Close()
+		h.log.Info("worker disconnected", "worker_id", worker.ID)
+	}()
+
+	conn.SetReadLimit(maxMessageSize)
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				h.log.Warn("websocket read error", "worker_id", worker.ID, "error", err)
+			}
+			return
+		}
+
+		h.handleMessage(worker, message)
+	}
+}
+
+// writePump pumps messages from the hub to the WebSocket.
+func (h *WSHandler) writePump(conn *websocket.Conn, worker *WorkerConn) {
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		conn.Close()
+	}()
+
+	for {
+		select {
+		case message, ok := <-worker.Send:
+			if err := conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				return
+			}
+			if !ok {
+				// Channel closed
+				_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+
+			if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
+				h.log.Warn("websocket write error", "worker_id", worker.ID, "error", err)
+				return
+			}
+
+		case <-ticker.C:
+			if err := conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				return
+			}
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// handleMessage processes incoming messages from a worker.
+func (h *WSHandler) handleMessage(worker *WorkerConn, data []byte) {
+	msgType, payload, err := protocol.Decode(data)
+	if err != nil {
+		h.log.Warn("failed to decode message", "worker_id", worker.ID, "error", err)
+		return
+	}
+
+	switch msgType {
+	case protocol.TypeRegister:
+		h.handleRegister(worker, payload)
+	case protocol.TypePing:
+		h.handlePing(worker, payload)
+	case protocol.TypeJobAck:
+		h.handleJobAck(worker, payload)
+	case protocol.TypeJobReject:
+		h.handleJobReject(worker, payload)
+	case protocol.TypeJobStarted:
+		h.handleJobStarted(worker, payload)
+	case protocol.TypeLogChunk:
+		h.handleLogChunk(worker, payload)
+	case protocol.TypeJobComplete:
+		h.handleJobComplete(worker, payload)
+	case protocol.TypeJobError:
+		h.handleJobError(worker, payload)
+	default:
+		h.log.Warn("unknown message type", "worker_id", worker.ID, "type", msgType)
+	}
+}
+
+// handleRegister processes worker registration.
+func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
+	reg, err := protocol.DecodePayload[protocol.Register](payload)
+	if err != nil {
+		h.log.Warn("failed to decode REGISTER", "worker_id", worker.ID, "error", err)
+		return
+	}
+
+	worker.Labels = reg.Labels
+	worker.Capabilities = Capabilities{
+		Docker:      reg.Capabilities.Docker,
+		Concurrency: reg.Capabilities.Concurrency,
+	}
+	worker.Hostname = reg.Hostname
+	worker.Version = reg.Version
+
+	// Register with hub
+	h.hub.Register(worker)
+
+	h.log.Info("worker registered",
+		"worker_id", worker.ID,
+		"labels", worker.Labels,
+		"concurrency", worker.Capabilities.Concurrency,
+		"hostname", worker.Hostname,
+	)
+
+	// Send REGISTERED
+	msg, err := protocol.Encode(protocol.TypeRegistered, protocol.Registered{
+		WorkerID: worker.ID,
+	})
+	if err != nil {
+		h.log.Error("failed to encode REGISTERED", "error", err)
+		return
+	}
+	worker.Send <- msg
+}
+
+// handlePing processes heartbeat from worker.
+func (h *WSHandler) handlePing(worker *WorkerConn, payload []byte) {
+	ping, err := protocol.DecodePayload[protocol.Ping](payload)
+	if err != nil {
+		h.log.Warn("failed to decode PING", "worker_id", worker.ID, "error", err)
+		return
+	}
+
+	h.hub.UpdateLastPing(worker.ID, ping.ActiveJobs)
+
+	// Send PONG
+	msg, err := protocol.Encode(protocol.TypePong, protocol.Pong{
+		Timestamp: time.Now().Unix(),
+	})
+	if err != nil {
+		h.log.Error("failed to encode PONG", "error", err)
+		return
+	}
+	worker.Send <- msg
+}
+
+// handleJobAck processes job acknowledgment.
+func (h *WSHandler) handleJobAck(worker *WorkerConn, payload []byte) {
+	ack, err := protocol.DecodePayload[protocol.JobAck](payload)
+	if err != nil {
+		h.log.Warn("failed to decode JOB_ACK", "worker_id", worker.ID, "error", err)
+		return
+	}
+
+	h.log.Debug("job acknowledged", "worker_id", worker.ID, "job_id", ack.JobID)
+	h.hub.AddActiveJob(worker.ID, ack.JobID)
+}
+
+// handleJobReject processes job rejection.
+func (h *WSHandler) handleJobReject(worker *WorkerConn, payload []byte) {
+	reject, err := protocol.DecodePayload[protocol.JobReject](payload)
+	if err != nil {
+		h.log.Warn("failed to decode JOB_REJECT", "worker_id", worker.ID, "error", err)
+		return
+	}
+
+	h.log.Warn("job rejected", "worker_id", worker.ID, "job_id", reject.JobID, "reason", reject.Reason)
+	// TODO: Re-queue job for another worker
+}
+
+// handleJobStarted processes job start notification.
+func (h *WSHandler) handleJobStarted(worker *WorkerConn, payload []byte) {
+	started, err := protocol.DecodePayload[protocol.JobStarted](payload)
+	if err != nil {
+		h.log.Warn("failed to decode JOB_STARTED", "worker_id", worker.ID, "error", err)
+		return
+	}
+
+	ctx := context.Background()
+	if err := h.storage.UpdateJobStatus(ctx, started.JobID, storage.JobStatusRunning, nil); err != nil {
+		h.log.Error("failed to update job status", "job_id", started.JobID, "error", err)
+	}
+	h.log.Info("job started", "worker_id", worker.ID, "job_id", started.JobID)
+}
+
+// handleLogChunk processes log output from worker.
+func (h *WSHandler) handleLogChunk(worker *WorkerConn, payload []byte) {
+	chunk, err := protocol.DecodePayload[protocol.LogChunk](payload)
+	if err != nil {
+		h.log.Warn("failed to decode LOG_CHUNK", "worker_id", worker.ID, "error", err)
+		return
+	}
+
+	ctx := context.Background()
+	if err := h.storage.AppendLog(ctx, chunk.JobID, chunk.Stream, chunk.Data); err != nil {
+		h.log.Error("failed to append log", "job_id", chunk.JobID, "error", err)
+	}
+}
+
+// handleJobComplete processes job completion.
+func (h *WSHandler) handleJobComplete(worker *WorkerConn, payload []byte) {
+	complete, err := protocol.DecodePayload[protocol.JobComplete](payload)
+	if err != nil {
+		h.log.Warn("failed to decode JOB_COMPLETE", "worker_id", worker.ID, "error", err)
+		return
+	}
+
+	ctx := context.Background()
+
+	// Determine status based on exit code
+	status := storage.JobStatusSuccess
+	if complete.ExitCode != 0 {
+		status = storage.JobStatusFailed
+	}
+
+	exitCode := complete.ExitCode
+	if err := h.storage.UpdateJobStatus(ctx, complete.JobID, status, &exitCode); err != nil {
+		h.log.Error("failed to update job status", "job_id", complete.JobID, "error", err)
+	}
+
+	h.hub.RemoveActiveJob(worker.ID, complete.JobID)
+	h.log.Info("job completed",
+		"worker_id", worker.ID,
+		"job_id", complete.JobID,
+		"exit_code", complete.ExitCode,
+		"duration_ms", complete.DurationMs,
+	)
+
+	// Send ACK
+	msg, err := protocol.Encode(protocol.TypeAck, protocol.Ack{
+		Ref: complete.JobID,
+	})
+	if err != nil {
+		h.log.Error("failed to encode ACK", "error", err)
+		return
+	}
+	worker.Send <- msg
+}
+
+// handleJobError processes job error.
+func (h *WSHandler) handleJobError(worker *WorkerConn, payload []byte) {
+	jobErr, err := protocol.DecodePayload[protocol.JobError](payload)
+	if err != nil {
+		h.log.Warn("failed to decode JOB_ERROR", "worker_id", worker.ID, "error", err)
+		return
+	}
+
+	ctx := context.Background()
+	if err := h.storage.UpdateJobStatus(ctx, jobErr.JobID, storage.JobStatusError, nil); err != nil {
+		h.log.Error("failed to update job status", "job_id", jobErr.JobID, "error", err)
+	}
+
+	h.hub.RemoveActiveJob(worker.ID, jobErr.JobID)
+	h.log.Error("job error",
+		"worker_id", worker.ID,
+		"job_id", jobErr.JobID,
+		"phase", jobErr.Phase,
+		"error", jobErr.Error,
+	)
+
+	// Send ACK
+	msg, err := protocol.Encode(protocol.TypeAck, protocol.Ack{
+		Ref: jobErr.JobID,
+	})
+	if err != nil {
+		h.log.Error("failed to encode ACK", "error", err)
+		return
+	}
+	worker.Send <- msg
+}
+
+// SendJob sends a job assignment to a worker.
+func (h *WSHandler) SendJob(workerID string, job protocol.JobAssign) error {
+	worker := h.hub.Get(workerID)
+	if worker == nil {
+		return ErrWorkerNotFound
+	}
+
+	msg, err := protocol.Encode(protocol.TypeJobAssign, job)
+	if err != nil {
+		return err
+	}
+
+	worker.Send <- msg
+	return nil
+}
+
+// CancelJob sends a cancellation to a worker.
+func (h *WSHandler) CancelJob(workerID string, cancel protocol.JobCancel) error {
+	worker := h.hub.Get(workerID)
+	if worker == nil {
+		return ErrWorkerNotFound
+	}
+
+	msg, err := protocol.Encode(protocol.TypeJobCancel, cancel)
+	if err != nil {
+		return err
+	}
+
+	worker.Send <- msg
+	return nil
+}
