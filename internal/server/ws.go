@@ -39,11 +39,17 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// StatusPoster posts job status to forges.
+type StatusPoster interface {
+	PostJobStatus(ctx context.Context, jobID string, state string, description string) error
+}
+
 // WSHandler handles WebSocket connections from workers.
 type WSHandler struct {
-	hub     *Hub
-	storage storage.Storage
-	log     *slog.Logger
+	hub          *Hub
+	storage      storage.Storage
+	log          *slog.Logger
+	statusPoster StatusPoster
 }
 
 // NewWSHandler creates a new WebSocket handler.
@@ -56,6 +62,11 @@ func NewWSHandler(hub *Hub, store storage.Storage, log *slog.Logger) *WSHandler 
 		storage: store,
 		log:     log,
 	}
+}
+
+// SetStatusPoster sets the status poster for reporting job status to forges.
+func (h *WSHandler) SetStatusPoster(sp StatusPoster) {
+	h.statusPoster = sp
 }
 
 // ServeHTTP handles WebSocket upgrade requests.
@@ -356,13 +367,26 @@ func (h *WSHandler) handleJobComplete(worker *WorkerConn, payload []byte) {
 
 	// Determine status based on exit code
 	status := storage.JobStatusSuccess
+	forgeState := "success"
+	description := formatDuration(complete.DurationMs)
 	if complete.ExitCode != 0 {
 		status = storage.JobStatusFailed
+		forgeState = "failure"
+		description = "Build failed - " + description
+	} else {
+		description = "Build passed - " + description
 	}
 
 	exitCode := complete.ExitCode
 	if err := h.storage.UpdateJobStatus(ctx, complete.JobID, status, &exitCode); err != nil {
 		h.log.Error("failed to update job status", "job_id", complete.JobID, "error", err)
+	}
+
+	// Post status to forge
+	if h.statusPoster != nil {
+		if err := h.statusPoster.PostJobStatus(ctx, complete.JobID, forgeState, description); err != nil {
+			h.log.Warn("failed to post status to forge", "job_id", complete.JobID, "error", err)
+		}
 	}
 
 	h.hub.RemoveActiveJob(worker.ID, complete.JobID)
@@ -384,6 +408,14 @@ func (h *WSHandler) handleJobComplete(worker *WorkerConn, payload []byte) {
 	worker.Send <- msg
 }
 
+func formatDuration(ms int64) string {
+	d := time.Duration(ms) * time.Millisecond
+	if d < time.Minute {
+		return d.Round(time.Millisecond).String()
+	}
+	return d.Round(time.Second).String()
+}
+
 // handleJobError processes job error.
 func (h *WSHandler) handleJobError(worker *WorkerConn, payload []byte) {
 	jobErr, err := protocol.DecodePayload[protocol.JobError](payload)
@@ -395,6 +427,17 @@ func (h *WSHandler) handleJobError(worker *WorkerConn, payload []byte) {
 	ctx := context.Background()
 	if err := h.storage.UpdateJobStatus(ctx, jobErr.JobID, storage.JobStatusError, nil); err != nil {
 		h.log.Error("failed to update job status", "job_id", jobErr.JobID, "error", err)
+	}
+
+	// Post error status to forge
+	if h.statusPoster != nil {
+		description := "Build error: " + jobErr.Error
+		if jobErr.Phase != "" {
+			description = "Build error in " + jobErr.Phase + ": " + jobErr.Error
+		}
+		if err := h.statusPoster.PostJobStatus(ctx, jobErr.JobID, "error", description); err != nil {
+			h.log.Warn("failed to post status to forge", "job_id", jobErr.JobID, "error", err)
+		}
 	}
 
 	h.hub.RemoveActiveJob(worker.ID, jobErr.JobID)

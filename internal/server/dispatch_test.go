@@ -39,14 +39,11 @@ func TestDispatcherEnqueue(t *testing.T) {
 	}
 
 	queued := &QueuedJob{
-		Job:    job,
-		Labels: []string{"linux"},
-		Config: protocol.JobConfig{Command: "make test"},
-		Repo: protocol.JobRepo{
-			CloneURL: "https://github.com/test/repo.git",
-			Commit:   "abc123",
-			Branch:   "main",
-		},
+		Job:      job,
+		Labels:   []string{"linux"},
+		Config:   protocol.JobConfig{Command: "make test"},
+		CloneURL: "https://github.com/test/repo.git",
+		Branch:   "main",
 	}
 
 	dispatcher.Enqueue(queued)
@@ -119,14 +116,11 @@ func TestDispatcherAssignment(t *testing.T) {
 	}
 
 	queued := &QueuedJob{
-		Job:    job,
-		Labels: []string{"linux"},
-		Config: protocol.JobConfig{Command: "make test"},
-		Repo: protocol.JobRepo{
-			CloneURL: "https://github.com/test/repo.git",
-			Commit:   "abc123",
-			Branch:   "main",
-		},
+		Job:      job,
+		Labels:   []string{"linux"},
+		Config:   protocol.JobConfig{Command: "make test"},
+		CloneURL: "https://github.com/test/repo.git",
+		Branch:   "main",
 	}
 
 	dispatcher.Enqueue(queued)
