@@ -15,9 +15,11 @@ test:
 fmt:
 	go fmt ./...
 
-# Lint code
+# Lint code (auto-installs golangci-lint if missing)
+GOLANGCI_LINT := $(shell go env GOPATH)/bin/golangci-lint
 lint:
-	golangci-lint run
+	@test -f $(GOLANGCI_LINT) || go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	$(GOLANGCI_LINT) run
 
 # Full pre-commit check
 check: fmt test lint

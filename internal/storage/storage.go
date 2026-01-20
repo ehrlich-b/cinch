@@ -1,0 +1,141 @@
+package storage
+
+import (
+	"context"
+	"errors"
+	"time"
+)
+
+var (
+	ErrNotFound = errors.New("not found")
+)
+
+// Storage defines the interface for all database operations.
+type Storage interface {
+	// Jobs
+	CreateJob(ctx context.Context, job *Job) error
+	GetJob(ctx context.Context, id string) (*Job, error)
+	ListJobs(ctx context.Context, filter JobFilter) ([]*Job, error)
+	UpdateJobStatus(ctx context.Context, id string, status JobStatus, exitCode *int) error
+	UpdateJobWorker(ctx context.Context, jobID, workerID string) error
+
+	// Workers
+	CreateWorker(ctx context.Context, worker *Worker) error
+	GetWorker(ctx context.Context, id string) (*Worker, error)
+	ListWorkers(ctx context.Context) ([]*Worker, error)
+	UpdateWorkerLastSeen(ctx context.Context, id string) error
+	UpdateWorkerStatus(ctx context.Context, id string, status WorkerStatus) error
+	DeleteWorker(ctx context.Context, id string) error
+
+	// Repos
+	CreateRepo(ctx context.Context, repo *Repo) error
+	GetRepo(ctx context.Context, id string) (*Repo, error)
+	GetRepoByCloneURL(ctx context.Context, cloneURL string) (*Repo, error)
+	ListRepos(ctx context.Context) ([]*Repo, error)
+	DeleteRepo(ctx context.Context, id string) error
+
+	// Tokens
+	CreateToken(ctx context.Context, token *Token) error
+	GetTokenByHash(ctx context.Context, hash string) (*Token, error)
+	ListTokens(ctx context.Context) ([]*Token, error)
+	RevokeToken(ctx context.Context, id string) error
+
+	// Logs
+	AppendLog(ctx context.Context, jobID, stream, data string) error
+	GetLogs(ctx context.Context, jobID string) ([]*LogEntry, error)
+
+	// Lifecycle
+	Close() error
+}
+
+// JobStatus represents the state of a job.
+type JobStatus string
+
+const (
+	JobStatusPending   JobStatus = "pending"
+	JobStatusQueued    JobStatus = "queued"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusSuccess   JobStatus = "success"
+	JobStatusFailed    JobStatus = "failed"
+	JobStatusCancelled JobStatus = "cancelled"
+	JobStatusError     JobStatus = "error" // infrastructure error
+)
+
+// Job represents a CI job.
+type Job struct {
+	ID         string
+	RepoID     string
+	Commit     string
+	Branch     string
+	Status     JobStatus
+	ExitCode   *int
+	WorkerID   *string
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	CreatedAt  time.Time
+}
+
+// JobFilter for listing jobs.
+type JobFilter struct {
+	RepoID string
+	Status JobStatus
+	Branch string
+	Limit  int
+	Offset int
+}
+
+// WorkerStatus represents the connection state of a worker.
+type WorkerStatus string
+
+const (
+	WorkerStatusOnline  WorkerStatus = "online"
+	WorkerStatusOffline WorkerStatus = "offline"
+)
+
+// Worker represents a registered worker.
+type Worker struct {
+	ID        string
+	Name      string
+	Labels    []string
+	Status    WorkerStatus
+	LastSeen  time.Time
+	CreatedAt time.Time
+}
+
+// ForgeType represents the type of git forge.
+type ForgeType string
+
+const (
+	ForgeTypeGitHub  ForgeType = "github"
+	ForgeTypeGitLab  ForgeType = "gitlab"
+	ForgeTypeForgejo ForgeType = "forgejo"
+	ForgeTypeGitea   ForgeType = "gitea"
+)
+
+// Repo represents a configured repository.
+type Repo struct {
+	ID            string
+	ForgeType     ForgeType
+	CloneURL      string
+	WebhookSecret string
+	CreatedAt     time.Time
+}
+
+// Token represents a worker authentication token.
+type Token struct {
+	ID        string
+	Name      string
+	Hash      string // bcrypt hash of the token
+	WorkerID  *string
+	CreatedAt time.Time
+	RevokedAt *time.Time
+}
+
+// LogEntry represents a chunk of log output.
+type LogEntry struct {
+	ID        int64
+	JobID     string
+	Stream    string // "stdout" or "stderr"
+	Data      string
+	CreatedAt time.Time
+}
