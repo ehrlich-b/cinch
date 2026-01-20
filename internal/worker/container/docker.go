@@ -137,3 +137,93 @@ func exitCode(err error) int {
 	}
 	return 1
 }
+
+// CreateNetwork creates a Docker network for job isolation.
+func CreateNetwork(ctx context.Context, name string) error {
+	cmd := exec.CommandContext(ctx, "docker", "network", "create", name)
+	return cmd.Run()
+}
+
+// RemoveNetwork removes a Docker network.
+func RemoveNetwork(ctx context.Context, name string) error {
+	cmd := exec.CommandContext(ctx, "docker", "network", "rm", name)
+	return cmd.Run()
+}
+
+// ServiceConfig configures a service container.
+type ServiceConfig struct {
+	Name        string
+	Image       string
+	Network     string
+	NetworkName string // Alias on the network (e.g., "postgres")
+	Env         map[string]string
+	Command     string
+}
+
+// StartService starts a service container in detached mode.
+// Returns the container ID.
+func StartService(ctx context.Context, cfg ServiceConfig, stdout, stderr io.Writer) (string, error) {
+	args := []string{"run", "-d", "--rm"}
+
+	// Container name
+	args = append(args, "--name", cfg.Name)
+
+	// Network with alias
+	if cfg.Network != "" {
+		args = append(args, "--network", cfg.Network)
+		if cfg.NetworkName != "" {
+			args = append(args, "--network-alias", cfg.NetworkName)
+		}
+	}
+
+	// Environment variables
+	for k, v := range cfg.Env {
+		args = append(args, "-e", k+"="+v)
+	}
+
+	// Image
+	args = append(args, cfg.Image)
+
+	// Custom command
+	if cfg.Command != "" {
+		args = append(args, "sh", "-c", cfg.Command)
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("docker run failed: %s", string(exitErr.Stderr))
+		}
+		return "", err
+	}
+
+	// Container ID is the output (trim newline)
+	containerID := string(out)
+	if len(containerID) > 0 && containerID[len(containerID)-1] == '\n' {
+		containerID = containerID[:len(containerID)-1]
+	}
+	return containerID, nil
+}
+
+// StopService stops and removes a service container.
+func StopService(ctx context.Context, containerID string) error {
+	cmd := exec.CommandContext(ctx, "docker", "stop", containerID)
+	return cmd.Run()
+}
+
+// ExecInContainer runs a command inside a running container.
+// Returns the exit code.
+func ExecInContainer(ctx context.Context, containerID, command string) (int, error) {
+	cmd := exec.CommandContext(ctx, "docker", "exec", containerID, "sh", "-c", command)
+	err := cmd.Run()
+	return exitCode(err), nil
+}
+
+// PullImage pulls an image if not present locally.
+func PullImage(ctx context.Context, image string, stdout, stderr io.Writer) error {
+	cmd := exec.CommandContext(ctx, "docker", "pull", image)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	return cmd.Run()
+}

@@ -48,27 +48,34 @@ func Run(opts RunOptions) int {
 
 	command := opts.Command
 	bareMetal := opts.BareMetal
+	var cfg *config.Config
 
-	// If no command provided, load from config
-	if command == "" {
-		cfg, configFile, err := config.Load(workDir)
-		if err != nil {
-			if errors.Is(err, config.ErrNoConfig) {
-				fmt.Fprintln(os.Stderr, "Error: no command provided and no config file found")
-				fmt.Fprintln(os.Stderr, "Usage: cinch run \"make test\"")
-				fmt.Fprintln(os.Stderr, "   or: create .cinch.yaml with 'command: make test'")
-			} else {
-				fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-			}
-			return 1
-		}
+	// Try to load config (for services, timeout, etc.)
+	loadedCfg, configFile, err := config.Load(workDir)
+	if err == nil {
+		cfg = loadedCfg
 		fmt.Printf("Loaded config from %s\n", configFile)
-		command = cfg.Command
+
+		// Use command from config if not provided
+		if command == "" {
+			command = cfg.Command
+		}
 
 		// Check if config specifies bare metal
 		if cfg.IsBareMetalContainer() {
 			bareMetal = true
 		}
+	} else if !errors.Is(err, config.ErrNoConfig) {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		return 1
+	}
+
+	// Still no command?
+	if command == "" {
+		fmt.Fprintln(os.Stderr, "Error: no command provided and no config file found")
+		fmt.Fprintln(os.Stderr, "Usage: cinch run \"make test\"")
+		fmt.Fprintln(os.Stderr, "   or: create .cinch.yaml with 'command: make test'")
+		return 1
 	}
 
 	// Bare metal mode - just run the command
@@ -76,8 +83,8 @@ func Run(opts RunOptions) int {
 		return runBareMetal(ctx, command, workDir, opts.Env)
 	}
 
-	// Container mode
-	return runContainer(ctx, command, workDir, opts.Env)
+	// Container mode (with optional services)
+	return runContainer(ctx, command, workDir, opts.Env, cfg)
 }
 
 func runBareMetal(ctx context.Context, command, workDir string, env map[string]string) int {
@@ -101,7 +108,7 @@ func runBareMetal(ctx context.Context, command, workDir string, env map[string]s
 	return exitCode
 }
 
-func runContainer(ctx context.Context, command, workDir string, env map[string]string) int {
+func runContainer(ctx context.Context, command, workDir string, env map[string]string, cfg *config.Config) int {
 	// Check docker is available
 	if err := container.CheckAvailable(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -138,14 +145,31 @@ func runContainer(ctx context.Context, command, workDir string, env map[string]s
 		return 1
 	}
 
+	// Start services if configured
+	var svcManager *container.ServiceManager
+	var network string
+	if cfg != nil && len(cfg.Services) > 0 {
+		fmt.Printf("\nStarting %d service(s)...\n", len(cfg.Services))
+		svcManager = container.NewServiceManager(jobID, os.Stdout, os.Stderr)
+		defer svcManager.Cleanup(ctx)
+
+		if err := svcManager.Setup(ctx, cfg.Services); err != nil {
+			fmt.Fprintf(os.Stderr, "Error starting services: %v\n", err)
+			return 1
+		}
+		network = svcManager.Network
+		fmt.Println()
+	}
+
 	// Run in container
-	fmt.Printf("\nRunning: %s\n", command)
+	fmt.Printf("Running: %s\n", command)
 	fmt.Printf("Working directory: /workspace (mounted from %s)\n\n", workDir)
 
 	docker := &container.Docker{
 		WorkDir:      workDir,
 		Image:        image,
 		Env:          env,
+		Network:      network,
 		CacheVolumes: container.DefaultCacheVolumes(),
 		Stdout:       os.Stdout,
 		Stderr:       os.Stderr,
