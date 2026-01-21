@@ -217,14 +217,14 @@ Target: Private development → clean up → single big commit before public rel
 
 ### Static Assets
 - [x] Basic layout (header, nav, main content)
-- [ ] Dark theme CSS *(minimal styling only)*
-- [ ] Responsive (mobile-friendly)
+- [x] Dark theme CSS *(minimal styling only)*
+- [x] Responsive (mobile-friendly)
 
 ### Jobs Page
 - [x] Jobs list with status icons
-- [ ] Job detail page with log viewer
-- [ ] ANSI color rendering
-- [ ] Real-time updates via WebSocket
+- [x] Job detail page with log viewer
+- [x] ANSI color stripping (basic)
+- [x] Real-time updates via WebSocket
 - [ ] Filter by repo, status, branch
 
 ### Workers Page
@@ -351,6 +351,6 @@ Worker connects via `wss://` URLs automatically (gorilla/websocket handles TLS).
 3. ~~**Cinch env vars** - Expose `CINCH_BRANCH`, `CINCH_COMMIT`, etc. to commands~~ ✅
 4. ~~**E2E test** - Verify server + worker actually work together~~ ✅
 5. ~~**Fix frontend API mismatch** - Response format issue~~ ✅
-6. **Basic log viewing in UI** - Connect to /ws/logs/:id
+6. ~~**Basic log viewing in UI** - Connect to /ws/logs/:id~~ ✅
 
-Everything else can ship as-is or be cut.
+**MVP complete!** Everything else can ship as-is or be cut.
