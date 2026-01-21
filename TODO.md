@@ -2,344 +2,320 @@
 
 Target: Private development → clean up → single big commit before public release
 
-## Phase 0: Project Scaffolding
+**Last reviewed:** 2025-01-19
+
+---
+
+## Phase 0: Project Scaffolding ✅
 
 ### Go Project Setup
-- [ ] Initialize go.mod (`go mod init github.com/cinch-sh/cinch`)
-- [ ] Create directory structure per design/00-overview.md
-- [ ] Add Makefile (build, test, fmt, lint targets)
-- [ ] Set up main.go with cobra CLI skeleton
-- [ ] Add .gitignore (binaries, .env, etc.)
+- [x] Initialize go.mod (`go mod init github.com/cinch-sh/cinch`)
+- [x] Create directory structure per design/00-overview.md
+- [x] Add Makefile (build, test, fmt, lint targets)
+- [x] Set up main.go with cobra CLI skeleton
+- [x] Add .gitignore (binaries, .env, etc.)
 
 ### Frontend Setup (Minimal React + Vite)
-- [ ] Set up web/ directory with Vite + React 18
-- [ ] package.json with minimal deps:
-  - [ ] react, react-dom
-  - [ ] vite, @vitejs/plugin-react
-  - [ ] ansi-to-html (for log rendering)
-  - [ ] That's it. No state libs, no component libs, no CSS frameworks.
-- [ ] vite.config.ts (build to web/dist/)
-- [ ] Add `make web` target to build frontend
-- [ ] Create web/embed.go with `//go:embed dist/*` directive
-- [ ] CSS: vanilla CSS modules, dark theme, mobile-responsive
+- [x] Set up web/ directory with Vite + React 18
+- [x] package.json with minimal deps (react, vite, etc.)
+- [x] vite.config.ts (build to web/dist/)
+- [x] Create web/embed.go with `//go:embed dist/*` directive
+- [ ] CSS: vanilla CSS modules, dark theme, mobile-responsive *(basic styles only)*
 
 ---
 
-## Phase 1: Core Infrastructure (Days 1-4)
+## Phase 1: Core Infrastructure ✅
 
 ### CLI Routing (cmd/cinch/)
-- [ ] `cinch server` - starts control plane
-- [ ] `cinch worker` - starts worker
-- [ ] `cinch run` - local execution (stub)
-- [ ] `cinch status` - check job status (stub)
-- [ ] `cinch logs` - stream logs (stub)
-- [ ] `cinch config validate` - validate config file
-- [ ] `cinch token create` - create worker token
-- [ ] Version flag and help text
+- [x] CLI skeleton with all subcommands defined
+- [x] `cinch run` - local execution (WORKING)
+- [x] `cinch config validate` - validate config file (WORKING)
+- [ ] `cinch server` - starts control plane *(stub only - needs wiring)*
+- [ ] `cinch worker` - starts worker *(stub only - needs wiring)*
+- [ ] `cinch status` - check job status *(stub only)*
+- [ ] `cinch logs` - stream logs *(stub only)*
+- [ ] `cinch token create` - create worker token *(stub only)*
+- [x] Version flag and help text
 
 ### Configuration (internal/config/)
-- [ ] Define Config struct matching design/08-config-format.md
-- [ ] YAML parser (.cinch.yaml)
-- [ ] TOML parser (.cinch.toml)
-- [ ] JSON parser (.cinch.json)
-- [ ] Config discovery: .cinch.yaml > .cinch.toml > .cinch.json
-- [ ] Validation (required fields, timeout parsing, etc.)
-- [ ] Unit tests for all formats
+- [x] Define Config struct matching design/08-config-format.md
+- [x] YAML parser (.cinch.yaml)
+- [x] TOML parser (.cinch.toml)
+- [x] JSON parser (.cinch.json)
+- [x] Config discovery: .cinch.yaml > .cinch.toml > .cinch.json
+- [x] Validation (required fields, timeout parsing, etc.)
+- [x] Unit tests for all formats
 
-### Storage Layer (internal/storage/) - tunn pattern
-- [ ] Define `Storage` interface (all DB ops go through this)
-  - [ ] Jobs: Create, Get, List, UpdateStatus
-  - [ ] Workers: Create, Get, List, UpdateLastSeen
-  - [ ] Repos: Create, Get, GetByCloneURL, List
-  - [ ] Tokens: Create, Validate, Revoke
-  - [ ] Logs: Append, Get
-  - [ ] Available() bool
-- [ ] `SQLiteStorage` implementation (v0.1, ships free)
-- [ ] Stub `ProxyStorage` interface (gRPC to login node, v0.2)
-- [ ] Interface designed for future backends:
-  - [ ] `PostgresStorage` (paid support, multi-instance)
-  - [ ] `MySQLStorage` (paid support, if someone pays)
-- [ ] SQLite setup (modernc.org/sqlite, pure Go, no CGO)
-- [ ] Migrations system (embed SQL files, per-backend)
-- [ ] Tables:
-  - [ ] workers (id, name, labels, status, last_seen, created_at)
-  - [ ] repos (id, forge_type, clone_url, webhook_secret, forge_token)
-  - [ ] jobs (id, repo_id, commit, branch, status, exit_code, started_at, finished_at, worker_id)
-  - [ ] job_logs (id, job_id, stream, data, created_at)
-  - [ ] tokens (id, name, hash, worker_id, created_at, revoked_at)
-- [ ] Unit tests with in-memory SQLite
+### Storage Layer (internal/storage/)
+- [x] Define `Storage` interface (all DB ops go through this)
+  - [x] Jobs: Create, Get, List, UpdateStatus
+  - [x] Workers: Create, Get, List, UpdateLastSeen
+  - [x] Repos: Create, Get, GetByCloneURL, List
+  - [x] Tokens: Create, Validate, Revoke
+  - [x] Logs: Append, Get
+- [x] `SQLiteStorage` implementation
+- [x] SQLite setup (modernc.org/sqlite, pure Go, no CGO)
+- [x] Migrations (inline in sqlite.go)
+- [x] Unit tests with in-memory SQLite
 
 ### Worker Registry / Hub (internal/server/hub.go)
-- [ ] `Hub` struct - tracks live WebSocket connections
-- [ ] `WorkerConn` struct - worker_id, labels, conn, active jobs, last ping
-- [ ] Register/unregister worker on connect/disconnect
-- [ ] Get available workers by label (for job dispatch)
-- [ ] Least-loaded worker selection
-- [ ] Broadcast to all workers (future: status updates)
-- [ ] Note: This is separate from Storage - Storage tracks persistent info, Hub tracks live connections
+- [x] `Hub` struct - tracks live WebSocket connections
+- [x] `WorkerConn` struct - worker_id, labels, conn, active jobs, last ping
+- [x] Register/unregister worker on connect/disconnect
+- [x] Get available workers by label (for job dispatch)
+- [x] Least-loaded worker selection
+- [x] Broadcast to all workers
 
 ### Protocol Types (internal/protocol/)
-- [ ] Define message types per design/02-protocol.md:
-  - [ ] AUTH (token)
-  - [ ] AUTH_OK / AUTH_FAIL
-  - [ ] REGISTER (labels, capabilities)
-  - [ ] JOB_ASSIGN (job details, clone token)
-  - [ ] LOG_CHUNK (job_id, stream, data)
-  - [ ] JOB_COMPLETE (job_id, exit_code)
-  - [ ] JOB_ERROR (job_id, error)
-  - [ ] PING / PONG
-- [ ] JSON marshal/unmarshal helpers
-- [ ] Message envelope with type discrimination
+- [x] Define message types per design/02-protocol.md
+- [x] JSON marshal/unmarshal helpers
+- [x] Message envelope with type discrimination
+- [x] Unit tests
 
 ---
 
-## Phase 2: WebSocket & Worker (Days 5-8)
+## Phase 2: WebSocket & Worker ✅
 
 ### Server WebSocket Hub (internal/server/ws.go)
-- [ ] WebSocket upgrade handler
-- [ ] Worker connection registry (map of connected workers)
-- [ ] Worker authentication (token validation)
-- [ ] Message routing (dispatch to specific worker)
-- [ ] Broadcast (status updates to UI clients)
-- [ ] Connection cleanup on disconnect
-- [ ] Ping/pong keepalive
-- [ ] Unit tests with mock connections
+- [x] WebSocket upgrade handler
+- [x] Worker authentication (token validation)
+- [x] Message routing (dispatch to specific worker)
+- [x] Connection cleanup on disconnect
+- [x] Ping/pong keepalive
+- [x] Handle all message types (REGISTER, JOB_ACK, LOG_CHUNK, JOB_COMPLETE, etc.)
+- [x] Unit tests
 
 ### Job Dispatch (internal/server/dispatch.go)
-- [ ] Job queue (pending jobs waiting for workers)
-- [ ] Worker selection (least-loaded with matching labels)
-- [ ] Job assignment (send JOB_ASSIGN, mark in-progress)
-- [ ] Job completion handler (update status, post to forge)
-- [ ] Timeout handling (mark failed if worker goes silent)
-- [ ] Fan-out: create N jobs for N worker labels
+- [x] Job queue (pending jobs waiting for workers)
+- [x] Worker selection (least-loaded with matching labels)
+- [x] Job assignment (send JOB_ASSIGN, mark in-progress)
+- [x] Job completion handler (update status)
+- [x] Timeout handling (mark failed if worker goes silent)
+- [x] Stale worker detection and cleanup
+- [x] Unit tests
 
-### Worker Connection (internal/worker/worker.go)
-- [ ] WebSocket connect with reconnect backoff
-- [ ] Token-based authentication
-- [ ] REGISTER message on connect
-- [ ] Job receive loop
-- [ ] Graceful shutdown (finish current job)
-- [ ] Config: server URL, token, labels
+### Worker Client (internal/worker/worker.go)
+- [x] WebSocket connect with reconnect backoff
+- [x] Token-based authentication
+- [x] REGISTER message on connect
+- [x] Job receive loop
+- [x] Graceful shutdown (finish current job)
+- [x] Config: server URL, token, labels
 
 ### Git Clone (internal/worker/clone.go)
-- [ ] Clone with short-lived token
-- [ ] Shallow clone (--depth=1)
-- [ ] Checkout specific commit
-- [ ] Cleanup after job
+- [x] Clone with token authentication
+- [x] Shallow clone (--depth=1)
+- [x] Checkout specific commit
+- [x] Cleanup after job
+- [x] Unit tests
 
 ### Bare Metal Execution (internal/worker/executor.go)
-- [ ] Execute command (exec.Command)
-- [ ] Stream stdout/stderr to server
-- [ ] Capture exit code
-- [ ] Timeout handling
-- [ ] Environment variable injection
-- [ ] Working directory setup
+- [x] Execute command (exec.Command)
+- [x] Capture exit code
+- [x] Environment variable injection
+- [ ] **Cinch env vars:** `CINCH_BRANCH`, `CINCH_COMMIT`, `CINCH_REPO`, `CINCH_JOB_ID`
+- [x] Working directory setup
+- [x] Unit tests
 
 ### Log Streaming (internal/worker/stream.go)
-- [ ] Chunk stdout/stderr (max 64KB per message)
-- [ ] Rate limiting (don't flood server)
-- [ ] Buffer and batch small outputs
-- [ ] Handle large outputs gracefully
+- [x] Stream stdout/stderr to server
+- [x] Chunk output (max 64KB per message)
+- [x] Buffer and batch small outputs
+- [x] Unit tests
 
 ---
 
-## Phase 3: Containerization (Days 7-8)
+## Phase 3: Containerization ✅
 
-### Container Interface (internal/worker/container/)
-- [ ] ContainerRuntime interface (Run, Stop, Pull)
-- [ ] Docker implementation via CLI (docker run, docker stop)
-
-### Devcontainer Detection (internal/worker/container/devcontainer.go)
-- [ ] Check for .devcontainer/devcontainer.json
-- [ ] Parse devcontainer.json (image, dockerFile, build.dockerfile)
-- [ ] Check for .devcontainer/Dockerfile
-- [ ] Check for repo root Dockerfile
-- [ ] Fallback to default image (cinch-builder:latest or alpine)
-- [ ] Build image if Dockerfile specified
+### Container Detection (internal/worker/container/detect.go)
+- [x] Check for .devcontainer/devcontainer.json
+- [x] Parse devcontainer.json (image, dockerFile, build.dockerfile)
+- [x] Check for .devcontainer/Dockerfile
+- [x] Check for repo root Dockerfile
+- [x] Fallback to default image (ubuntu:22.04)
+- [x] Unit tests
 
 ### Container Execution (internal/worker/container/docker.go)
-- [ ] docker run with:
-  - [ ] Workspace mount (-v)
-  - [ ] Cache volume mounts per design/09-containerization.md
-  - [ ] Environment variables (--env)
-  - [ ] Working directory (--workdir)
-  - [ ] Remove after exit (--rm)
-- [ ] Capture stdout/stderr
-- [ ] Capture exit code
-- [ ] Timeout handling (docker stop)
+- [x] docker run with workspace mount
+- [x] Cache volume mounts
+- [x] Environment variables
+- [x] Working directory
+- [x] Capture exit code
+- [x] Build from Dockerfile
+- [x] Pull images
 
-### Cache Volumes (internal/worker/container/cache.go)
-- [ ] Create ~/.cinch/cache/{npm,cargo,pip,go,ccache}
-- [ ] Mount mappings:
-  - [ ] npm → ~/.npm
-  - [ ] cargo → ~/.cargo
-  - [ ] pip → ~/.cache/pip
-  - [ ] go → ~/go/pkg
-- [ ] Custom cache support from config
-- [ ] Volume creation on first use
+### Cache Volumes
+- [x] Default cache mappings (npm, cargo, pip, go)
+- [x] Volume creation on first use
 
 ### Service Containers (internal/worker/container/services.go)
-- [ ] Parse services from config
-- [ ] Start service containers before build
-- [ ] Health check polling (pg_isready, redis-cli ping, etc.)
-- [ ] DNS/network setup (--network)
-- [ ] Inject service env vars (DATABASE_URL, etc.)
-- [ ] Stop services after build
+- [x] Parse services from config
+- [x] Start service containers before build
+- [x] Health check polling
+- [x] Network setup for service communication
+- [x] Stop services after build
 
 ---
 
-## Phase 4: Forge Integrations (Days 9-11)
+## Phase 4: Forge Integrations ✅
 
-### Forge Interface (internal/forge/)
-- [ ] Forge interface:
-  - [ ] VerifyWebhook(signature, body) bool
-  - [ ] ParsePushEvent(body) (repo, commit, branch)
-  - [ ] PostStatus(repo, commit, state, context, url)
-  - [ ] FetchConfig(repo, commit) ([]byte, error)
-  - [ ] CreateCloneToken(repo) (token, expiry)
+### Forge Interface (internal/forge/forge.go)
+- [x] Forge interface defined:
+  - [x] Identify(r *http.Request) bool
+  - [x] ParsePush(r, secret) (*PushEvent, error)
+  - [x] PostStatus(ctx, repo, commit, status) error
+  - [x] CloneToken(ctx, repo) (string, time.Time, error)
 
 ### GitHub (internal/forge/github.go)
-- [ ] HMAC-SHA256 webhook verification
-- [ ] Push event parsing
-- [ ] Status API (POST /repos/:owner/:repo/statuses/:sha)
-- [ ] Contents API (fetch .cinch.yaml)
-- [ ] Installation token for clone
-- [ ] OAuth app token refresh
-- [ ] Unit tests with recorded responses
+- [x] HMAC-SHA256 webhook verification
+- [x] Push event parsing
+- [x] Status API (POST /repos/:owner/:repo/statuses/:sha)
+- [x] Clone token support
+- [x] Unit tests
 
 ### Forgejo/Gitea (internal/forge/forgejo.go)
-- [ ] HMAC-SHA256 webhook verification (same as GitHub)
-- [ ] Push event parsing (slightly different payload)
-- [ ] Status API (POST /api/v1/repos/:owner/:repo/statuses/:sha)
-- [ ] Contents API
-- [ ] Token handling
-- [ ] Unit tests
+- [x] HMAC-SHA256 webhook verification
+- [x] Push event parsing
+- [x] Status API
+- [x] Clone token support
+- [x] Unit tests
 
 ### Webhook Handler (internal/server/webhook.go)
-- [ ] POST /webhooks/github
-- [ ] POST /webhooks/forgejo
-- [ ] Signature verification per forge
-- [ ] Event parsing (push only for v0.1)
-- [ ] Config fetch and validation
-- [ ] Job creation
-- [ ] Initial status post (pending)
+- [x] POST /webhooks handler
+- [x] Forge identification (GitHub vs Forgejo)
+- [x] Signature verification per forge
+- [x] Event parsing (push)
+- [x] Job creation
+- [x] Initial status post (pending)
+- [x] Queue job for dispatch
 
 ---
 
-## Phase 5: HTTP API (Day 11-12)
+## Phase 5: HTTP API ✅
 
 ### API Handlers (internal/server/api.go)
-- [ ] GET /api/jobs - list jobs (with pagination, filters)
-- [ ] GET /api/jobs/:id - job details
-- [ ] GET /api/jobs/:id/logs - job logs (full)
-- [ ] GET /api/workers - list connected workers
-- [ ] GET /api/repos - list configured repos
-- [ ] POST /api/repos - add repo (generates webhook secret)
-- [ ] DELETE /api/repos/:id - remove repo
-- [ ] POST /api/tokens - create worker token
-- [ ] DELETE /api/tokens/:id - revoke token
+- [x] GET /api/jobs - list jobs (with pagination, filters)
+- [x] GET /api/jobs/:id - job details
+- [x] GET /api/jobs/:id/logs - job logs (full)
+- [x] GET /api/workers - list connected workers
+- [x] GET /api/repos - list configured repos
+- [x] POST /api/repos - add repo (generates webhook secret)
+- [x] DELETE /api/repos/:id - remove repo
+- [x] POST /api/tokens - create worker token
+- [x] DELETE /api/tokens/:id - revoke token
+- [x] Unit tests
 
-### WebSocket for UI (internal/server/ws.go)
-- [ ] /ws/logs/:job_id - real-time log streaming
-- [ ] /ws/status - job status updates broadcast
-- [ ] Authentication (session or token)
+### WebSocket for UI (internal/server/logstream.go)
+- [x] /ws/logs/:job_id - real-time log streaming
+- [x] Send existing logs on connect
+- [x] Broadcast new logs to subscribers
+- [x] Handle job completion
 
 ---
 
-## Phase 6: Web UI (Days 12-13)
+## Phase 6: Web UI 🚧
 
 ### Static Assets
-- [ ] Basic layout (header, sidebar, main content)
-- [ ] Dark theme CSS
+- [x] Basic layout (header, nav, main content)
+- [ ] Dark theme CSS *(minimal styling only)*
 - [ ] Responsive (mobile-friendly)
 
-### Dashboard Page (/)
-- [ ] Recent jobs list
-- [ ] Status icons (✓ ✗ ◐ ◷)
-- [ ] Filter by repo, status, branch
-- [ ] Pagination
-- [ ] Worker count indicator in header
-- [ ] Auto-refresh via WebSocket
-
-### Job Detail Page (/jobs/:id)
-- [ ] Job metadata (repo, branch, commit, worker, duration)
-- [ ] Real-time log viewer
+### Jobs Page
+- [x] Jobs list with status icons
+- [ ] Job detail page with log viewer
 - [ ] ANSI color rendering
-- [ ] Auto-scroll with "pause" button
-- [ ] Copy logs button
-- [ ] Download raw logs
+- [ ] Real-time updates via WebSocket
+- [ ] Filter by repo, status, branch
 
-### Workers Page (/workers)
-- [ ] List connected workers
-- [ ] Status (connected/disconnected)
-- [ ] Labels
-- [ ] Current job (if any)
-- [ ] Last seen
-- [ ] Add worker instructions (shows token)
+### Workers Page
+- [x] List workers with status
+- [ ] Show current job per worker
+- [ ] Add worker instructions
 
-### Settings Page (/settings) - optional for v0.1
-- [ ] Add/remove repos
+### Settings Page
+- [ ] Add/remove repos *(placeholder only)*
 - [ ] View webhook URLs and secrets
 - [ ] Token management
 
+**Note:** Frontend has API response mismatch - expects `{jobs: [...]}` but API returns `[...]` directly.
+
 ---
 
-## Phase 7: CLI Completion (Day 13-14)
+## Phase 7: CLI Completion 🚧
 
-### cinch run
-- [ ] Load local config
-- [ ] Execute command locally (bare metal or container)
-- [ ] Stream logs to terminal
-- [ ] Exit with command's exit code
-- [ ] Support --bare-metal flag
+### cinch run ✅
+- [x] Load local config
+- [x] Execute command (bare metal or container)
+- [x] Stream logs to terminal
+- [x] Exit with command's exit code
+- [x] Support --bare-metal flag
+- [x] Service container support
+
+### cinch server ✅
+- [x] Parse flags (--addr, --data-dir, --base-url)
+- [x] Initialize storage (SQLite)
+- [x] Create Hub, Dispatcher, WSHandler, APIHandler, WebhookHandler, LogStreamHandler
+- [x] Mount routes:
+  - [x] /api/* → APIHandler
+  - [x] /webhooks → WebhookHandler
+  - [x] /ws/worker → WSHandler (workers)
+  - [x] /ws/logs/* → LogStreamHandler (UI)
+  - [x] /* → embedded web assets (with SPA routing)
+- [x] Start HTTP server
+- [x] Graceful shutdown
+
+### cinch worker ❌ BLOCKING MVP
+- [ ] Parse flags (--server, --token, --labels, --concurrency)
+- [ ] Create Worker with config
+- [ ] Call Worker.Start()
+- [ ] Wait for interrupt, call Worker.Stop()
 
 ### cinch status
 - [ ] Detect repo from .git
 - [ ] Query server API
 - [ ] Display recent builds
-- [ ] Color-coded status
 
 ### cinch logs
 - [ ] Stream logs from server
-- [ ] ANSI passthrough
 - [ ] Follow mode (-f)
 
-### cinch config validate
-- [ ] Load and validate config
-- [ ] Report errors with line numbers
+### cinch config validate ✅
+- [x] Load and validate config
+- [x] Report errors
+- [x] Show parsed config summary
 
 ### cinch token
-- [ ] create: generate and print token
-- [ ] list: show active tokens
-- [ ] revoke: revoke by ID
+- [ ] create: call API, print token
+- [ ] list: call API, print table
+- [ ] revoke: call API
 
 ---
 
-## Phase 8: Polish & Release (Day 14)
+## Phase 8: Polish & Release
 
 ### Documentation
 - [ ] README.md (quick start, self-hosted setup)
-- [ ] install.sh (curl | sh installer)
 - [ ] Worker setup guide
 - [ ] Config reference
 
 ### Testing
-- [ ] Integration test: push → webhook → job → status
+- [ ] **E2E test (in-process):** Start server + worker in same test process, simulate webhook, verify job completes
+  - No network mocking - real HTTP, real WebSocket, real SQLite (in-memory)
+  - Assert: webhook accepted → job queued → worker picks up → logs streamed → status posted
+- [ ] Integration test: webhook → job → status (against running server)
 - [ ] Test with real GitHub repo
 - [ ] Test with Forgejo instance
-- [ ] Test Docker execution
-- [ ] Test devcontainer detection
-- [ ] Test service containers
 
 ### Release
 - [ ] Build binaries (linux/amd64, linux/arm64, darwin/arm64, darwin/amd64)
-- [ ] Create GitHub release (after going public)
 - [ ] Docker image (optional)
 
 ---
 
-## Out of Scope (v0.2+)
+## Deferred to v0.2+
 
+- [ ] Worker trust model (--allow-repo, --allow-org, login-based auto-allow)
+- [ ] Built-in TLS (--tls-cert, --tls-key flags for standalone deployments)
 - [ ] GitLab integration
 - [ ] Bitbucket integration
 - [ ] Postgres support (multi-instance)
@@ -348,16 +324,35 @@ Target: Private development → clean up → single big commit before public rel
 - [ ] Build badges
 - [ ] User authentication in web UI
 - [ ] Notifications (Slack, email)
-- [ ] Resource limits
-- [ ] Artifact storage
-- [ ] Trigger filtering (branch patterns)
 
 ---
 
-## Open Questions
+## Notes
 
-1. ~~**Frontend:** Vanilla JS vs Preact+Vite?~~ → **Minimal React + Vite** (resolved)
-2. ~~**ANSI rendering:**~~ → **ansi-to-html** lib (resolved)
-3. **Auth for web UI:** Skip for v0.1 (assume localhost/trusted network)?
-4. **Default container image:** Build our own cinch-builder or use alpine?
-5. **Worker labels:** Predefined set or freeform strings?
+### CD (Continuous Deployment)
+We don't do CD. Your Makefile does.
+
+Cinch exposes `CINCH_BRANCH`, `CINCH_COMMIT`, etc. Your Makefile decides what to do:
+```makefile
+ci:
+	make test
+	@[ "$$CINCH_BRANCH" = "release" ] && make deploy || true
+```
+
+No branch filtering in YAML. No trigger config. No pipeline stages. Your Makefile is smart, our config is dumb. If you want conditional deployment logic, write a shell conditional - you already know how.
+
+### TLS
+Worker connects via `wss://` URLs automatically (gorilla/websocket handles TLS). Server assumes TLS termination at reverse proxy (Caddy, nginx, or platform like Fly.io). This is standard practice and works out of the box with any deployment platform. For v0.2, consider adding `--tls-cert`/`--tls-key` flags for standalone deployments.
+
+---
+
+## Critical Path to MVP
+
+1. ~~**`cinch server`** - Wire up HTTP server with existing handlers (~100 lines)~~ ✅
+2. **`cinch worker`** - Instantiate Worker and call Start() (~30 lines)
+3. **Cinch env vars** - Expose `CINCH_BRANCH`, `CINCH_COMMIT`, etc. to commands (~5 lines)
+4. **E2E test** - Verify server + worker actually work together
+5. **Fix frontend API mismatch** - Response format issue
+6. **Basic log viewing in UI** - Connect to /ws/logs/:id
+
+Everything else can ship as-is or be cut.

@@ -44,12 +44,19 @@ type StatusPoster interface {
 	PostJobStatus(ctx context.Context, jobID string, state string, description string) error
 }
 
+// LogBroadcaster broadcasts logs and job completion to UI clients.
+type LogBroadcaster interface {
+	BroadcastLog(jobID, stream, data string)
+	BroadcastJobComplete(jobID string, status string, exitCode *int)
+}
+
 // WSHandler handles WebSocket connections from workers.
 type WSHandler struct {
-	hub          *Hub
-	storage      storage.Storage
-	log          *slog.Logger
-	statusPoster StatusPoster
+	hub            *Hub
+	storage        storage.Storage
+	log            *slog.Logger
+	statusPoster   StatusPoster
+	logBroadcaster LogBroadcaster
 }
 
 // NewWSHandler creates a new WebSocket handler.
@@ -67,6 +74,11 @@ func NewWSHandler(hub *Hub, store storage.Storage, log *slog.Logger) *WSHandler 
 // SetStatusPoster sets the status poster for reporting job status to forges.
 func (h *WSHandler) SetStatusPoster(sp StatusPoster) {
 	h.statusPoster = sp
+}
+
+// SetLogBroadcaster sets the log broadcaster for streaming logs to UI clients.
+func (h *WSHandler) SetLogBroadcaster(lb LogBroadcaster) {
+	h.logBroadcaster = lb
 }
 
 // ServeHTTP handles WebSocket upgrade requests.
@@ -353,6 +365,11 @@ func (h *WSHandler) handleLogChunk(worker *WorkerConn, payload []byte) {
 	if err := h.storage.AppendLog(ctx, chunk.JobID, chunk.Stream, chunk.Data); err != nil {
 		h.log.Error("failed to append log", "job_id", chunk.JobID, "error", err)
 	}
+
+	// Broadcast to UI clients
+	if h.logBroadcaster != nil {
+		h.logBroadcaster.BroadcastLog(chunk.JobID, chunk.Stream, chunk.Data)
+	}
 }
 
 // handleJobComplete processes job completion.
@@ -387,6 +404,11 @@ func (h *WSHandler) handleJobComplete(worker *WorkerConn, payload []byte) {
 		if err := h.statusPoster.PostJobStatus(ctx, complete.JobID, forgeState, description); err != nil {
 			h.log.Warn("failed to post status to forge", "job_id", complete.JobID, "error", err)
 		}
+	}
+
+	// Broadcast to UI clients
+	if h.logBroadcaster != nil {
+		h.logBroadcaster.BroadcastJobComplete(complete.JobID, string(status), &exitCode)
 	}
 
 	h.hub.RemoveActiveJob(worker.ID, complete.JobID)
@@ -438,6 +460,11 @@ func (h *WSHandler) handleJobError(worker *WorkerConn, payload []byte) {
 		if err := h.statusPoster.PostJobStatus(ctx, jobErr.JobID, "error", description); err != nil {
 			h.log.Warn("failed to post status to forge", "job_id", jobErr.JobID, "error", err)
 		}
+	}
+
+	// Broadcast to UI clients
+	if h.logBroadcaster != nil {
+		h.logBroadcaster.BroadcastJobComplete(jobErr.JobID, string(storage.JobStatusError), nil)
 	}
 
 	h.hub.RemoveActiveJob(worker.ID, jobErr.JobID)
