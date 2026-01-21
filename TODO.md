@@ -299,7 +299,7 @@ Target: Private development → clean up → single big commit before public rel
 - [ ] Config reference
 
 ### Testing
-- [ ] **E2E test (in-process):** Start server + worker in same test process, simulate webhook, verify job completes
+- [x] **E2E test (in-process):** Start server + worker in same test process, simulate webhook, verify job completes
   - No network mocking - real HTTP, real WebSocket, real SQLite (in-memory)
   - Assert: webhook accepted → job queued → worker picks up → logs streamed → status posted
 - [ ] Integration test: webhook → job → status (against running server)
