@@ -113,7 +113,7 @@ Target: Private development → clean up → single big commit before public rel
 - [x] Execute command (exec.Command)
 - [x] Capture exit code
 - [x] Environment variable injection
-- [ ] **Cinch env vars:** `CINCH_BRANCH`, `CINCH_COMMIT`, `CINCH_REPO`, `CINCH_JOB_ID`
+- [x] **Cinch env vars:** `CINCH_BRANCH`, `CINCH_COMMIT`, `CINCH_REPO`, `CINCH_JOB_ID`
 - [x] Working directory setup
 - [x] Unit tests
 
@@ -264,11 +264,11 @@ Target: Private development → clean up → single big commit before public rel
 - [x] Start HTTP server
 - [x] Graceful shutdown
 
-### cinch worker ❌ BLOCKING MVP
-- [ ] Parse flags (--server, --token, --labels, --concurrency)
-- [ ] Create Worker with config
-- [ ] Call Worker.Start()
-- [ ] Wait for interrupt, call Worker.Stop()
+### cinch worker ✅
+- [x] Parse flags (--server, --token, --labels, --concurrency)
+- [x] Create Worker with config
+- [x] Call Worker.Start()
+- [x] Wait for interrupt, call Worker.Stop()
 
 ### cinch status
 - [ ] Detect repo from .git
@@ -348,9 +348,9 @@ Worker connects via `wss://` URLs automatically (gorilla/websocket handles TLS).
 
 ## Critical Path to MVP
 
-1. ~~**`cinch server`** - Wire up HTTP server with existing handlers (~100 lines)~~ ✅
-2. **`cinch worker`** - Instantiate Worker and call Start() (~30 lines)
-3. **Cinch env vars** - Expose `CINCH_BRANCH`, `CINCH_COMMIT`, etc. to commands (~5 lines)
+1. ~~**`cinch server`** - Wire up HTTP server with existing handlers~~ ✅
+2. ~~**`cinch worker`** - Instantiate Worker and call Start()~~ ✅
+3. ~~**Cinch env vars** - Expose `CINCH_BRANCH`, `CINCH_COMMIT`, etc. to commands~~ ✅
 4. **E2E test** - Verify server + worker actually work together
 5. **Fix frontend API mismatch** - Response format issue
 6. **Basic log viewing in UI** - Connect to /ws/logs/:id

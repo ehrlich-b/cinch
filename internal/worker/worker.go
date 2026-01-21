@@ -429,10 +429,20 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 		}
 	})
 
+	// Build environment with Cinch variables
+	env := make(map[string]string)
+	for k, v := range assign.Config.Env {
+		env[k] = v
+	}
+	env["CINCH_JOB_ID"] = jobID
+	env["CINCH_BRANCH"] = assign.Repo.Branch
+	env["CINCH_COMMIT"] = assign.Repo.Commit
+	env["CINCH_REPO"] = assign.Repo.CloneURL
+
 	// Execute command
 	executor := &Executor{
 		WorkDir: workDir,
-		Env:     assign.Config.Env,
+		Env:     env,
 		Stdout:  streamer.Stdout(),
 		Stderr:  streamer.Stderr(),
 	}
