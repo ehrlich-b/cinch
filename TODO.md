@@ -237,8 +237,6 @@ Target: Private development → clean up → single big commit before public rel
 - [ ] View webhook URLs and secrets
 - [ ] Token management
 
-**Note:** Frontend has API response mismatch - expects `{jobs: [...]}` but API returns `[...]` directly.
-
 ---
 
 ## Phase 7: CLI Completion 🚧
@@ -351,8 +349,8 @@ Worker connects via `wss://` URLs automatically (gorilla/websocket handles TLS).
 1. ~~**`cinch server`** - Wire up HTTP server with existing handlers~~ ✅
 2. ~~**`cinch worker`** - Instantiate Worker and call Start()~~ ✅
 3. ~~**Cinch env vars** - Expose `CINCH_BRANCH`, `CINCH_COMMIT`, etc. to commands~~ ✅
-4. **E2E test** - Verify server + worker actually work together
-5. **Fix frontend API mismatch** - Response format issue
+4. ~~**E2E test** - Verify server + worker actually work together~~ ✅
+5. ~~**Fix frontend API mismatch** - Response format issue~~ ✅
 6. **Basic log viewing in UI** - Connect to /ws/logs/:id
 
 Everything else can ship as-is or be cut.
