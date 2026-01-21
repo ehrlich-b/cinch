@@ -1,6 +1,6 @@
 # Binaries
 bin/
-cinch
+/cinch
 
 # Environment
 .env
