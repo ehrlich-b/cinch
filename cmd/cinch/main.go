@@ -17,6 +17,7 @@ import (
 	"github.com/ehrlich-b/cinch/internal/forge"
 	"github.com/ehrlich-b/cinch/internal/server"
 	"github.com/ehrlich-b/cinch/internal/storage"
+	"github.com/ehrlich-b/cinch/internal/worker"
 	"github.com/ehrlich-b/cinch/web"
 	"github.com/spf13/cobra"
 )
@@ -190,16 +191,50 @@ func workerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "worker",
 		Short: "Start a worker that connects to the server",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("worker not yet implemented")
-			return nil
-		},
+		RunE:  runWorker,
 	}
-	cmd.Flags().String("server", "", "Server URL to connect to")
+	cmd.Flags().String("server", "", "Server WebSocket URL to connect to (e.g., wss://cinch.example.com/ws/worker)")
 	cmd.Flags().String("token", "", "Authentication token")
 	cmd.Flags().StringSlice("labels", nil, "Worker labels (e.g., linux-amd64,docker)")
 	cmd.Flags().Int("concurrency", 1, "Max concurrent jobs")
+	cmd.MarkFlagRequired("server")
+	cmd.MarkFlagRequired("token")
 	return cmd
+}
+
+func runWorker(cmd *cobra.Command, args []string) error {
+	serverURL, _ := cmd.Flags().GetString("server")
+	token, _ := cmd.Flags().GetString("token")
+	labels, _ := cmd.Flags().GetStringSlice("labels")
+	concurrency, _ := cmd.Flags().GetInt("concurrency")
+
+	log := slog.Default()
+
+	cfg := worker.WorkerConfig{
+		ServerURL:   serverURL,
+		Token:       token,
+		Labels:      labels,
+		Concurrency: concurrency,
+		Docker:      true, // Assume Docker available
+	}
+
+	w := worker.NewWorker(cfg, log)
+
+	// Start worker
+	log.Info("starting worker", "server", serverURL, "labels", labels, "concurrency", concurrency)
+	if err := w.Start(); err != nil {
+		return fmt.Errorf("start worker: %w", err)
+	}
+
+	// Wait for interrupt
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	<-ctx.Done()
+	log.Info("shutting down worker")
+	w.Stop()
+
+	return nil
 }
 
 func runCmd() *cobra.Command {
