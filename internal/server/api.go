@@ -102,9 +102,11 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type jobResponse struct {
 	ID         string     `json:"id"`
 	RepoID     string     `json:"repo_id"`
+	Repo       string     `json:"repo"` // repo name for frontend display
 	Commit     string     `json:"commit"`
 	Branch     string     `json:"branch"`
 	Status     string     `json:"status"`
+	Duration   *int64     `json:"duration,omitempty"` // duration in ms
 	ExitCode   *int       `json:"exit_code,omitempty"`
 	WorkerID   *string    `json:"worker_id,omitempty"`
 	StartedAt  *time.Time `json:"started_at,omitempty"`
@@ -113,7 +115,7 @@ type jobResponse struct {
 }
 
 func jobToResponse(j *storage.Job) jobResponse {
-	return jobResponse{
+	resp := jobResponse{
 		ID:         j.ID,
 		RepoID:     j.RepoID,
 		Commit:     j.Commit,
@@ -125,6 +127,12 @@ func jobToResponse(j *storage.Job) jobResponse {
 		FinishedAt: j.FinishedAt,
 		CreatedAt:  j.CreatedAt,
 	}
+	// Calculate duration if job finished
+	if j.StartedAt != nil && j.FinishedAt != nil {
+		d := j.FinishedAt.Sub(*j.StartedAt).Milliseconds()
+		resp.Duration = &d
+	}
+	return resp
 }
 
 func (h *APIHandler) listJobs(w http.ResponseWriter, r *http.Request) {
@@ -155,12 +163,17 @@ func (h *APIHandler) listJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build response with repo names
 	resp := make([]jobResponse, len(jobs))
 	for i, j := range jobs {
 		resp[i] = jobToResponse(j)
+		// Try to get repo name
+		if repo, err := h.storage.GetRepo(r.Context(), j.RepoID); err == nil {
+			resp[i].Repo = repo.Owner + "/" + repo.Name
+		}
 	}
 
-	h.writeJSON(w, resp)
+	h.writeJSON(w, map[string]any{"jobs": resp})
 }
 
 func (h *APIHandler) getJob(w http.ResponseWriter, r *http.Request, jobID string) {
@@ -216,6 +229,7 @@ type workerResponse struct {
 	// Live info from hub
 	Connected   bool     `json:"connected"`
 	ActiveJobs  []string `json:"active_jobs,omitempty"`
+	CurrentJob  *string  `json:"currentJob,omitempty"` // First active job for frontend
 	Concurrency int      `json:"concurrency,omitempty"`
 }
 
@@ -244,11 +258,14 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 				resp[i].Connected = true
 				resp[i].ActiveJobs = conn.ActiveJobs
 				resp[i].Concurrency = conn.Capabilities.Concurrency
+				if len(conn.ActiveJobs) > 0 {
+					resp[i].CurrentJob = &conn.ActiveJobs[0]
+				}
 			}
 		}
 	}
 
-	h.writeJSON(w, resp)
+	h.writeJSON(w, map[string]any{"workers": resp})
 }
 
 // --- Repos ---

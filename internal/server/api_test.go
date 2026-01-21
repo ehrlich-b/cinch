@@ -48,13 +48,15 @@ func TestAPIListJobs(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var jobs []jobResponse
-	if err := json.NewDecoder(w.Body).Decode(&jobs); err != nil {
+	var resp struct {
+		Jobs []jobResponse `json:"jobs"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 
-	if len(jobs) != 3 {
-		t.Errorf("len(jobs) = %d, want 3", len(jobs))
+	if len(resp.Jobs) != 3 {
+		t.Errorf("len(jobs) = %d, want 3", len(resp.Jobs))
 	}
 }
 
@@ -96,14 +98,16 @@ func TestAPIListJobsWithFilters(t *testing.T) {
 	w := httptest.NewRecorder()
 	api.ServeHTTP(w, req)
 
-	var jobs []jobResponse
-	_ = json.NewDecoder(w.Body).Decode(&jobs)
-
-	if len(jobs) != 1 {
-		t.Errorf("len(jobs) = %d, want 1", len(jobs))
+	var resp struct {
+		Jobs []jobResponse `json:"jobs"`
 	}
-	if len(jobs) > 0 && jobs[0].Status != "success" {
-		t.Errorf("status = %s, want success", jobs[0].Status)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+
+	if len(resp.Jobs) != 1 {
+		t.Errorf("len(jobs) = %d, want 1", len(resp.Jobs))
+	}
+	if len(resp.Jobs) > 0 && resp.Jobs[0].Status != "success" {
+		t.Errorf("status = %s, want success", resp.Jobs[0].Status)
 	}
 }
 
@@ -238,14 +242,16 @@ func TestAPIListWorkers(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var workers []workerResponse
-	_ = json.NewDecoder(w.Body).Decode(&workers)
-
-	if len(workers) != 1 {
-		t.Errorf("len(workers) = %d, want 1", len(workers))
+	var resp struct {
+		Workers []workerResponse `json:"workers"`
 	}
-	if len(workers) > 0 && workers[0].Name != "worker-1" {
-		t.Errorf("Name = %s, want worker-1", workers[0].Name)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+
+	if len(resp.Workers) != 1 {
+		t.Errorf("len(workers) = %d, want 1", len(resp.Workers))
+	}
+	if len(resp.Workers) > 0 && resp.Workers[0].Name != "worker-1" {
+		t.Errorf("Name = %s, want worker-1", resp.Workers[0].Name)
 	}
 }
 
