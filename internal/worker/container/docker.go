@@ -106,10 +106,11 @@ func CheckAvailable() error {
 // DefaultCacheVolumes returns the standard cache volume mappings.
 func DefaultCacheVolumes() map[string]string {
 	return map[string]string{
-		"cinch-cache-npm":   "/root/.npm",
-		"cinch-cache-cargo": "/root/.cargo",
-		"cinch-cache-go":    "/root/go/pkg",
-		"cinch-cache-pip":   "/root/.cache/pip",
+		"cinch-cache-npm":     "/root/.npm",
+		"cinch-cache-cargo":   "/root/.cargo",
+		"cinch-cache-gomod":   "/go/pkg/mod",           // Go module cache (GOMODCACHE)
+		"cinch-cache-gobuild": "/root/.cache/go-build", // Go build cache (GOCACHE)
+		"cinch-cache-pip":     "/root/.cache/pip",
 	}
 }
 
