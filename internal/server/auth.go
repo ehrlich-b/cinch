@@ -1,0 +1,541 @@
+package server
+
+import (
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/golang-jwt/jwt/v4"
+)
+
+const (
+	githubAuthorizeURL = "https://github.com/login/oauth/authorize"
+	githubTokenURL     = "https://github.com/login/oauth/access_token"
+	githubUserURL      = "https://api.github.com/user"
+
+	authCookieName     = "cinch_auth"
+	authCookieLifetime = 7 * 24 * time.Hour
+)
+
+// AuthConfig holds GitHub OAuth configuration.
+type AuthConfig struct {
+	GitHubClientID     string
+	GitHubClientSecret string
+	JWTSecret          string
+	BaseURL            string // e.g., "https://cinch.sh"
+}
+
+// AuthHandler handles authentication routes.
+type AuthHandler struct {
+	config AuthConfig
+	log    *slog.Logger
+}
+
+// NewAuthHandler creates a new auth handler.
+func NewAuthHandler(cfg AuthConfig, log *slog.Logger) *AuthHandler {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &AuthHandler{
+		config: cfg,
+		log:    log,
+	}
+}
+
+// ServeHTTP routes auth requests.
+func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/auth")
+
+	switch path {
+	case "/login", "/login/":
+		h.handleLogin(w, r)
+	case "/github", "/github/":
+		h.handleGitHubLogin(w, r)
+	case "/callback", "/callback/":
+		h.handleCallback(w, r)
+	case "/logout", "/logout/":
+		h.handleLogout(w, r)
+	case "/me", "/me/":
+		h.handleMe(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// handleLogin shows a simple login page.
+func (h *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
+	returnTo := sanitizeReturnTo(r.URL.Query().Get("return_to"), h.config.BaseURL)
+
+	// If already logged in, redirect
+	if email, ok := h.getAuthFromCookie(r); ok {
+		h.log.Info("already authenticated", "email", email)
+		http.Redirect(w, r, returnTo, http.StatusFound)
+		return
+	}
+
+	// Check if GitHub OAuth is configured
+	if h.config.GitHubClientID == "" {
+		http.Error(w, "GitHub OAuth not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// Simple login page
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+
+	oauthURL := fmt.Sprintf("/auth/github?return_to=%s", url.QueryEscape(returnTo))
+
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in - Cinch</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0d1117;
+  color: #c9d1d9;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.container {
+  text-align: center;
+  padding: 2rem;
+}
+h1 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+  color: #f0f6fc;
+}
+p {
+  color: #8b949e;
+  margin-bottom: 2rem;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: #238636;
+  color: #fff;
+  text-decoration: none;
+  border-radius: 6px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+.btn:hover { background: #2ea043; }
+.btn svg { width: 20px; height: 20px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Sign in to Cinch</h1>
+  <p>Authenticate to manage repos and workers.</p>
+  <a href="%s" class="btn">
+    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+    Continue with GitHub
+  </a>
+</div>
+</body>
+</html>`, oauthURL)
+}
+
+// handleGitHubLogin initiates the GitHub OAuth flow.
+func (h *AuthHandler) handleGitHubLogin(w http.ResponseWriter, r *http.Request) {
+	if h.config.GitHubClientID == "" {
+		h.log.Error("GitHub OAuth not configured")
+		http.Error(w, "OAuth not configured", http.StatusInternalServerError)
+		return
+	}
+
+	returnTo := sanitizeReturnTo(r.URL.Query().Get("return_to"), h.config.BaseURL)
+
+	// Create signed state JWT
+	stateToken, err := h.createOAuthState(returnTo)
+	if err != nil {
+		h.log.Error("failed to create OAuth state", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Build GitHub authorization URL
+	authURL := fmt.Sprintf("%s?client_id=%s&redirect_uri=%s&scope=%s&state=%s",
+		githubAuthorizeURL,
+		url.QueryEscape(h.config.GitHubClientID),
+		url.QueryEscape(h.config.BaseURL+"/auth/callback"),
+		url.QueryEscape("read:user"),
+		url.QueryEscape(stateToken))
+
+	h.log.Info("redirecting to GitHub")
+	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+// handleCallback handles the GitHub OAuth callback.
+func (h *AuthHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
+	// Parse and validate the state JWT
+	stateToken := r.URL.Query().Get("state")
+	returnTo, err := h.parseOAuthState(stateToken)
+	if err != nil {
+		h.log.Error("invalid state parameter", "error", err)
+		http.Error(w, "Invalid state parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Get authorization code
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		h.log.Error("missing authorization code")
+		http.Error(w, "Missing authorization code", http.StatusBadRequest)
+		return
+	}
+
+	// Exchange code for access token
+	accessToken, err := h.exchangeGitHubCode(code)
+	if err != nil {
+		h.log.Error("failed to exchange code", "error", err)
+		http.Error(w, "Failed to exchange code", http.StatusInternalServerError)
+		return
+	}
+
+	// Get user info from GitHub
+	user, err := h.getGitHubUser(accessToken)
+	if err != nil {
+		h.log.Error("failed to get user info", "error", err)
+		http.Error(w, "Failed to get user info", http.StatusInternalServerError)
+		return
+	}
+
+	// Set JWT auth cookie
+	if err := h.setAuthCookie(w, user.Login); err != nil {
+		h.log.Error("failed to set auth cookie", "error", err)
+		http.Error(w, "Failed to complete login", http.StatusInternalServerError)
+		return
+	}
+
+	h.log.Info("user authenticated via GitHub", "user", user.Login)
+
+	// Redirect to return_to or home
+	if returnTo == "" || returnTo == "/" {
+		returnTo = "/"
+	}
+	http.Redirect(w, r, returnTo, http.StatusFound)
+}
+
+// handleLogout clears the auth cookie.
+func (h *AuthHandler) handleLogout(w http.ResponseWriter, r *http.Request) {
+	h.clearAuthCookie(w)
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// handleMe returns the current user info as JSON.
+func (h *AuthHandler) handleMe(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.getAuthFromCookie(r)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]any{"authenticated": false})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"authenticated": true,
+		"user":          user,
+	})
+}
+
+// RequireAuth is middleware that requires authentication.
+// For API routes, returns 401. For browser routes, redirects to login.
+func (h *AuthHandler) RequireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, authenticated := h.getAuthFromCookie(r)
+		if !authenticated {
+			// Check if this is an API request (expects JSON)
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "authentication required"})
+				return
+			}
+
+			// Browser request - redirect to login
+			returnTo := r.URL.String()
+			loginURL := fmt.Sprintf("/auth/login?return_to=%s", url.QueryEscape(returnTo))
+			http.Redirect(w, r, loginURL, http.StatusFound)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// IsAuthenticated checks if the request has valid auth.
+func (h *AuthHandler) IsAuthenticated(r *http.Request) bool {
+	_, ok := h.getAuthFromCookie(r)
+	return ok
+}
+
+// GetUser returns the authenticated username, or empty string.
+func (h *AuthHandler) GetUser(r *http.Request) string {
+	user, _ := h.getAuthFromCookie(r)
+	return user
+}
+
+// --- Cookie Management ---
+
+func (h *AuthHandler) setAuthCookie(w http.ResponseWriter, username string) error {
+	claims := jwt.MapClaims{
+		"sub": username,
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(authCookieLifetime).Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(h.getJWTSigningKey())
+	if err != nil {
+		return fmt.Errorf("failed to sign JWT: %w", err)
+	}
+
+	// Parse base URL to get domain
+	domain := ""
+	if h.config.BaseURL != "" {
+		if u, err := url.Parse(h.config.BaseURL); err == nil {
+			domain = u.Hostname()
+		}
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     authCookieName,
+		Value:    tokenString,
+		Path:     "/",
+		Domain:   domain,
+		MaxAge:   int(authCookieLifetime.Seconds()),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	return nil
+}
+
+func (h *AuthHandler) getAuthFromCookie(r *http.Request) (string, bool) {
+	cookie, err := r.Cookie(authCookieName)
+	if err != nil {
+		return "", false
+	}
+
+	token, err := jwt.Parse(cookie.Value, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return h.getJWTSigningKey(), nil
+	})
+	if err != nil || !token.Valid {
+		return "", false
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", false
+	}
+
+	sub, ok := claims["sub"].(string)
+	if !ok || sub == "" {
+		return "", false
+	}
+
+	return sub, true
+}
+
+func (h *AuthHandler) clearAuthCookie(w http.ResponseWriter) {
+	domain := ""
+	if h.config.BaseURL != "" {
+		if u, err := url.Parse(h.config.BaseURL); err == nil {
+			domain = u.Hostname()
+		}
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     authCookieName,
+		Value:    "",
+		Path:     "/",
+		Domain:   domain,
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (h *AuthHandler) getJWTSigningKey() []byte {
+	if h.config.JWTSecret != "" {
+		return []byte(h.config.JWTSecret)
+	}
+
+	// Check environment
+	if secret := os.Getenv("CINCH_JWT_SECRET"); secret != "" {
+		return []byte(secret)
+	}
+
+	// In dev (no secret configured), use weak fallback
+	h.log.Warn("JWT_SECRET not configured - using weak dev fallback")
+	return []byte("dev-jwt-secret-do-not-use-in-prod")
+}
+
+// --- OAuth State ---
+
+func (h *AuthHandler) createOAuthState(returnTo string) (string, error) {
+	// Generate random CSRF token
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+
+	claims := jwt.MapClaims{
+		"csrf":      base64.URLEncoding.EncodeToString(b),
+		"return_to": returnTo,
+		"exp":       time.Now().Add(10 * time.Minute).Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(h.getJWTSigningKey())
+}
+
+func (h *AuthHandler) parseOAuthState(stateToken string) (string, error) {
+	token, err := jwt.Parse(stateToken, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return h.getJWTSigningKey(), nil
+	})
+	if err != nil || !token.Valid {
+		return "", fmt.Errorf("invalid state token: %w", err)
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", fmt.Errorf("invalid claims")
+	}
+
+	returnTo, _ := claims["return_to"].(string)
+	return returnTo, nil
+}
+
+// --- GitHub API ---
+
+type githubUser struct {
+	Login string `json:"login"`
+	ID    int    `json:"id"`
+}
+
+func (h *AuthHandler) exchangeGitHubCode(code string) (string, error) {
+	data := url.Values{}
+	data.Set("client_id", h.config.GitHubClientID)
+	data.Set("client_secret", h.config.GitHubClientSecret)
+	data.Set("code", code)
+	data.Set("redirect_uri", h.config.BaseURL+"/auth/callback")
+
+	req, err := http.NewRequest("POST", githubTokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("token request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("token request returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tokenResp struct {
+		AccessToken string `json:"access_token"`
+		Error       string `json:"error"`
+		ErrorDesc   string `json:"error_description"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return "", fmt.Errorf("failed to decode token response: %w", err)
+	}
+
+	if tokenResp.Error != "" {
+		return "", fmt.Errorf("GitHub error: %s - %s", tokenResp.Error, tokenResp.ErrorDesc)
+	}
+
+	if tokenResp.AccessToken == "" {
+		return "", fmt.Errorf("no access token in response")
+	}
+
+	return tokenResp.AccessToken, nil
+}
+
+func (h *AuthHandler) getGitHubUser(accessToken string) (*githubUser, error) {
+	req, err := http.NewRequest("GET", githubUserURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("user request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("user request returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var user githubUser
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return nil, fmt.Errorf("failed to decode user response: %w", err)
+	}
+
+	if user.Login == "" {
+		return nil, fmt.Errorf("no login in response")
+	}
+
+	return &user, nil
+}
+
+// --- Helpers ---
+
+// sanitizeReturnTo validates and sanitizes a return_to URL parameter.
+func sanitizeReturnTo(returnTo, baseURL string) string {
+	if returnTo == "" {
+		return "/"
+	}
+
+	// Allow relative paths
+	if strings.HasPrefix(returnTo, "/") && !strings.HasPrefix(returnTo, "//") {
+		return returnTo
+	}
+
+	// Allow absolute URLs on our domain
+	if baseURL != "" && strings.HasPrefix(returnTo, baseURL) {
+		return returnTo
+	}
+
+	return "/"
+}

@@ -68,6 +68,26 @@ nav button.active {
   color: #fff;
 }
 
+.auth {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.875rem;
+}
+
+.auth .user {
+  color: var(--text-muted);
+}
+
+.auth a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.auth a:hover {
+  text-decoration: underline;
+}
+
 main {
   flex: 1;
   padding: 2rem;
@@ -194,9 +214,15 @@ tr.clickable {
 
 @media (max-width: 768px) {
   header {
-    flex-direction: column;
+    flex-wrap: wrap;
     gap: 1rem;
     padding: 1rem;
+  }
+
+  .auth {
+    order: -1;
+    width: 100%;
+    justify-content: flex-end;
   }
 
   main {

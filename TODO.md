@@ -352,5 +352,29 @@ Worker connects via `wss://` URLs automatically (gorilla/websocket handles TLS).
 4. ~~**E2E test** - Verify server + worker actually work together~~ ✅
 5. ~~**Fix frontend API mismatch** - Response format issue~~ ✅
 6. ~~**Basic log viewing in UI** - Connect to /ws/logs/:id~~ ✅
+7. **GitHub OAuth** - Protect API/UI before public deployment ✅
+   - [x] `internal/server/auth.go` - GitHub OAuth + JWT sessions (steal from tunn)
+   - [x] Routes: `/auth/login`, `/auth/github`, `/auth/callback`, `/auth/logout`
+   - [x] JWT cookie: `cinch_auth`, 7-day expiry, HttpOnly, Secure, SameSite=Lax
+   - [x] `requireAuth` middleware for protected routes
+   - [x] Protected: `POST/DELETE /api/*` (mutations)
+   - [x] Public: `GET /api/jobs`, `GET /api/jobs/:id/logs` (read-only, for now)
+   - [x] Public: `/webhooks` (already has signature verification)
+   - [x] Public: `/ws/worker` (already has token auth)
+   - [x] Config: `CINCH_GITHUB_CLIENT_ID`, `CINCH_GITHUB_CLIENT_SECRET`, `CINCH_JWT_SECRET`
+   - [x] Login page in web UI (or simple server-rendered page)
+   - [x] Show logged-in user in UI header
+8. **Deploy to cinch.sh** - Fly.io with TLS termination
+   - [x] fly.toml config
+   - [x] Dockerfile for server
+   - [ ] Set secrets: `fly secrets set CINCH_JWT_SECRET=... CINCH_GITHUB_CLIENT_ID=... CINCH_GITHUB_CLIENT_SECRET=...`
+   - [ ] Create GitHub OAuth app (callback: `https://cinch.sh/auth/callback`)
+   - [ ] Deploy to Fly.io
+   - [ ] DNS: cinch.sh CNAME cinch.fly.dev (Cloudflare, proxied)
+9. **Dogfood** - Cinch runs its own CI
+   - [ ] Add .cinch.yaml to this repo
+   - [ ] Configure GitHub webhook → cinch.sh
+   - [ ] Run worker locally (Mac)
+   - [ ] Verify push → build → status check works
 
-**MVP complete!** Everything else can ship as-is or be cut.
+**No more features until dogfooding works.** Everything else can ship as-is or be cut.

@@ -64,6 +64,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	baseURL, _ := cmd.Flags().GetString("base-url")
 
+	// Allow env vars to override flags
+	if envAddr := os.Getenv("CINCH_ADDR"); envAddr != "" {
+		addr = envAddr
+	}
+	if envDataDir := os.Getenv("CINCH_DATA_DIR"); envDataDir != "" {
+		dataDir = envDataDir
+	}
+	if envBaseURL := os.Getenv("CINCH_BASE_URL"); envBaseURL != "" {
+		baseURL = envBaseURL
+	}
+
 	// Set up logger
 	log := slog.Default()
 
@@ -83,6 +94,22 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("initialize storage: %w", err)
 	}
 	defer store.Close()
+
+	// Create auth handler
+	authConfig := server.AuthConfig{
+		GitHubClientID:     os.Getenv("CINCH_GITHUB_CLIENT_ID"),
+		GitHubClientSecret: os.Getenv("CINCH_GITHUB_CLIENT_SECRET"),
+		JWTSecret:          os.Getenv("CINCH_JWT_SECRET"),
+		BaseURL:            baseURL,
+	}
+	authHandler := server.NewAuthHandler(authConfig, log)
+
+	// Log auth status
+	if authConfig.GitHubClientID != "" {
+		log.Info("GitHub OAuth configured")
+	} else {
+		log.Warn("GitHub OAuth not configured - auth disabled")
+	}
 
 	// Create components
 	hub := server.NewHub()
@@ -108,17 +135,21 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Set up HTTP routes
 	mux := http.NewServeMux()
 
-	// API routes
-	mux.Handle("/api/", apiHandler)
+	// Auth routes (no caching)
+	mux.Handle("/auth/", noCache(authHandler))
 
-	// Webhook endpoint
-	mux.Handle("/webhooks", webhookHandler)
-	mux.Handle("/webhooks/", webhookHandler)
+	// API routes with auth middleware for mutations
+	// Read-only endpoints are public, mutations require auth
+	mux.Handle("/api/", noCache(authMiddleware(apiHandler, authHandler)))
 
-	// WebSocket for workers
+	// Webhook endpoint (no caching) - public (has signature verification)
+	mux.Handle("/webhooks", noCache(webhookHandler))
+	mux.Handle("/webhooks/", noCache(webhookHandler))
+
+	// WebSocket for workers - public (has token auth)
 	mux.Handle("/ws/worker", wsHandler)
 
-	// WebSocket for UI log streaming
+	// WebSocket for UI log streaming - public for now
 	mux.HandleFunc("/ws/logs/", logStreamHandler.ServeHTTP)
 
 	// Serve embedded web assets
@@ -138,6 +169,13 @@ func runServer(cmd *cobra.Command, args []string) error {
 		f, err := webFS.Open(strings.TrimPrefix(path, "/"))
 		if err == nil {
 			f.Close()
+			// Hashed assets (Vite build) get long cache
+			// index.html gets no-cache so updates propagate
+			if path == "/index.html" || path == "/" {
+				w.Header().Set("Cache-Control", "no-cache")
+			} else if strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}
@@ -145,7 +183,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 		// For SPA routing, serve index.html for non-API routes
 		if !strings.HasPrefix(r.URL.Path, "/api/") &&
 			!strings.HasPrefix(r.URL.Path, "/ws/") &&
-			!strings.HasPrefix(r.URL.Path, "/webhooks") {
+			!strings.HasPrefix(r.URL.Path, "/webhooks") &&
+			!strings.HasPrefix(r.URL.Path, "/auth/") {
+			w.Header().Set("Cache-Control", "no-cache")
 			r.URL.Path = "/"
 			fileServer.ServeHTTP(w, r)
 			return
@@ -235,6 +275,36 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	w.Stop()
 
 	return nil
+}
+
+// noCache wraps a handler to add no-store cache headers (for API/webhooks behind CDN)
+func noCache(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		h.ServeHTTP(w, r)
+	})
+}
+
+// authMiddleware requires auth for mutation endpoints (POST, DELETE, PUT, PATCH)
+// Read-only endpoints (GET) are public
+func authMiddleware(next http.Handler, auth *server.AuthHandler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// GET requests are public (read-only)
+		if r.Method == http.MethodGet {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Mutations require auth
+		if !auth.IsAuthenticated(r) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"authentication required"}`))
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func runCmd() *cobra.Command {

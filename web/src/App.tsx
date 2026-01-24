@@ -2,9 +2,24 @@ import { useState, useEffect, useRef } from 'react'
 
 type Page = 'jobs' | 'workers' | 'settings'
 
+interface AuthState {
+  authenticated: boolean
+  user?: string
+  loading: boolean
+}
+
 export function App() {
   const [page, setPage] = useState<Page>('jobs')
   const [selectedJob, setSelectedJob] = useState<string | null>(null)
+  const [auth, setAuth] = useState<AuthState>({ authenticated: false, loading: true })
+
+  // Check auth status on load
+  useEffect(() => {
+    fetch('/auth/me')
+      .then(r => r.json())
+      .then(data => setAuth({ ...data, loading: false }))
+      .catch(() => setAuth({ authenticated: false, loading: false }))
+  }, [])
 
   return (
     <div className="app">
@@ -30,6 +45,16 @@ export function App() {
             Settings
           </button>
         </nav>
+        <div className="auth">
+          {auth.loading ? null : auth.authenticated ? (
+            <>
+              <span className="user">{auth.user}</span>
+              <a href="/auth/logout" className="logout">Logout</a>
+            </>
+          ) : (
+            <a href="/auth/login" className="login">Login</a>
+          )}
+        </div>
       </header>
       <main>
         {page === 'jobs' && !selectedJob && <JobsPage onSelectJob={setSelectedJob} />}
