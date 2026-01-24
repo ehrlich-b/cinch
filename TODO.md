@@ -364,16 +364,22 @@ Worker connects via `wss://` URLs automatically (gorilla/websocket handles TLS).
    - [x] Config: `CINCH_GITHUB_CLIENT_ID`, `CINCH_GITHUB_CLIENT_SECRET`, `CINCH_JWT_SECRET`
    - [x] Login page in web UI (or simple server-rendered page)
    - [x] Show logged-in user in UI header
-8. **Deploy to cinch.sh** - Fly.io with TLS termination
+8. **Deploy to cinch.sh** - Fly.io with TLS termination ✅
    - [x] fly.toml config
    - [x] Dockerfile for server
-   - [ ] Set secrets: `fly secrets set CINCH_JWT_SECRET=... CINCH_GITHUB_CLIENT_ID=... CINCH_GITHUB_CLIENT_SECRET=...`
-   - [ ] Create GitHub OAuth app (callback: `https://cinch.sh/auth/callback`)
-   - [ ] Deploy to Fly.io
-   - [ ] DNS: cinch.sh CNAME cinch.fly.dev (Cloudflare, proxied)
-9. **Dogfood** - Cinch runs its own CI
+   - [x] Set secrets: `fly secrets set CINCH_JWT_SECRET=... CINCH_GITHUB_CLIENT_ID=... CINCH_GITHUB_CLIENT_SECRET=...`
+   - [x] Create GitHub OAuth app (callback: `https://cinch.sh/auth/callback`)
+   - [x] Deploy to Fly.io
+   - [x] DNS: cinch.sh CNAME cinch.fly.dev (Cloudflare, proxied)
+9. **CLI Auth & Self-Registration** - See design/11-cli-auth.md 🚧
+   - [ ] Device auth flow (`POST /auth/device`, polling, browser verify)
+   - [ ] `cinch login` command
+   - [ ] Config file (`~/.cinch/config`)
+   - [ ] Worker self-registration with Bearer token
+   - [ ] `cinch repo add` command
+10. **Dogfood** - Cinch runs its own CI
    - [ ] Add .cinch.yaml to this repo
-   - [ ] Configure GitHub webhook → cinch.sh
+   - [ ] `cinch login` + `cinch repo add ehrlich-b/cinch`
    - [ ] Run worker locally (Mac)
    - [ ] Verify push → build → status check works
 
