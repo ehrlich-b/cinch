@@ -731,23 +731,21 @@ func repoListCmd() *cobra.Command {
 			}
 			defer resp.Body.Close()
 
-			var result struct {
-				Repos []struct {
-					ID    string `json:"id"`
-					Owner string `json:"owner"`
-					Name  string `json:"name"`
-				} `json:"repos"`
+			var repos []struct {
+				ID    string `json:"id"`
+				Owner string `json:"owner"`
+				Name  string `json:"name"`
 			}
-			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
 				return fmt.Errorf("decode response: %w", err)
 			}
 
-			if len(result.Repos) == 0 {
+			if len(repos) == 0 {
 				fmt.Println("No repositories configured")
 				return nil
 			}
 
-			for _, r := range result.Repos {
+			for _, r := range repos {
 				fmt.Printf("%s/%s\n", r.Owner, r.Name)
 			}
 			return nil
