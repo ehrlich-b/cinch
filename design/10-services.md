@@ -10,7 +10,7 @@ Many builds need backing services: databases, caches, message queues. Instead of
 
 ```yaml
 # .cinch.yaml
-command: make test
+build: make test
 
 services:
   postgres:

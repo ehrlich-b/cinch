@@ -136,7 +136,7 @@ latest build:
   id:      42
   status:  success
   time:    2m 34s
-  command: make ci
+  build: make check
 ```
 
 ### `cinch logs`
@@ -188,7 +188,7 @@ cinch config -f /path/to/.cinch.yaml
 ```
 .cinch.yaml is valid
 
-command: make ci
+build: make check
 timeout: 30m
 triggers:
   branches: [main, develop]
@@ -199,7 +199,7 @@ runner:
 
 **Output (error):**
 ```
-.cinch.yaml:12: unknown field 'comand' (did you mean 'command'?)
+.cinch.yaml:12: unknown field 'biuld' (did you mean 'build'?)
 ```
 
 ### `cinch token`

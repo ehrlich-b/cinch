@@ -29,7 +29,7 @@ We can just:
 
 ```yaml
 # .cinch.yaml - the dream
-command: make ci
+build: make check
 
 # That's it. We auto-detect and use .devcontainer/
 ```
@@ -40,7 +40,7 @@ command: make ci
 
 ```yaml
 # .cinch.yaml
-command: make ci
+build: make check
 # container: auto  (implicit default)
 ```
 
@@ -54,7 +54,7 @@ Discovery order:
 
 ```yaml
 # .cinch.yaml
-command: npm test
+build: npm test
 
 container:
   image: node:20-alpine
@@ -66,7 +66,7 @@ container:
 
 ```yaml
 # .cinch.yaml
-command: make ci
+build: make check
 
 container: none  # Explicit "run on host"
 ```
@@ -129,7 +129,7 @@ var defaultCacheMounts = []Mount{
 
 ```yaml
 # .cinch.yaml
-command: make ci
+build: make check
 
 cache:
   # Named caches that persist across builds
@@ -207,7 +207,7 @@ Build artifacts (binaries, test reports, coverage) are created inside the contai
 
 ```yaml
 # .cinch.yaml
-command: make ci
+build: make check
 
 output:
   path: ./artifacts
@@ -230,7 +230,7 @@ After build completes, `outputDir` on host contains whatever the build put in `.
 
 ```yaml
 # .cinch.yaml
-command: make ci
+build: make check
 
 artifacts:
   - path: ./dist/app
@@ -261,7 +261,7 @@ For most CI, you don't need artifacts extracted. The logs tell you pass/fail.
 
 ```yaml
 # .cinch.yaml
-command: make test  # Just need exit code + logs
+build: make test  # Just need exit code + logs
 ```
 
 Only configure `output` or `artifacts` if you actually need the files.
@@ -460,7 +460,7 @@ The README says "Your cache is already warm." With containers, is this still tru
 ```yaml
 # .cinch.yaml - full container options
 
-command: make ci
+build: make check
 
 # Container settings
 container:

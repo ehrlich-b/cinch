@@ -119,7 +119,8 @@ if assign.Repo.CloneToken != "" {
 
 ```yaml
 # .cinch.yaml
-command: make release
+build: make check
+release: make release  # runs on tag pushes
 ```
 
 ```makefile
@@ -236,22 +237,21 @@ This is how Cinch releases itself:
 
 ```yaml
 # .cinch.yaml
-command: make ci
+build: make check
+release: make release
 timeout: 15m
 ```
 
 ```makefile
-# Cinch's Makefile - CI entry point
-ci: check
-	@if [ -n "$$CINCH_TAG" ]; then $(MAKE) release; fi
+# Cinch's Makefile
 
-# Tests + lint run on every push
+# Runs on branch pushes and PRs
 check: fmt test lint
 
-# Release only runs on tag pushes
+# Runs on tag pushes
 release: web
-	gh release create $(VERSION) dist/* --generate-notes
+	gh release create $(CINCH_TAG) dist/* --generate-notes
 ```
 
-Every push runs `make ci` which runs `check`. Tag pushes also run `release`.
+Branch pushes run `make check`. Tag pushes run `make release`.
 Cinch builds Cinch. Same tools, same env vars, your hardware.
