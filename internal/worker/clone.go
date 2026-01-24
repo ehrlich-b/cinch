@@ -43,7 +43,12 @@ func (c *GitCloner) Clone(ctx context.Context, repo protocol.JobRepo) (string, e
 	}
 
 	// Clone with shallow depth
-	args := []string{"clone", "--depth=1", "--branch", repo.Branch, cloneURL, workDir}
+	// Use tag name for tag pushes, branch name for branch pushes
+	refToClone := repo.Branch
+	if repo.Tag != "" {
+		refToClone = repo.Tag
+	}
+	args := []string{"clone", "--depth=1", "--branch", refToClone, cloneURL, workDir}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0", // Don't prompt for credentials
