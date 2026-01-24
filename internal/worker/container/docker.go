@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"syscall"
 )
 
@@ -37,7 +38,7 @@ type Docker struct {
 // Run executes a command inside a container.
 // Returns the exit code.
 func (d *Docker) Run(ctx context.Context, command string) (int, error) {
-	args := []string{"run", "--rm"}
+	args := []string{"run", "--rm", "--platform", "linux/" + runtime.GOARCH}
 
 	// Mount workspace
 	if d.WorkDir != "" {
