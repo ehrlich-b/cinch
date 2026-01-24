@@ -45,8 +45,7 @@ The whole point of Cinch is that CI runs on YOUR hardware. We dogfood this for r
 ### Tasks
 
 - [x] Install script (`install.sh`) - detects OS/arch, downloads from GitHub Releases
-- [ ] `make release` target - cross-compiles all platforms, uploads to GitHub Releases
-- [ ] Tag-triggered builds - worker runs release on tag push
+- [x] `make release` target - cross-compiles all platforms, uploads to GitHub Releases
 - [ ] First release: `v0.1.0`
 
 ### Release Process

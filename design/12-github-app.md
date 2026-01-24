@@ -27,10 +27,13 @@ No manual webhook setup. No PAT creation. No copying secrets.
 ### Permissions Required
 
 **Repository permissions:**
-- `contents: read` - Clone repos
+- `contents: write` - Clone repos AND create releases
 - `statuses: write` - Post commit statuses
 - `checks: write` - Create check runs (optional, nicer UI)
 - `metadata: read` - Required for all apps
+
+Note: `contents: write` (not just read) enables jobs to create GitHub releases
+using the same installation token. See `design/13-job-tokens.md`.
 
 **Subscribe to events:**
 - `push` - Trigger builds
