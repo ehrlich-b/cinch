@@ -92,7 +92,7 @@ func (d *Docker) Pull(ctx context.Context) error {
 
 // Build builds an image from a Dockerfile.
 func Build(ctx context.Context, dockerfile, contextDir, tag string, stdout, stderr io.Writer) error {
-	args := []string{"build", "-f", dockerfile, "-t", tag, contextDir}
+	args := []string{"build", "--platform", "linux/" + runtime.GOARCH, "-f", dockerfile, "-t", tag, contextDir}
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
