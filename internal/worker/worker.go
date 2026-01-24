@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ehrlich-b/cinch/internal/config"
 	"github.com/ehrlich-b/cinch/internal/protocol"
 	"github.com/gorilla/websocket"
 )
@@ -422,6 +423,17 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	}
 	defer os.RemoveAll(workDir)
 
+	// Load config from repo (overrides server-provided config)
+	command := assign.Config.Command
+	cfg, _, err := config.Load(workDir)
+	if err == nil && cfg.Command != "" {
+		command = cfg.Command
+		w.log.Debug("using command from .cinch.yaml", "command", command)
+	} else if command == "" {
+		command = "make test" // Default fallback
+		w.log.Debug("using default command", "command", command)
+	}
+
 	// Create log streamer
 	streamer := NewLogStreamer(jobID, func(jobID, stream, data string) {
 		if err := w.send(protocol.TypeLogChunk, protocol.NewLogChunk(jobID, stream, data)); err != nil {
@@ -447,7 +459,7 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 		Stderr:  streamer.Stderr(),
 	}
 
-	exitCode, err := executor.Run(ctx, assign.Config.Command)
+	exitCode, err := executor.Run(ctx, command)
 	if err != nil && ctx.Err() != nil {
 		// Context cancelled
 		w.reportError(jobID, protocol.PhaseExecute, "job cancelled")
