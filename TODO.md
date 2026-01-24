@@ -4,20 +4,22 @@
 
 ---
 
-## Current: MVP 1.1 - GitHub Releases
+## Current: MVP 1.1 - Releases (via Cinch)
 
-- [x] GitHub Actions release workflow
-  - [x] Trigger on tag push (v*)
-  - [x] Build: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64
-  - [x] Create GitHub Release with binaries
-- [x] Install script (`install.sh`)
-  - [x] Detect OS/arch
-  - [x] Download from GitHub Releases
-  - [x] Install to ~/.local/bin or /usr/local/bin
-- [x] README quick start guide
-- [x] GitHub Actions CI workflow (tests + lint on push/PR)
+Cinch builds itself. No GitHub Actions.
 
-**Ready to release:** Tag `v0.1.0` to create first release.
+- [x] Install script (`install.sh`) - detects OS/arch, downloads from GitHub Releases
+- [ ] `make release` target - cross-compiles all platforms, uploads to GitHub Releases
+- [ ] Tag-triggered builds - worker detects tag push, runs release
+- [ ] First release: `v0.1.0`
+
+Release process:
+```bash
+git tag v0.1.0 && git push --tags
+# Cinch worker picks up the push, runs: make release
+# Binaries uploaded to GitHub Releases
+# Users install with: curl ... | sh
+```
 
 ---
 

@@ -22,6 +22,7 @@
 - [x] `cinch worker` with job execution
 - [x] SQLite storage backend
 - [x] Deployed to Fly.io (cinch.fly.dev)
+- [x] Dogfooding: Cinch runs its own CI
 
 ### What's NOT Working Yet
 
@@ -35,35 +36,40 @@
 
 ---
 
-## MVP 1.1: GitHub Releases & Install Script - COMPLETE
+## MVP 1.1: Releases (via Cinch)
 
-**Goal:** Users can install Cinch with a single curl command.
+**Goal:** Cinch builds and releases itself. No GitHub Actions.
+
+The whole point of Cinch is that CI runs on YOUR hardware. We dogfood this for releases.
 
 ### Tasks
 
-- [x] GitHub Actions workflow for releases
-  - [x] Build binaries: Linux/macOS (amd64/arm64)
-  - [x] Create GitHub Release with changelog
-  - [x] Upload binaries as release assets
-- [x] GitHub Actions CI workflow (tests + lint on push/PR)
-- [x] Install script (`install.sh`)
-  - [x] Detect OS/arch
-  - [x] Download from GitHub Releases
-  - [x] Install to ~/.local/bin or /usr/local/bin
-- [x] README quick start guide
+- [x] Install script (`install.sh`) - detects OS/arch, downloads from GitHub Releases
+- [ ] `make release` target - cross-compiles all platforms, uploads to GitHub Releases
+- [ ] Tag-triggered builds - worker runs release on tag push
+- [ ] First release: `v0.1.0`
 
-### Ready to Release
+### Release Process
 
-Tag `v0.1.0` to trigger first release:
 ```bash
+# Developer tags a release
 git tag v0.1.0 && git push --tags
+
+# Cinch worker (running on dev's machine or build box) picks up the push
+# Runs: make release
+# Which cross-compiles and uploads to GitHub Releases
+
+# Users install
+curl -fsSL https://raw.githubusercontent.com/ehrlich-b/cinch/main/install.sh | sh
 ```
 
-Then users can install with:
-```bash
-curl -fsSL https://raw.githubusercontent.com/ehrlich-b/cinch/main/install.sh | sh
-cinch version
-```
+### Why Not GitHub Actions?
+
+Because that defeats the entire value proposition:
+- **"Your hardware"** - Workers run on YOUR machines, not GitHub's
+- **"Your Makefile is the pipeline"** - We just invoke `make release`
+
+If we used GitHub Actions, we'd be saying "use Cinch for CI... except we don't."
 
 ---
 
