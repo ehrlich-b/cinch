@@ -166,6 +166,6 @@ Worker reads `.cinch.yaml` from the cloned repo, not from server config. This al
 
 ```yaml
 # .cinch.yaml
-command: make check
+build: make check
 timeout: 30m
 ```

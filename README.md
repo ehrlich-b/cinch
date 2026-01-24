@@ -4,7 +4,7 @@ CI that's a cinch.
 
 ```yaml
 # .cinch.yaml
-command: make ci
+build: make check
 ```
 
 Push code, get a green checkmark. Your Makefile is the pipeline.
@@ -27,7 +27,8 @@ Add `.cinch.yaml` to your repo, configure the webhook, push. Done.
 
 ```yaml
 # .cinch.yaml
-command: make ci
+build: make check
+release: make release  # optional: runs on tag pushes
 
 services:
   postgres:
@@ -36,10 +37,6 @@ services:
       POSTGRES_PASSWORD: postgres
 
 workers: [linux-amd64, linux-arm64]  # optional: fan-out to multiple platforms
-
-trigger:
-  pull_requests: true
-  schedule: "0 0 * * *"  # nightly
 ```
 
 Builds run in containers by default (auto-detects your devcontainer). Caches persist between builds.
