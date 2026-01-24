@@ -55,15 +55,21 @@ type JWTValidator interface {
 	ValidateUserToken(tokenString string) string
 }
 
+// WorkerAvailableNotifier is called when a worker becomes available.
+type WorkerAvailableNotifier interface {
+	NotifyWorkerAvailable()
+}
+
 // WSHandler handles WebSocket connections from workers.
 type WSHandler struct {
-	hub            *Hub
-	storage        storage.Storage
-	log            *slog.Logger
-	statusPoster   StatusPoster
-	logBroadcaster LogBroadcaster
-	jwtValidator   JWTValidator
-	githubApp      *GitHubAppHandler
+	hub              *Hub
+	storage          storage.Storage
+	log              *slog.Logger
+	statusPoster     StatusPoster
+	logBroadcaster   LogBroadcaster
+	jwtValidator     JWTValidator
+	githubApp        *GitHubAppHandler
+	workerNotifier   WorkerAvailableNotifier
 }
 
 // NewWSHandler creates a new WebSocket handler.
@@ -96,6 +102,11 @@ func (h *WSHandler) SetJWTValidator(v JWTValidator) {
 // SetGitHubApp sets the GitHub App handler for status posting.
 func (h *WSHandler) SetGitHubApp(app *GitHubAppHandler) {
 	h.githubApp = app
+}
+
+// SetWorkerNotifier sets the notifier to call when a worker becomes available.
+func (h *WSHandler) SetWorkerNotifier(n WorkerAvailableNotifier) {
+	h.workerNotifier = n
 }
 
 // ServeHTTP handles WebSocket upgrade requests.
@@ -340,6 +351,11 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 		return
 	}
 	worker.Send <- msg
+
+	// Notify dispatcher that a worker is available for queued jobs
+	if h.workerNotifier != nil {
+		h.workerNotifier.NotifyWorkerAvailable()
+	}
 }
 
 // handlePing processes heartbeat from worker.

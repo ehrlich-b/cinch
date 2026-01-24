@@ -104,6 +104,7 @@ func TestE2EFullPipeline(t *testing.T) {
 	// Wire up dependencies
 	wsHandler.SetStatusPoster(&mockStatusPoster{t: t})
 	wsHandler.SetLogBroadcaster(logStreamHandler)
+	wsHandler.SetWorkerNotifier(dispatcher)
 
 	// Register GitHub forge
 	webhookHandler.RegisterForge(&forge.GitHub{})
@@ -402,6 +403,7 @@ func TestE2EWorkerReconnect(t *testing.T) {
 	hub := server.NewHub()
 	wsHandler := server.NewWSHandler(hub, store, log)
 	dispatcher := server.NewDispatcher(hub, store, wsHandler, log)
+	wsHandler.SetWorkerNotifier(dispatcher)
 	dispatcher.Start()
 	defer dispatcher.Stop()
 
@@ -491,6 +493,7 @@ func TestE2EJobCancellation(t *testing.T) {
 	hub := server.NewHub()
 	wsHandler := server.NewWSHandler(hub, store, log)
 	dispatcher := server.NewDispatcher(hub, store, wsHandler, log)
+	wsHandler.SetWorkerNotifier(dispatcher)
 	dispatcher.Start()
 	defer dispatcher.Stop()
 

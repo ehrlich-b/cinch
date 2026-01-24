@@ -155,6 +155,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	wsHandler.SetLogBroadcaster(logStreamHandler)
 	wsHandler.SetJWTValidator(authHandler)
 	wsHandler.SetGitHubApp(githubAppHandler)
+	wsHandler.SetWorkerNotifier(dispatcher)
 	webhookHandler.SetGitHubApp(githubAppHandler)
 
 	// Register forges (for webhook identification)
