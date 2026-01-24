@@ -245,18 +245,23 @@ function SettingsPage() {
 
 // Badge style definitions
 const BADGE_STYLES = {
-  // Free tier
-  flat: { name: 'Flat', tier: 'free', desc: 'Classic shields.io style' },
-  modern: { name: 'Modern', tier: 'free', desc: 'Clean dark theme' },
-  // Pro tier
-  neon: { name: 'Neon Glow', tier: 'pro', desc: 'Cyberpunk with glow effects' },
-  electric: { name: 'Electric', tier: 'pro', desc: 'Bold uppercase with subtle glow' },
-  terminal: { name: 'Terminal', tier: 'pro', desc: 'CLI aesthetic with cursor' },
-  glass: { name: 'Glass', tier: 'pro', desc: 'Glassmorphism effect' },
-  holographic: { name: 'Holographic', tier: 'pro', desc: 'Iridescent border' },
-  pixel: { name: 'Pixel', tier: 'pro', desc: 'Retro 8-bit style' },
-  minimal: { name: 'Minimal', tier: 'pro', desc: 'Ultra-clean status pill' },
-  outlined: { name: 'Outlined', tier: 'pro', desc: 'Ghost style, any background' },
+  // Shields.io tribute
+  shields: { name: 'Shields.io Style', desc: 'The OG. Props to shields.io', link: 'https://shields.io' },
+  // CLI/dev aesthetic
+  terminal: { name: 'Terminal', desc: 'Lives in the command line' },
+  // Modern styles
+  neon: { name: 'Neon', desc: 'Glow effects' },
+  electric: { name: 'Electric', desc: 'Bold uppercase' },
+  // Clean styles
+  modern: { name: 'Modern', desc: 'Clean dark minimal' },
+  flat: { name: 'Flat', desc: 'Simple and readable' },
+  minimal: { name: 'Minimal', desc: 'Just the essentials' },
+  outlined: { name: 'Outlined', desc: 'Works on any background' },
+  // Fun styles
+  holographic: { name: 'Holographic', desc: 'Iridescent border' },
+  pixel: { name: 'Pixel', desc: 'Retro 8-bit' },
+  brutalist: { name: 'Brutalist', desc: 'Maximum impact' },
+  gradient: { name: 'Gradient', desc: 'Smooth transitions' },
 } as const
 
 type BadgeStyle = keyof typeof BADGE_STYLES
@@ -306,16 +311,20 @@ function BadgesPage() {
         {(Object.entries(BADGE_STYLES) as [BadgeStyle, typeof BADGE_STYLES[BadgeStyle]][]).map(([key, style]) => (
           <div
             key={key}
-            className={`badge-card ${selectedStyle === key ? 'selected' : ''} ${style.tier === 'pro' ? 'pro' : ''}`}
+            className={`badge-card ${selectedStyle === key ? 'selected' : ''}`}
             onClick={() => setSelectedStyle(key)}
           >
-            {style.tier === 'pro' && <span className="pro-badge">PRO</span>}
             <div className="badge-card-preview">
-              <BadgeSVG style={key} status="passing" />
+              <BadgeSVG style={key} status={selectedStatus} />
             </div>
             <div className="badge-card-info">
               <span className="badge-card-name">{style.name}</span>
-              <span className="badge-card-desc">{style.desc}</span>
+              <span className="badge-card-desc">
+                {style.desc}
+                {'link' in style && (
+                  <a href={style.link} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}> ↗</a>
+                )}
+              </span>
             </div>
           </div>
         ))}
@@ -349,23 +358,39 @@ function BadgeSVG({ style, status }: { style: BadgeStyle; status: BadgeStatus })
   const c = colors[status]
 
   switch (style) {
-    case 'flat':
+    case 'shields':
+      // Faithful shields.io style
       return (
         <svg width="108" height="20" xmlns="http://www.w3.org/2000/svg">
-          <linearGradient id="flat-b" x2="0" y2="100%">
+          <linearGradient id="sh-b" x2="0" y2="100%">
             <stop offset="0" stopColor="#bbb" stopOpacity=".1"/>
             <stop offset="1" stopOpacity=".1"/>
           </linearGradient>
+          <clipPath id="sh-a"><rect width="108" height="20" rx="3"/></clipPath>
+          <g clipPath="url(#sh-a)">
+            <path fill="#555" d="M0 0h49v20H0z"/>
+            <path fill={c.main} d="M49 0h59v20H49z"/>
+            <path fill="url(#sh-b)" d="M0 0h108v20H0z"/>
+          </g>
+          <g fill="#fff" textAnchor="middle" fontFamily="Verdana,Geneva,DejaVu Sans,sans-serif" fontSize="11">
+            <text x="24.5" y="15" fill="#010101" fillOpacity=".3">cinch</text>
+            <text x="24.5" y="14">cinch</text>
+            <text x="77.5" y="15" fill="#010101" fillOpacity=".3">{c.text}</text>
+            <text x="77.5" y="14">{c.text}</text>
+          </g>
+        </svg>
+      )
+
+    case 'flat':
+      return (
+        <svg width="108" height="20" xmlns="http://www.w3.org/2000/svg">
           <clipPath id="flat-a"><rect width="108" height="20" rx="3"/></clipPath>
           <g clipPath="url(#flat-a)">
             <path fill="#555" d="M0 0h49v20H0z"/>
             <path fill={c.main} d="M49 0h59v20H49z"/>
-            <path fill="url(#flat-b)" d="M0 0h108v20H0z"/>
           </g>
-          <g fill="#fff" textAnchor="middle" fontFamily="DejaVu Sans,Verdana,sans-serif" fontSize="11">
-            <text x="24.5" y="15" fillOpacity=".3">cinch</text>
+          <g fill="#fff" textAnchor="middle" fontFamily="Verdana,Geneva,sans-serif" fontSize="11">
             <text x="24.5" y="14">cinch</text>
-            <text x="77.5" y="15" fillOpacity=".3">{c.text}</text>
             <text x="77.5" y="14">{c.text}</text>
           </g>
         </svg>
@@ -443,25 +468,28 @@ function BadgeSVG({ style, status }: { style: BadgeStyle; status: BadgeStatus })
         </svg>
       )
 
-    case 'glass':
+    case 'brutalist':
       return (
-        <svg width="120" height="30" xmlns="http://www.w3.org/2000/svg">
+        <svg width="100" height="28" xmlns="http://www.w3.org/2000/svg">
+          <rect width="100" height="28" fill="#000"/>
+          <rect x="2" y="2" width="96" height="24" fill={c.main}/>
+          <text x="50" y="19" fontFamily="Arial Black,sans-serif" fontSize="11" fontWeight="900" fill="#000" textAnchor="middle">CINCH {c.text.toUpperCase().slice(0,4)}</text>
+        </svg>
+      )
+
+    case 'gradient':
+      return (
+        <svg width="116" height="26" xmlns="http://www.w3.org/2000/svg">
           <defs>
-            <linearGradient id="glass-bg" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.15"/>
-              <stop offset="100%" stopColor="#ffffff" stopOpacity="0.05"/>
+            <linearGradient id={`grad-bg-${status}`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#3b82f6"/>
+              <stop offset="100%" stopColor={c.main}/>
             </linearGradient>
-            <filter id="glass-blur" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur in="SourceGraphic" stdDeviation="10"/>
-            </filter>
           </defs>
-          <circle cx="20" cy="15" r="20" fill="#3b82f6" filter="url(#glass-blur)" opacity="0.5"/>
-          <circle cx="100" cy="15" r="20" fill={c.main} filter="url(#glass-blur)" opacity="0.5"/>
-          <rect x="2" y="2" width="116" height="26" rx="13" fill="url(#glass-bg)"/>
-          <rect x="2" y="2" width="116" height="26" rx="13" fill="none" stroke="#ffffff" strokeOpacity="0.2" strokeWidth="1"/>
-          <circle cx="18" cy="15" r="5" fill="#3b82f6"/>
-          <text x="30" y="19" fontFamily="-apple-system,sans-serif" fontSize="11" fontWeight="600" fill="#fff">cinch</text>
-          <text x="68" y="19" fontFamily="-apple-system,sans-serif" fontSize="11" fontWeight="500" fill={c.glow}>{c.text}</text>
+          <rect width="116" height="26" rx="6" fill={`url(#grad-bg-${status})`}/>
+          <text x="14" y="17" fontFamily="-apple-system,sans-serif" fontSize="11" fontWeight="700" fill="#fff">cinch</text>
+          <text x="58" y="17" fontFamily="-apple-system,sans-serif" fontSize="11" fontWeight="500" fill="#fff">{c.text}</text>
+          <circle cx="102" cy="13" r="4" fill="#fff" fillOpacity="0.9"/>
         </svg>
       )
 

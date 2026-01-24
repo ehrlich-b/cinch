@@ -41,3 +41,4 @@ web/node_modules/
 # Temp
 tmp/
 .tmp/
+.badge-renders
