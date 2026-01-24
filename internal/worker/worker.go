@@ -484,6 +484,7 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 
 	// Determine execution mode
 	var exitCode int
+	var runErr error
 	stdout := io.MultiWriter(streamer.Stdout(), os.Stdout)
 	stderr := io.MultiWriter(streamer.Stderr(), os.Stderr)
 
@@ -497,7 +498,7 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 
 		if source.Type == "bare-metal" {
 			// Config says bare-metal
-			exitCode, err = w.runBareMetal(ctx, command, workDir, env, stdout, stderr)
+			exitCode, runErr = w.runBareMetal(ctx, command, workDir, env, stdout, stderr)
 		} else {
 			// Run in container
 			w.log.Info("executing job",
@@ -510,7 +511,7 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 				"container_type", source.Type,
 			)
 
-			exitCode, err = w.runInContainer(ctx, jobID, source, command, workDir, env, stdout, stderr)
+			exitCode, runErr = w.runInContainer(ctx, jobID, source, command, workDir, env, stdout, stderr)
 		}
 	} else {
 		// Bare-metal mode
@@ -523,9 +524,9 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 			"mode", "bare-metal",
 		)
 
-		exitCode, err = w.runBareMetal(ctx, command, workDir, env, stdout, stderr)
+		exitCode, runErr = w.runBareMetal(ctx, command, workDir, env, stdout, stderr)
 	}
-	if err != nil && ctx.Err() != nil {
+	if runErr != nil && ctx.Err() != nil {
 		// Context cancelled
 		w.reportError(jobID, protocol.PhaseExecute, "job cancelled")
 		return
