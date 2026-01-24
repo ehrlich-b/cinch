@@ -138,7 +138,8 @@ func (h *GitHubAppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *GitHubAppHandler) verifySignature(payload []byte, signature string) bool {
 	if h.config.WebhookSecret == "" {
-		return true // No secret configured, skip verification
+		h.log.Error("webhook secret not configured - rejecting request")
+		return false // No secret configured, reject unverified webhooks
 	}
 
 	if !strings.HasPrefix(signature, "sha256=") {
