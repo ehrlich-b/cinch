@@ -1,4 +1,4 @@
-FROM golang:1.24-bookworm
+FROM docker.io/golang:1.24-bookworm
 
 # Install Node.js 22 LTS
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \

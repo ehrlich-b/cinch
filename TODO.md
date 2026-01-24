@@ -98,6 +98,8 @@ Already done: Gitea, Forgejo (same codebase). These cover the self-hosted commun
 - [ ] Filter jobs by repo/status/branch in UI
 - [ ] Show current job per worker in UI
 - [ ] Homepage should only show your own jobs (not all jobs)
+- [ ] Retry/rerun failed builds from UI
+- [ ] Create releases from cinch.sh UI (push tag to user's repo via forge API)
 
 ### Known Issues
 - [ ] **Rejected jobs not re-queued** - When a worker rejects a job (at max concurrency), the job is not put back in the queue. See `ws.go:403` TODO.
