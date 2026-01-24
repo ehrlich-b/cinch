@@ -4,7 +4,24 @@
 
 ---
 
-## Current: MVP 1.3 - Forge Expansion (Tier 1)
+## Current: MVP 1.3 - Public Launch Prep
+
+**Goal:** Make cinch presentable for public use.
+
+### Build Badges
+- [ ] `/badge/{owner}/{repo}.svg` endpoint
+- [ ] Status: passing (green), failing (red), pending (yellow), unknown (gray)
+- [ ] Cache headers for CDN-friendly serving
+- [ ] Markdown snippet in repo settings page
+
+### Website Polish
+- [ ] Landing page that doesn't look like dog shit
+- [ ] Quick start guide
+- [ ] Pricing page ($5/seat/month private, free public, free self-hosted)
+
+---
+
+## Then: MVP 1.4 - Forge Expansion (Tier 1)
 
 **Goal:** Cover the major forges. These represent 95%+ of the market.
 
@@ -28,7 +45,7 @@ GitLab positioning: We're not replacing GitLab as a forge—we're replacing `.gi
 
 ---
 
-## Then: MVP 1.4 - PR/MR Support
+## Then: MVP 1.5 - PR/MR Support
 
 Currently push-only. PRs are table stakes for real adoption.
 
@@ -40,7 +57,7 @@ Currently push-only. PRs are table stakes for real adoption.
 
 ---
 
-## Then: MVP 1.5 - Forge Expansion (Tier 2)
+## Then: MVP 1.6 - Forge Expansion (Tier 2)
 
 Enterprise and ecosystem-specific forges.
 
@@ -76,7 +93,6 @@ Already done: Gitea, Forgejo (same codebase). These cover the self-hosted commun
 - [ ] Postgres storage backend
 
 ### Polish
-- [ ] Build badges
 - [ ] `cinch status` - check job status from CLI
 - [ ] `cinch logs -f` - stream logs from CLI
 - [ ] Filter jobs by repo/status/branch in UI
