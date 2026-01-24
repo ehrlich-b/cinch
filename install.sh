@@ -49,26 +49,44 @@ fi
 echo "Installing cinch $VERSION..."
 mkdir -p "$INSTALL_DIR"
 
+# Download to temp dir first, verify, then move
+TEMP_DIR=$(mktemp -d)
+trap "rm -rf $TEMP_DIR" EXIT
+
 # Download all platform variants
 for platform in $PLATFORMS; do
     echo "  Downloading cinch-$platform..."
     DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/cinch-$platform"
-    if curl -fsSL "$DOWNLOAD_URL" -o "$INSTALL_DIR/cinch-$platform" 2>/dev/null; then
-        chmod +x "$INSTALL_DIR/cinch-$platform"
+    if curl -fsSL "$DOWNLOAD_URL" -o "$TEMP_DIR/cinch-$platform" 2>/dev/null; then
+        chmod +x "$TEMP_DIR/cinch-$platform"
     else
         echo "    Warning: Could not download cinch-$platform (may not exist)"
     fi
 done
 
-# Create symlink for local platform
-if [ -f "$INSTALL_DIR/cinch-$LOCAL_PLATFORM" ]; then
-    rm -f "$INSTALL_DIR/cinch"
-    ln -s "cinch-$LOCAL_PLATFORM" "$INSTALL_DIR/cinch"
-    echo "Installed cinch $VERSION to $INSTALL_DIR/cinch"
-else
+# Verify local platform binary works before installing
+if [ ! -f "$TEMP_DIR/cinch-$LOCAL_PLATFORM" ]; then
     echo "Error: Could not download binary for $LOCAL_PLATFORM"
     exit 1
 fi
+
+echo "  Verifying cinch-$LOCAL_PLATFORM..."
+if ! "$TEMP_DIR/cinch-$LOCAL_PLATFORM" --version >/dev/null 2>&1; then
+    echo "Error: Downloaded binary failed to run - aborting install"
+    exit 1
+fi
+
+# Move verified binaries into place
+for platform in $PLATFORMS; do
+    if [ -f "$TEMP_DIR/cinch-$platform" ]; then
+        mv -f "$TEMP_DIR/cinch-$platform" "$INSTALL_DIR/cinch-$platform"
+    fi
+done
+
+# Create symlink for local platform
+rm -f "$INSTALL_DIR/cinch"
+ln -s "cinch-$LOCAL_PLATFORM" "$INSTALL_DIR/cinch"
+echo "Installed cinch $VERSION to $INSTALL_DIR/cinch"
 
 # Write version file
 echo "$VERSION" > "$INSTALL_DIR/.version"
