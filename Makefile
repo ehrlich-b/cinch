@@ -121,7 +121,7 @@ fly-create:
 	fly volumes create cinch_data --size 1 --region iad -a $(FLY_APP) -y
 
 fly-deploy:
-	fly deploy
+	fly deploy --no-cache
 
 fly-logs:
 	fly logs -a $(FLY_APP) --no-tail
