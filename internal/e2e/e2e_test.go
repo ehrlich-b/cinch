@@ -87,7 +87,7 @@ func TestE2EFullPipeline(t *testing.T) {
 		Name:          "testrepo",
 		CloneURL:      "file://" + testRepo.Dir,
 		WebhookSecret: webhookSecret,
-		Command:       "echo 'Hello from Cinch CI!'",
+		Build:         "echo 'Hello from Cinch CI!'",
 		CreatedAt:     time.Now(),
 	}
 	if err := store.CreateRepo(ctx, repo); err != nil {
@@ -483,7 +483,7 @@ func TestE2EJobCancellation(t *testing.T) {
 		ID:        "r_1",
 		ForgeType: storage.ForgeTypeGitHub,
 		CloneURL:  "https://github.com/test/repo.git",
-		Command:   "sleep 60", // Long-running command
+		Build:     "sleep 60", // Long-running command
 		CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRepo failed: %v", err)

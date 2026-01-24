@@ -1,3 +1,3 @@
-# Cinch CI - Your Makefile is the pipeline
-command: make ci
+build: make check
+release: make release
 timeout: 15m

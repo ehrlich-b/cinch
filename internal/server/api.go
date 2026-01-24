@@ -278,7 +278,8 @@ type repoResponse struct {
 	CloneURL      string    `json:"clone_url"`
 	HTMLURL       string    `json:"html_url,omitempty"`
 	WebhookSecret string    `json:"webhook_secret,omitempty"`
-	Command       string    `json:"command"`
+	Build         string    `json:"build"`
+	Release       string    `json:"release,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
@@ -289,7 +290,8 @@ type createRepoRequest struct {
 	CloneURL   string `json:"clone_url"`
 	HTMLURL    string `json:"html_url"`
 	ForgeToken string `json:"forge_token"`
-	Command    string `json:"command"`
+	Build      string `json:"build"`
+	Release    string `json:"release"`
 }
 
 func (h *APIHandler) listRepos(w http.ResponseWriter, r *http.Request) {
@@ -309,7 +311,8 @@ func (h *APIHandler) listRepos(w http.ResponseWriter, r *http.Request) {
 			Name:      repo.Name,
 			CloneURL:  repo.CloneURL,
 			HTMLURL:   repo.HTMLURL,
-			Command:   repo.Command,
+			Build:     repo.Build,
+			Release:   repo.Release,
 			CreatedAt: repo.CreatedAt,
 		}
 	}
@@ -337,7 +340,8 @@ func (h *APIHandler) getRepo(w http.ResponseWriter, r *http.Request, repoID stri
 		CloneURL:      repo.CloneURL,
 		HTMLURL:       repo.HTMLURL,
 		WebhookSecret: repo.WebhookSecret, // Include for admin viewing
-		Command:       repo.Command,
+		Build:         repo.Build,
+		Release:       repo.Release,
 		CreatedAt:     repo.CreatedAt,
 	}
 
@@ -374,7 +378,8 @@ func (h *APIHandler) createRepo(w http.ResponseWriter, r *http.Request) {
 		HTMLURL:       req.HTMLURL,
 		WebhookSecret: secret,
 		ForgeToken:    req.ForgeToken,
-		Command:       req.Command,
+		Build:         req.Build,
+		Release:       req.Release,
 		CreatedAt:     time.Now(),
 	}
 
@@ -395,7 +400,8 @@ func (h *APIHandler) createRepo(w http.ResponseWriter, r *http.Request) {
 		CloneURL:      repo.CloneURL,
 		HTMLURL:       repo.HTMLURL,
 		WebhookSecret: repo.WebhookSecret,
-		Command:       repo.Command,
+		Build:         repo.Build,
+		Release:       repo.Release,
 		CreatedAt:     repo.CreatedAt,
 	}
 

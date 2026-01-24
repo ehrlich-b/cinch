@@ -10,7 +10,7 @@ That's it. The config file IS the product experience. Get it wrong, and every us
 
 ## The Constraints
 
-1. **Simplicity** - The whole point is `command = "make ci"`. Don't make it complex.
+1. **Simplicity** - The whole point is `build = "make check"`. Don't make it complex.
 2. **Familiarity** - Developers have opinions. Strong ones.
 3. **No footguns** - YAML's implicit typing has ruined careers.
 4. **Tooling** - Syntax highlighting, validation, IDE support.
@@ -22,7 +22,7 @@ That's it. The config file IS the product experience. Get it wrong, and every us
 ### TOML
 
 ```toml
-command = "make ci"
+build = "make check"
 
 [trigger]
 branches = ["main", "develop"]
@@ -50,7 +50,7 @@ labels = ["linux"]
 ### YAML
 
 ```yaml
-command: make ci
+build: make check
 
 trigger:
   branches:
@@ -84,7 +84,7 @@ runner:
 
 ```json
 {
-  "command": "make ci",
+  "build": "make check",
   "trigger": {
     "branches": ["main", "develop"],
     "pull_requests": true
@@ -113,8 +113,10 @@ runner:
 
 ```jsonc
 {
-  // This is the main CI command
-  command: "make ci",
+  // Build runs on branches and PRs
+  build: "make check",
+  // Release runs on tag pushes (optional)
+  release: "make release",
 
   trigger: {
     branches: ["main", "develop"],
@@ -144,7 +146,7 @@ runner:
 ### Dhall / CUE / Nickel (Configuration Languages)
 
 ```dhall
-{ command = "make ci"
+{ build = "make check"
 , trigger = { branches = ["main"], pull_requests = True }
 }
 ```
@@ -244,8 +246,8 @@ decoder.KnownFields(true)  // Error on unknown fields
 // Post-parse validation
 func validateConfig(c *Config) error {
     // Reject suspicious values that YAML might have mangled
-    if c.Command == "true" || c.Command == "false" {
-        return errors.New("command looks like it was parsed as boolean - quote it")
+    if c.Build == "true" || c.Build == "false" {
+        return errors.New("build looks like it was parsed as boolean - quote it")
     }
     // ... more safety checks
 }
@@ -253,11 +255,14 @@ func validateConfig(c *Config) error {
 
 ### The Config Schema (v0.1)
 
-The v0.1 philosophy: **your Makefile is the pipeline.** Cinch runs one command. Services are the one exception - because starting postgres in a Makefile sucks.
+The v0.1 philosophy: **your Makefile is the pipeline.** Cinch runs two commands: `build` for branches/PRs, and optionally `release` for tags. Services are the one exception to "just use make" - because starting postgres in a Makefile sucks.
 
 ```yaml
-# Required: what to run
-command: make ci
+# Required: what to run on branch pushes and PRs
+build: make check
+
+# Optional: what to run on tag pushes (defaults to build command if not set)
+release: make release
 
 # Optional: which worker(s) run this (fan-out)
 workers: [linux-amd64, linux-arm64]  # creates one job per label, default: any available worker
@@ -277,6 +282,12 @@ services:
   redis:
     image: redis:7-alpine
 ```
+
+**Event mapping:** Cinch maps all forge webhook events to one of two internal event types:
+- `build` - branch pushes, pull requests (future: scheduled builds)
+- `release` - tag pushes
+
+If `release` is not specified, tag pushes run the `build` command. This keeps the config minimal for projects that don't publish releases.
 
 That's the full v0.1 surface. Container is auto-detected (devcontainer > Dockerfile > default image). Artifacts? Your makefile uploads them. Scheduled builds? Push code or wait for v0.2.
 
@@ -322,13 +333,13 @@ What if the config is SO simple it barely needs a file?
 
 ```yaml
 # Minimal: just the command
-command: make ci
+build: make check
 ```
 
 Or even inline in a comment in another file:
 
 ```makefile
-# cinch: make ci
+# cinch: make check
 ```
 
 This is probably too clever. But worth considering for the "zero friction" angle.
@@ -341,10 +352,10 @@ Some users want to run multiple commands:
 
 ```yaml
 # Option A: Shell string (current design)
-command: make lint && make test && make build
+build: make lint && make test && make build
 
 # Option B: Array (explicit)
-command:
+build:
   - make lint
   - make test
   - make build
@@ -352,9 +363,9 @@ command:
 # Option C: Named steps (getting complex...)
 steps:
   - name: lint
-    command: make lint
+    run: make lint
   - name: test
-    command: make test
+    run: make test
 ```
 
 **Recommendation:** Option A (shell string). Keep it simple. Users can put complex logic in their Makefile.
@@ -394,14 +405,14 @@ README and docs should show both formats:
 Create `.cinch.yaml` in your repo root:
 
 \```yaml
-command: make ci
+build: make check
 \```
 
 Or if you prefer JSON, create `.cinch.json`:
 
 \```json
 {
-  "command": "make ci"
+  "build": "make check"
 }
 \```
 ```
@@ -456,7 +467,7 @@ func LoadConfig(repoPath string) (*Config, error) {
    - Pro: No extra file for JS projects
    - Con: Mixing concerns
 
-2. **Should we auto-detect common commands?** (No config = try `make ci`, `npm test`, etc.)
+2. **Should we auto-detect common commands?** (No config = try `make check`, `npm test`, etc.)
    - Pro: Zero config for common cases
    - Con: Surprising behavior
 

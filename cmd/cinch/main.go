@@ -455,7 +455,10 @@ func configValidateCmd() *cobra.Command {
 			}
 
 			fmt.Printf("Valid: %s\n", configFile)
-			fmt.Printf("  command: %s\n", cfg.Command)
+			fmt.Printf("  build: %s\n", cfg.Build)
+			if cfg.Release != "" {
+				fmt.Printf("  release: %s\n", cfg.Release)
+			}
 			if cfg.Timeout != 0 {
 				fmt.Printf("  timeout: %s\n", cfg.Timeout.Duration())
 			}

@@ -1,24 +1,6 @@
-# Cinch Makefile - The canonical example for Go projects using Cinch CI
-#
-# This Makefile demonstrates Cinch's philosophy: your Makefile IS your CI pipeline.
-# One command runs everything. Tag pushes automatically trigger releases.
-#
-# Environment variables provided by Cinch:
-#   CINCH_REF      - Full git ref (refs/heads/main or refs/tags/v1.0.0)
-#   CINCH_BRANCH   - Branch name (empty for tags)
-#   CINCH_TAG      - Tag name (empty for branches)
-#   CINCH_COMMIT   - Git commit SHA
-#   CINCH_FORGE    - Forge type (github, gitlab, forgejo, gitea)
-#   GITHUB_TOKEN   - Installation token for GitHub API (releases, etc.)
+# Cinch Makefile
 
-.PHONY: build test fmt lint check ci release clean web web-deps web-dev dev dev-worker run
-
-# -----------------------------------------------------------------------------
-# CI Entry Point - This is what Cinch runs
-# -----------------------------------------------------------------------------
-
-ci: check
-	@if [ -n "$$CINCH_TAG" ]; then $(MAKE) release; fi
+.PHONY: build test fmt lint check release clean web web-deps web-dev dev dev-worker run
 
 # -----------------------------------------------------------------------------
 # Development
@@ -85,17 +67,20 @@ validate: build-go
 	./bin/cinch config validate
 
 # -----------------------------------------------------------------------------
-# Release - Triggered automatically when CINCH_TAG is set
+# Release (runs on tag push via Cinch CI)
 # -----------------------------------------------------------------------------
 
-# Use CINCH_TAG if set (CI), otherwise fall back to git describe (local)
-VERSION := $(or $(CINCH_TAG),$(shell git describe --tags --always))
+VERSION := $(CINCH_TAG)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 release: web
 	@if [ -z "$$GITHUB_TOKEN" ]; then \
-		echo "Error: GITHUB_TOKEN not set (run via Cinch or set manually)"; \
+		echo "Error: GITHUB_TOKEN not set"; \
+		exit 1; \
+	fi
+	@if [ -z "$(VERSION)" ]; then \
+		echo "Error: CINCH_TAG not set (run via Cinch CI on tag push)"; \
 		exit 1; \
 	fi
 	@echo "Building $(VERSION) for all platforms..."
@@ -109,31 +94,18 @@ release: web
 	done
 	@echo "Creating GitHub release $(VERSION)..."
 	gh release create $(VERSION) dist/* --generate-notes
-	@echo "Release complete: $(VERSION)"
 
 # -----------------------------------------------------------------------------
-# Fly.io Deployment (manual, not part of CI)
+# Fly.io Deployment (manual)
 # -----------------------------------------------------------------------------
 
 FLY_APP := cinch
-
-fly-create:
-	fly apps create $(FLY_APP)
-	fly volumes create cinch_data --size 1 --region iad -a $(FLY_APP) -y
 
 fly-deploy:
 	fly deploy
 
 fly-logs:
 	fly logs -a $(FLY_APP) --no-tail
-
-fly-tail:
-	fly logs -a $(FLY_APP)
-
-fly-status:
-	@fly status -a $(FLY_APP)
-	@echo ""
-	@fly ips list -a $(FLY_APP)
 
 fly-ssh:
 	fly ssh console -a $(FLY_APP)

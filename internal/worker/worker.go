@@ -427,11 +427,17 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	// Load config from repo (overrides server-provided config)
 	command := assign.Config.Command
 	cfg, _, err := config.Load(workDir)
-	if err == nil && cfg.Command != "" {
-		command = cfg.Command
-		w.log.Debug("using command from .cinch.yaml", "command", command)
-	} else if command == "" {
-		command = "make test" // Default fallback
+	if err == nil {
+		// Select build or release based on whether this is a tag push
+		isTag := assign.Repo.Tag != ""
+		configCommand := cfg.CommandForEvent(isTag)
+		if configCommand != "" {
+			command = configCommand
+			w.log.Debug("using command from .cinch.yaml", "command", command, "is_tag", isTag)
+		}
+	}
+	if command == "" {
+		command = "make check" // Default fallback
 		w.log.Debug("using default command", "command", command)
 	}
 

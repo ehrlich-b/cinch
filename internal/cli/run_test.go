@@ -30,7 +30,7 @@ func TestRunBareMetalWithConfig(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create config that specifies bare metal
-	configContent := `command: echo "from config"
+	configContent := `build: echo "from config"
 container: none
 `
 	if err := os.WriteFile(filepath.Join(dir, ".cinch.yaml"), []byte(configContent), 0644); err != nil {
@@ -137,7 +137,7 @@ func TestRunContainerWithServices(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create config with redis service
-	configContent := `command: |
+	configContent := `build: |
   apt-get update -qq && apt-get install -yqq redis-tools > /dev/null
   redis-cli -h redis PING
 services:
@@ -157,10 +157,10 @@ services:
 	}
 }
 
-func TestRunMultilineCommand(t *testing.T) {
+func TestRunMultilineBuild(t *testing.T) {
 	dir := t.TempDir()
 
-	configContent := `command: |
+	configContent := `build: |
   set -e
   echo "line1"
   echo "line2"
