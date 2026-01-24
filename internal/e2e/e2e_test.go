@@ -537,8 +537,14 @@ func TestE2EJobCancellation(t *testing.T) {
 	}
 
 	// Queue job - worker will try to clone and fail (no real repo)
+	repo := &storage.Repo{
+		ID:        "r_1",
+		ForgeType: storage.ForgeTypeGitHub,
+		CloneURL:  "https://github.com/test/repo.git",
+	}
 	dispatcher.Enqueue(&server.QueuedJob{
 		Job:      job,
+		Repo:     repo,
 		CloneURL: "https://github.com/test/repo.git",
 		Branch:   "main",
 		Config:   protocol.JobConfig{Command: "sleep 60"},
