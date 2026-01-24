@@ -58,9 +58,10 @@ func TestGetRepoRoot(t *testing.T) {
 		t.Skipf("not in git repo: %v", err)
 	}
 
-	// Should end in "cinch"
-	if filepath.Base(root) != "cinch" {
-		t.Errorf("repo root = %s, expected to end in 'cinch'", root)
+	// Should return a valid directory that contains .git
+	gitDir := filepath.Join(root, ".git")
+	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+		t.Errorf("repo root %s does not contain .git directory", root)
 	}
 }
 

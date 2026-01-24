@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
 	"os"
@@ -451,12 +452,12 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	env["CINCH_COMMIT"] = assign.Repo.Commit
 	env["CINCH_REPO"] = assign.Repo.CloneURL
 
-	// Execute command
+	// Execute command (stream to both server and local stdout/stderr)
 	executor := &Executor{
 		WorkDir: workDir,
 		Env:     env,
-		Stdout:  streamer.Stdout(),
-		Stderr:  streamer.Stderr(),
+		Stdout:  io.MultiWriter(streamer.Stdout(), os.Stdout),
+		Stderr:  io.MultiWriter(streamer.Stderr(), os.Stderr),
 	}
 
 	exitCode, err := executor.Run(ctx, command)
