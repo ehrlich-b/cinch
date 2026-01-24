@@ -89,7 +89,7 @@ release: web
 		GOOS=$$os GOARCH=$$arch go build -ldflags="$(LDFLAGS)" -o $$output ./cmd/cinch; \
 	done
 	@echo "Creating release $(VERSION)..."
-	cinch release dist/*
+	./dist/cinch-$$(uname -s | tr '[:upper:]' '[:lower:]')-$$(uname -m | sed 's/aarch64/arm64/') release dist/*
 
 # -----------------------------------------------------------------------------
 # Fly.io Deployment (manual)
