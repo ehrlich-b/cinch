@@ -270,12 +270,12 @@ func (h *AuthHandler) handleMe(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]any{"authenticated": false})
+		_ = json.NewEncoder(w).Encode(map[string]any{"authenticated": false})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"authenticated": true,
 		"user":          user,
 	})
@@ -291,7 +291,7 @@ func (h *AuthHandler) RequireAuth(next http.Handler) http.Handler {
 			if strings.HasPrefix(r.URL.Path, "/api/") {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(map[string]string{"error": "authentication required"})
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "authentication required"})
 				return
 			}
 
@@ -613,7 +613,7 @@ func (h *AuthHandler) handleDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"device_code":      deviceCodeStr,
 		"user_code":        userCode,
 		"verification_uri": verificationURI,
@@ -788,7 +788,7 @@ func (h *AuthHandler) handleDeviceToken(w http.ResponseWriter, r *http.Request) 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid_request"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_request"})
 		return
 	}
 
@@ -799,7 +799,7 @@ func (h *AuthHandler) handleDeviceToken(w http.ResponseWriter, r *http.Request) 
 	if !exists {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid_device_code"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_device_code"})
 		return
 	}
 
@@ -811,14 +811,14 @@ func (h *AuthHandler) handleDeviceToken(w http.ResponseWriter, r *http.Request) 
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "expired_token"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "expired_token"})
 		return
 	}
 
 	if !dc.Authorized {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK) // 200 with authorization_pending
-		json.NewEncoder(w).Encode(map[string]string{"error": "authorization_pending"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "authorization_pending"})
 		return
 	}
 
@@ -828,7 +828,7 @@ func (h *AuthHandler) handleDeviceToken(w http.ResponseWriter, r *http.Request) 
 		h.log.Error("failed to create user token", "error", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "server_error"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "server_error"})
 		return
 	}
 
@@ -838,7 +838,7 @@ func (h *AuthHandler) handleDeviceToken(w http.ResponseWriter, r *http.Request) 
 	h.deviceCodesMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"access_token": token,
 		"token_type":   "Bearer",
 		"user":         dc.Username,
