@@ -53,6 +53,7 @@ func main() {
 		workerCmd(),
 		runCmd(),
 		releaseCmd(),
+		installCmd(),
 		statusCmd(),
 		logsCmd(),
 		configCmd(),
@@ -820,6 +821,43 @@ auto-detected from environment variables. Outside of CI, use flags.`,
 	cmd.Flags().BoolVar(&opts.Prerelease, "prerelease", false, "Mark as prerelease")
 
 	return cmd
+}
+
+func installCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "install",
+		Short: "Install or update cinch",
+		Long: `Download and run the cinch install script.
+
+This fetches the latest version from GitHub releases and installs
+all platform binaries to ~/.cinch/bin/.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println("Downloading install script...")
+
+			resp, err := http.Get("https://cinch.sh/install.sh")
+			if err != nil {
+				return fmt.Errorf("fetch install script: %w", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("failed to fetch install script: %s", resp.Status)
+			}
+
+			script, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("read install script: %w", err)
+			}
+
+			// Run the install script
+			shCmd := exec.Command("sh")
+			shCmd.Stdin = strings.NewReader(string(script))
+			shCmd.Stdout = os.Stdout
+			shCmd.Stderr = os.Stderr
+
+			return shCmd.Run()
+		},
+	}
 }
 
 // openBrowser tries to open a URL in the default browser.
