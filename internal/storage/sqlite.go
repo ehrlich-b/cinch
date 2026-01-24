@@ -112,9 +112,11 @@ func (s *SQLiteStorage) migrate() error {
 		}
 	}
 
-	// Add columns to existing jobs tables (ignore errors - columns may already exist)
+	// Add columns to existing tables (ignore errors - columns may already exist)
 	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN installation_id INTEGER")
 	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN check_run_id INTEGER")
+	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN build TEXT NOT NULL DEFAULT 'make check'")
+	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN release TEXT NOT NULL DEFAULT ''")
 
 	return nil
 }
