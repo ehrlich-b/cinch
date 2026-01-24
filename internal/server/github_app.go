@@ -129,7 +129,7 @@ func (h *GitHubAppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	case "ping":
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	default:
 		h.log.Debug("ignoring event", "event", eventType)
 		w.WriteHeader(http.StatusOK)
@@ -288,7 +288,7 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 	h.dispatcher.Enqueue(queuedJob)
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"job_id": job.ID})
+	_ = json.NewEncoder(w).Encode(map[string]string{"job_id": job.ID})
 }
 
 // GetInstallationToken gets or refreshes an installation token.

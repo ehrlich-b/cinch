@@ -367,7 +367,7 @@ func authMiddleware(next http.Handler, auth *server.AuthHandler) http.Handler {
 		if !auth.IsAuthenticated(r) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error":"authentication required"}`))
+			_, _ = w.Write([]byte(`{"error":"authentication required"}`))
 			return
 		}
 
@@ -799,5 +799,5 @@ func openBrowser(url string) {
 		return
 	}
 
-	exec.Command(cmd, cmdArgs...).Start()
+	_ = exec.Command(cmd, cmdArgs...).Start()
 }
