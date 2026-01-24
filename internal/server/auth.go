@@ -438,9 +438,9 @@ func (h *AuthHandler) getJWTSigningKey() []byte {
 		return []byte(secret)
 	}
 
-	// In dev (no secret configured), use weak fallback
-	h.log.Warn("JWT_SECRET not configured - using weak dev fallback")
-	return []byte("dev-jwt-secret-do-not-use-in-prod")
+	// No secret configured - this is a fatal misconfiguration
+	// Panic to prevent the server from running with forgeable tokens
+	panic("FATAL: JWT_SECRET not configured. Set config.JWTSecret or CINCH_JWT_SECRET environment variable.")
 }
 
 // --- OAuth State ---
