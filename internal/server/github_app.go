@@ -270,15 +270,13 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 		job.CheckRunID = &checkRunID
 	}
 
-	// Get clone token for private repos
+	// Get installation token for API access (releases, status, clone for private)
 	var cloneToken string
-	if event.Repository.Private {
-		token, err := h.GetInstallationToken(installationID)
-		if err != nil {
-			h.log.Warn("failed to get clone token for private repo", "error", err)
-		} else {
-			cloneToken = token
-		}
+	token, err := h.GetInstallationToken(installationID)
+	if err != nil {
+		h.log.Warn("failed to get installation token", "error", err)
+	} else {
+		cloneToken = token
 	}
 
 	// Enqueue job (worker will read .cinch.yaml for command)
