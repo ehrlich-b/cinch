@@ -306,16 +306,40 @@ func (h *AuthHandler) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// IsAuthenticated checks if the request has valid auth.
+// IsAuthenticated checks if the request has valid auth (cookie or Bearer token).
 func (h *AuthHandler) IsAuthenticated(r *http.Request) bool {
-	_, ok := h.getAuthFromCookie(r)
-	return ok
+	// Check cookie auth first
+	if _, ok := h.getAuthFromCookie(r); ok {
+		return true
+	}
+
+	// Check Bearer token auth
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if h.ValidateUserToken(token) != "" {
+			return true
+		}
+	}
+
+	return false
 }
 
 // GetUser returns the authenticated username, or empty string.
 func (h *AuthHandler) GetUser(r *http.Request) string {
-	user, _ := h.getAuthFromCookie(r)
-	return user
+	// Check cookie auth first
+	if user, ok := h.getAuthFromCookie(r); ok {
+		return user
+	}
+
+	// Check Bearer token auth
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		return h.ValidateUserToken(token)
+	}
+
+	return ""
 }
 
 // --- Cookie Management ---
