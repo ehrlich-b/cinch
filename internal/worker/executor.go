@@ -25,14 +25,36 @@ type Executor struct {
 // Run executes a command in bare metal (no container).
 // Returns the exit code.
 func (e *Executor) Run(ctx context.Context, command string) (int, error) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	// Don't use CommandContext - we handle cancellation ourselves with process groups
+	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = e.WorkDir
 	cmd.Env = e.buildEnv()
 	cmd.Stdout = e.Stdout
 	cmd.Stderr = e.Stderr
 
-	err := cmd.Run()
-	return exitCode(err), nil
+	// Create a new process group so we can kill all child processes
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	if err := cmd.Start(); err != nil {
+		return 1, err
+	}
+
+	// Wait for either completion or context cancellation
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		return exitCode(err), nil
+	case <-ctx.Done():
+		// Kill the entire process group (negative PID)
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		// Wait for it to actually exit
+		<-done
+		return 137, nil // 128 + 9 (SIGKILL)
+	}
 }
 
 func (e *Executor) buildEnv() []string {
