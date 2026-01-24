@@ -47,6 +47,14 @@ args = append(args, "-v", cinchPath+":/usr/local/bin/cinch:ro")
 
 Now every container job has `cinch` available automatically. No install step needed.
 
+### Architecture Matching
+
+Containers run with `--platform linux/{host_arch}` to ensure native execution (no emulation).
+This means binary injection works automatically - host and container share the same architecture.
+
+**Future:** Multi-arch testing (run amd64 container on arm64 host) would require downloading
+the correct cinch binary for the target architecture. Track in TODO.md.
+
 ## Forge APIs
 
 ### GitHub
