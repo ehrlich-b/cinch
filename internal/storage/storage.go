@@ -125,7 +125,8 @@ type Repo struct {
 	HTMLURL       string
 	WebhookSecret string
 	ForgeToken    string // Token for API calls (status posting, cloning private repos)
-	Command       string // Command to run (e.g., "make test")
+	Build         string // Build command (e.g., "make check") - runs on branches/PRs
+	Release       string // Release command (e.g., "make release") - runs on tags
 	CreatedAt     time.Time
 }
 

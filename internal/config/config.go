@@ -18,8 +18,12 @@ var ErrNoConfig = errors.New("no cinch config file found")
 
 // Config is the parsed cinch configuration.
 type Config struct {
-	// Command is the shell command to run (required).
-	Command string `yaml:"command" toml:"command" json:"command"`
+	// Build is the command to run on branch pushes and PRs (required).
+	Build string `yaml:"build" toml:"build" json:"build"`
+
+	// Release is the command to run on tag pushes (optional).
+	// If not set, tags just run the build command.
+	Release string `yaml:"release" toml:"release" json:"release"`
 
 	// Workers is a list of worker labels to fan-out to.
 	// If empty, runs on any available worker.
@@ -150,13 +154,16 @@ func parseJSON(data []byte, cfg *Config) error {
 
 // Validate checks the config for errors.
 func (c *Config) Validate() error {
-	if c.Command == "" {
-		return errors.New("command is required")
+	if c.Build == "" {
+		return errors.New("build is required")
 	}
 
 	// Check for YAML footguns
-	if c.Command == "true" || c.Command == "false" {
-		return errors.New("command looks like a boolean - did YAML mangle it? Quote your command")
+	if c.Build == "true" || c.Build == "false" {
+		return errors.New("build looks like a boolean - did YAML mangle it? Quote your command")
+	}
+	if c.Release == "true" || c.Release == "false" {
+		return errors.New("release looks like a boolean - did YAML mangle it? Quote your command")
 	}
 
 	// Validate services
@@ -187,4 +194,11 @@ func (c *Config) IsBareMetalContainer() bool {
 	return c.Container == "none"
 }
 
-// test comment Fri Jan 23 20:41:23 EST 2026
+// CommandForEvent returns the appropriate command based on whether this is
+// a tag push (release) or a branch push/PR (build).
+func (c *Config) CommandForEvent(isTag bool) string {
+	if isTag && c.Release != "" {
+		return c.Release
+	}
+	return c.Build
+}

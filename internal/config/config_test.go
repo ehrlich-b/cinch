@@ -9,7 +9,7 @@ import (
 
 func TestLoadYAML(t *testing.T) {
 	dir := t.TempDir()
-	content := `command: make test
+	content := `build: make test
 timeout: 10m
 workers:
   - linux
@@ -26,8 +26,8 @@ workers:
 	if filename != ".cinch.yaml" {
 		t.Errorf("expected .cinch.yaml, got %s", filename)
 	}
-	if cfg.Command != "make test" {
-		t.Errorf("expected 'make test', got %q", cfg.Command)
+	if cfg.Build != "make test" {
+		t.Errorf("expected 'make test', got %q", cfg.Build)
 	}
 	if cfg.Timeout.Duration() != 10*time.Minute {
 		t.Errorf("expected 10m, got %v", cfg.Timeout.Duration())
@@ -39,7 +39,7 @@ workers:
 
 func TestLoadTOML(t *testing.T) {
 	dir := t.TempDir()
-	content := `command = "cargo build"
+	content := `build = "cargo build"
 timeout = "5m"
 `
 	if err := os.WriteFile(filepath.Join(dir, ".cinch.toml"), []byte(content), 0644); err != nil {
@@ -53,8 +53,8 @@ timeout = "5m"
 	if filename != ".cinch.toml" {
 		t.Errorf("expected .cinch.toml, got %s", filename)
 	}
-	if cfg.Command != "cargo build" {
-		t.Errorf("expected 'cargo build', got %q", cfg.Command)
+	if cfg.Build != "cargo build" {
+		t.Errorf("expected 'cargo build', got %q", cfg.Build)
 	}
 	if cfg.Timeout.Duration() != 5*time.Minute {
 		t.Errorf("expected 5m, got %v", cfg.Timeout.Duration())
@@ -63,7 +63,7 @@ timeout = "5m"
 
 func TestLoadJSON(t *testing.T) {
 	dir := t.TempDir()
-	content := `{"command": "npm test", "timeout": "2m"}`
+	content := `{"build": "npm test", "timeout": "2m"}`
 	if err := os.WriteFile(filepath.Join(dir, ".cinch.json"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -75,18 +75,18 @@ func TestLoadJSON(t *testing.T) {
 	if filename != ".cinch.json" {
 		t.Errorf("expected .cinch.json, got %s", filename)
 	}
-	if cfg.Command != "npm test" {
-		t.Errorf("expected 'npm test', got %q", cfg.Command)
+	if cfg.Build != "npm test" {
+		t.Errorf("expected 'npm test', got %q", cfg.Build)
 	}
 }
 
 func TestLoadPriority(t *testing.T) {
 	// .cinch.yaml should take priority over cinch.yaml
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".cinch.yaml"), []byte("command: first"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".cinch.yaml"), []byte("build: first"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "cinch.yaml"), []byte("command: second"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "cinch.yaml"), []byte("build: second"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -97,14 +97,14 @@ func TestLoadPriority(t *testing.T) {
 	if filename != ".cinch.yaml" {
 		t.Errorf("expected .cinch.yaml priority, got %s", filename)
 	}
-	if cfg.Command != "first" {
-		t.Errorf("expected 'first', got %q", cfg.Command)
+	if cfg.Build != "first" {
+		t.Errorf("expected 'first', got %q", cfg.Build)
 	}
 }
 
 func TestLoadWithServices(t *testing.T) {
 	dir := t.TempDir()
-	content := `command: pytest
+	content := `build: pytest
 services:
   postgres:
     image: postgres:16-alpine
@@ -152,25 +152,32 @@ services:
 	}
 }
 
-func TestValidateNoCommand(t *testing.T) {
+func TestValidateNoBuild(t *testing.T) {
 	cfg := &Config{}
 	if err := cfg.Validate(); err == nil {
-		t.Error("expected error for missing command")
+		t.Error("expected error for missing build")
 	}
 }
 
 func TestValidateBooleanFootgun(t *testing.T) {
 	// YAML will parse `on` or `yes` as true
-	cfg := &Config{Command: "true"}
+	cfg := &Config{Build: "true"}
 	err := cfg.Validate()
 	if err == nil {
 		t.Error("expected error for boolean footgun")
+	}
+
+	// Also test release field
+	cfg = &Config{Build: "make test", Release: "true"}
+	err = cfg.Validate()
+	if err == nil {
+		t.Error("expected error for boolean footgun in release")
 	}
 }
 
 func TestValidateServiceNoImage(t *testing.T) {
 	cfg := &Config{
-		Command: "test",
+		Build: "test",
 		Services: map[string]Service{
 			"db": {Image: ""},
 		},
@@ -182,7 +189,7 @@ func TestValidateServiceNoImage(t *testing.T) {
 
 func TestDefaults(t *testing.T) {
 	dir := t.TempDir()
-	content := `command: test`
+	content := `build: test`
 	if err := os.WriteFile(filepath.Join(dir, ".cinch.yaml"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -224,9 +231,9 @@ func TestIsBareMetalContainer(t *testing.T) {
 	}
 }
 
-func TestMultilineCommand(t *testing.T) {
+func TestMultilineBuild(t *testing.T) {
 	dir := t.TempDir()
-	content := `command: |
+	content := `build: |
   set -e
   make build
   make test
@@ -241,7 +248,54 @@ func TestMultilineCommand(t *testing.T) {
 	}
 
 	expected := "set -e\nmake build\nmake test\n"
-	if cfg.Command != expected {
-		t.Errorf("expected multiline command, got %q", cfg.Command)
+	if cfg.Build != expected {
+		t.Errorf("expected multiline build, got %q", cfg.Build)
+	}
+}
+
+func TestCommandForEvent(t *testing.T) {
+	tests := []struct {
+		name    string
+		build   string
+		release string
+		isTag   bool
+		want    string
+	}{
+		{"branch with no release", "make check", "", false, "make check"},
+		{"branch with release", "make check", "make release", false, "make check"},
+		{"tag with no release", "make check", "", true, "make check"},
+		{"tag with release", "make check", "make release", true, "make release"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{Build: tt.build, Release: tt.release}
+			got := cfg.CommandForEvent(tt.isTag)
+			if got != tt.want {
+				t.Errorf("CommandForEvent(%v) = %q, want %q", tt.isTag, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadWithRelease(t *testing.T) {
+	dir := t.TempDir()
+	content := `build: make check
+release: make release
+`
+	if err := os.WriteFile(filepath.Join(dir, ".cinch.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Build != "make check" {
+		t.Errorf("expected 'make check', got %q", cfg.Build)
+	}
+	if cfg.Release != "make release" {
+		t.Errorf("expected 'make release', got %q", cfg.Release)
 	}
 }

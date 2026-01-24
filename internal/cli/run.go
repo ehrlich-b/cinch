@@ -56,9 +56,9 @@ func Run(opts RunOptions) int {
 		cfg = loadedCfg
 		fmt.Printf("Loaded config from %s\n", configFile)
 
-		// Use command from config if not provided
+		// Use build command from config if not provided
 		if command == "" {
-			command = cfg.Command
+			command = cfg.Build
 		}
 
 		// Check if config specifies bare metal
@@ -74,7 +74,7 @@ func Run(opts RunOptions) int {
 	if command == "" {
 		fmt.Fprintln(os.Stderr, "Error: no command provided and no config file found")
 		fmt.Fprintln(os.Stderr, "Usage: cinch run \"make test\"")
-		fmt.Fprintln(os.Stderr, "   or: create .cinch.yaml with 'command: make test'")
+		fmt.Fprintln(os.Stderr, "   or: create .cinch.yaml with 'build: make test'")
 		return 1
 	}
 

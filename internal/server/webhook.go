@@ -141,6 +141,12 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Don't fail the webhook - job is already created
 	}
 
+	// Select command based on event type: release for tags, build for branches/PRs
+	command := repo.Build
+	if event.Tag != "" && repo.Release != "" {
+		command = repo.Release
+	}
+
 	// Queue job for dispatch
 	h.dispatcher.Enqueue(&QueuedJob{
 		Job:      job,
@@ -151,7 +157,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Branch:   event.Branch,
 		Tag:      event.Tag,
 		Config: protocol.JobConfig{
-			Command: repo.Command,
+			Command: command,
 		},
 		CloneToken: repo.ForgeToken,
 	})

@@ -268,7 +268,7 @@ func TestAPICreateRepo(t *testing.T) {
 		"clone_url": "https://github.com/myorg/myrepo.git",
 		"html_url": "https://github.com/myorg/myrepo",
 		"forge_token": "ghp_xxxx",
-		"command": "make test"
+		"build": "make check"
 	}`
 
 	req := httptest.NewRequest("POST", "/api/repos", strings.NewReader(body))
@@ -289,8 +289,8 @@ func TestAPICreateRepo(t *testing.T) {
 	if repo.Name != "myrepo" {
 		t.Errorf("Name = %s, want myrepo", repo.Name)
 	}
-	if repo.Command != "make test" {
-		t.Errorf("Command = %s, want make test", repo.Command)
+	if repo.Build != "make check" {
+		t.Errorf("Build = %s, want make check", repo.Build)
 	}
 	if repo.WebhookSecret == "" {
 		t.Error("WebhookSecret should be generated")
