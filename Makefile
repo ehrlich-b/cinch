@@ -1,4 +1,4 @@
-.PHONY: build build-go test fmt lint clean web web-deps web-dev dev dev-worker run check fly-create fly-deploy fly-logs fly-tail fly-status fly-ssh
+.PHONY: build build-go test fmt lint clean web web-deps web-dev dev dev-worker run check release fly-create fly-deploy fly-logs fly-tail fly-status fly-ssh
 
 # Build the cinch binary (includes web assets)
 build: web build-go
@@ -64,6 +64,36 @@ validate: build-go
 # Run cinch run using config file
 ci: build-go
 	./bin/cinch run
+
+# -------- Release --------
+#
+# Cross-compile and upload to GitHub Releases.
+# Requires: gh CLI authenticated, git tag on HEAD
+#
+# Usage: git tag v0.1.0 && make release
+
+VERSION := $(shell git describe --tags --always)
+LDFLAGS := -s -w -X main.version=$(VERSION)
+PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+
+release: web
+	@if ! git describe --tags --exact-match HEAD 2>/dev/null; then \
+		echo "Error: HEAD is not tagged. Run: git tag vX.Y.Z"; \
+		exit 1; \
+	fi
+	@echo "Building $(VERSION) for all platforms..."
+	@mkdir -p dist
+	@for platform in $(PLATFORMS); do \
+		os=$${platform%/*}; \
+		arch=$${platform#*/}; \
+		output="dist/cinch-$$os-$$arch"; \
+		echo "  Building $$os/$$arch..."; \
+		GOOS=$$os GOARCH=$$arch go build -ldflags="$(LDFLAGS)" -o $$output ./cmd/cinch; \
+	done
+	@echo "Creating GitHub release $(VERSION)..."
+	gh release create $(VERSION) dist/* --generate-notes
+	@echo "Done! Users can install with:"
+	@echo "  curl -fsSL https://raw.githubusercontent.com/ehrlich-b/cinch/main/install.sh | sh"
 
 # -------- Fly.io Deployment --------
 #
