@@ -179,14 +179,18 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 		return
 	}
 
-	// Skip if not a branch push
-	if !strings.HasPrefix(event.Ref, "refs/heads/") {
-		h.log.Debug("ignoring non-branch push", "ref", event.Ref)
+	// Parse ref to determine if branch or tag
+	var branch, tag string
+	if strings.HasPrefix(event.Ref, "refs/tags/") {
+		tag = strings.TrimPrefix(event.Ref, "refs/tags/")
+	} else if strings.HasPrefix(event.Ref, "refs/heads/") {
+		branch = strings.TrimPrefix(event.Ref, "refs/heads/")
+	} else {
+		h.log.Debug("ignoring unknown ref type", "ref", event.Ref)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	branch := strings.TrimPrefix(event.Ref, "refs/heads/")
 	commit := event.After
 
 	// Skip zero commit (branch deletion)
@@ -249,7 +253,7 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 	h.log.Info("job created",
 		"job_id", job.ID,
 		"repo", event.Repository.FullName,
-		"branch", branch,
+		"ref", event.Ref,
 		"commit", commit[:8],
 	)
 
@@ -281,7 +285,9 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 		Job:            job,
 		Repo:           repo,
 		CloneURL:       repo.CloneURL,
+		Ref:            event.Ref,
 		Branch:         branch,
+		Tag:            tag,
 		CloneToken:     cloneToken,
 		InstallationID: installationID,
 	}
