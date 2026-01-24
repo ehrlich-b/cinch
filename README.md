@@ -98,3 +98,4 @@ See `CLAUDE.md` for architecture details.
 ## License
 
 MIT
+# Cinch CI
