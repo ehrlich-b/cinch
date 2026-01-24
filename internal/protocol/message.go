@@ -104,8 +104,10 @@ type JobRepo struct {
 	CloneURL   string `json:"clone_url"`
 	CloneToken string `json:"clone_token,omitempty"`
 	Commit     string `json:"commit"`
-	Branch     string `json:"branch"`
-	ForgeType  string `json:"forge_type"` // github, gitlab, forgejo, gitea
+	Ref        string `json:"ref"`              // Full ref (refs/heads/main or refs/tags/v1.0.0)
+	Branch     string `json:"branch,omitempty"` // Branch name (empty for tag pushes)
+	Tag        string `json:"tag,omitempty"`    // Tag name (empty for branch pushes)
+	ForgeType  string `json:"forge_type"`       // github, gitlab, forgejo, gitea
 	IsPR       bool   `json:"is_pr"`
 	PRNumber   int    `json:"pr_number,omitempty"`
 }

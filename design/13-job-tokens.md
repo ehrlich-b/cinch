@@ -188,12 +188,16 @@ Always set, regardless of forge type.
 Every Cinch job gets:
 
 ```bash
-# Cinch-specific
+# Git context
+CINCH_REF=refs/heads/main   # Full ref (or refs/tags/v1.0.0)
+CINCH_BRANCH=main           # Branch name (empty for tags)
+CINCH_TAG=                  # Tag name (empty for branches)
+CINCH_COMMIT=abc1234567890  # Commit SHA
+
+# Job context
 CINCH_JOB_ID=j_abc123
 CINCH_REPO=owner/repo
-CINCH_BRANCH=main
-CINCH_COMMIT=abc1234567890
-CINCH_FORGE=github  # or gitlab, forgejo, gitea
+CINCH_FORGE=github          # or gitlab, forgejo, gitea
 
 # Forge token (for API access)
 GITHUB_TOKEN=ghs_xxx        # GitHub
@@ -205,6 +209,23 @@ CINCH_FORGE_TOKEN=xxx       # Always set (same as above)
 # https://x-access-token:TOKEN@github.com/owner/repo.git
 ```
 
+### Tag Pushes
+
+When you push a tag (e.g., `git push --tags`), the ref is `refs/tags/v1.0.0`:
+
+```bash
+CINCH_REF=refs/tags/v1.0.0
+CINCH_BRANCH=               # Empty for tags
+CINCH_TAG=v1.0.0            # Tag name
+```
+
+Your Makefile can use this to decide what to do:
+
+```makefile
+ci: check
+	@if [ -n "$$CINCH_TAG" ]; then $(MAKE) release; fi
+```
+
 ## Why This Matters
 
 The whole point of Cinch is: **your Makefile is the pipeline**.
@@ -214,15 +235,23 @@ If your Makefile works locally with a GITHUB_TOKEN, it should work identically o
 This is how Cinch releases itself:
 
 ```yaml
-# .cinch.yaml (Cinch's own config)
-command: make release
+# .cinch.yaml
+command: make ci
+timeout: 15m
 ```
 
 ```makefile
-# Cinch's Makefile
-release:
-    go build ...
-    gh release create $(VERSION) dist/*
+# Cinch's Makefile - CI entry point
+ci: check
+	@if [ -n "$$CINCH_TAG" ]; then $(MAKE) release; fi
+
+# Tests + lint run on every push
+check: fmt test lint
+
+# Release only runs on tag pushes
+release: web
+	gh release create $(VERSION) dist/* --generate-notes
 ```
 
+Every push runs `make ci` which runs `check`. Tag pushes also run `release`.
 Cinch builds Cinch. Same tools, same env vars, your hardware.

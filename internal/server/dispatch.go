@@ -35,7 +35,9 @@ type QueuedJob struct {
 	Labels         []string
 	Config         protocol.JobConfig // Command, env vars, etc.
 	CloneURL       string             // Clone URL
-	Branch         string             // Branch to checkout
+	Ref            string             // Full ref (refs/heads/main or refs/tags/v1.0.0)
+	Branch         string             // Branch to checkout (empty for tags)
+	Tag            string             // Tag name (empty for branches)
 	CloneToken     string             // Token for cloning private repos
 	Forge          interface{}        // Forge implementation (for status posting)
 	InstallationID int64              // GitHub App installation ID
@@ -154,7 +156,9 @@ func (d *Dispatcher) tryAssign(qj *QueuedJob) bool {
 		JobID: qj.Job.ID,
 		Repo: protocol.JobRepo{
 			CloneURL:   qj.CloneURL,
+			Ref:        qj.Ref,
 			Branch:     qj.Branch,
+			Tag:        qj.Tag,
 			Commit:     qj.Job.Commit,
 			CloneToken: qj.CloneToken,
 			ForgeType:  string(qj.Repo.ForgeType),

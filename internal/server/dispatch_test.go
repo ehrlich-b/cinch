@@ -49,6 +49,7 @@ func TestDispatcherEnqueue(t *testing.T) {
 		Labels:   []string{"linux"},
 		Config:   protocol.JobConfig{Command: "make test"},
 		CloneURL: "https://github.com/test/repo.git",
+		Ref:      "refs/heads/main",
 		Branch:   "main",
 	}
 
@@ -132,6 +133,7 @@ func TestDispatcherAssignment(t *testing.T) {
 		Labels:   []string{"linux"},
 		Config:   protocol.JobConfig{Command: "make test"},
 		CloneURL: "https://github.com/test/repo.git",
+		Ref:      "refs/heads/main",
 		Branch:   "main",
 	}
 
@@ -208,6 +210,7 @@ func TestDispatcherNoMatchingWorker(t *testing.T) {
 		Repo:   repo,
 		Labels: []string{"windows"},
 		Config: protocol.JobConfig{Command: "make test"},
+		Ref:    "refs/heads/main",
 	}
 
 	dispatcher.Enqueue(queued)
