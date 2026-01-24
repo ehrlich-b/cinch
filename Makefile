@@ -88,7 +88,8 @@ validate: build-go
 # Release - Triggered automatically when CINCH_TAG is set
 # -----------------------------------------------------------------------------
 
-VERSION := $(shell git describe --tags --always)
+# Use CINCH_TAG if set (CI), otherwise fall back to git describe (local)
+VERSION := $(or $(CINCH_TAG),$(shell git describe --tags --always))
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
