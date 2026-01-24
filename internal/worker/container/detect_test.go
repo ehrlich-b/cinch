@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/ehrlich-b/cinch/internal/config"
 )
 
 func TestDetectImageDefault(t *testing.T) {
@@ -275,5 +277,199 @@ func TestDetectImagePriority_DevcontainerDockerfile(t *testing.T) {
 	// .devcontainer/Dockerfile should win
 	if source.Dockerfile != devDockerfile {
 		t.Errorf("expected devcontainer Dockerfile to take priority, got %q", source.Dockerfile)
+	}
+}
+
+// Tests for ResolveContainer (config-driven resolution)
+
+func TestResolveContainer_ExplicitImage(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{
+		Build: "test",
+		Image: "node:20",
+	}
+
+	source, err := ResolveContainer(cfg, dir)
+	if err != nil {
+		t.Fatalf("ResolveContainer failed: %v", err)
+	}
+	if source.Type != "image" {
+		t.Errorf("expected type 'image', got %q", source.Type)
+	}
+	if source.Image != "node:20" {
+		t.Errorf("expected 'node:20', got %q", source.Image)
+	}
+}
+
+func TestResolveContainer_ExplicitDockerfile(t *testing.T) {
+	dir := t.TempDir()
+	dockerDir := filepath.Join(dir, "docker")
+	if err := os.MkdirAll(dockerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	dockerfile := filepath.Join(dockerDir, "Dockerfile.ci")
+	if err := os.WriteFile(dockerfile, []byte("FROM alpine"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Build:      "test",
+		Dockerfile: "docker/Dockerfile.ci",
+	}
+
+	source, err := ResolveContainer(cfg, dir)
+	if err != nil {
+		t.Fatalf("ResolveContainer failed: %v", err)
+	}
+	if source.Type != "dockerfile" {
+		t.Errorf("expected type 'dockerfile', got %q", source.Type)
+	}
+	if source.Dockerfile != dockerfile {
+		t.Errorf("expected dockerfile %q, got %q", dockerfile, source.Dockerfile)
+	}
+}
+
+func TestResolveContainer_BareMetal(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{
+		Build:     "test",
+		Container: "none",
+	}
+
+	source, err := ResolveContainer(cfg, dir)
+	if err != nil {
+		t.Fatalf("ResolveContainer failed: %v", err)
+	}
+	if source.Type != "bare-metal" {
+		t.Errorf("expected type 'bare-metal', got %q", source.Type)
+	}
+}
+
+func TestResolveContainer_DevcontainerDisabled(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{
+		Build: "test",
+		Devcontainer: config.DevcontainerOption{
+			Disabled: true,
+			IsSet:    true,
+		},
+	}
+
+	source, err := ResolveContainer(cfg, dir)
+	if err != nil {
+		t.Fatalf("ResolveContainer failed: %v", err)
+	}
+	if source.Type != "image" {
+		t.Errorf("expected type 'image', got %q", source.Type)
+	}
+	if source.Image != DefaultImage {
+		t.Errorf("expected default image %q, got %q", DefaultImage, source.Image)
+	}
+}
+
+func TestResolveContainer_DevcontainerDefault(t *testing.T) {
+	dir := t.TempDir()
+	devcontainerDir := filepath.Join(dir, ".devcontainer")
+	if err := os.MkdirAll(devcontainerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	jsonFile := filepath.Join(devcontainerDir, "devcontainer.json")
+	content := `{"image": "mcr.microsoft.com/devcontainers/go:1.21"}`
+	if err := os.WriteFile(jsonFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Build: "test",
+		// No devcontainer option set, should use default path
+	}
+
+	source, err := ResolveContainer(cfg, dir)
+	if err != nil {
+		t.Fatalf("ResolveContainer failed: %v", err)
+	}
+	if source.Type != "devcontainer" {
+		t.Errorf("expected type 'devcontainer', got %q", source.Type)
+	}
+	if source.Image != "mcr.microsoft.com/devcontainers/go:1.21" {
+		t.Errorf("expected devcontainer image, got %q", source.Image)
+	}
+}
+
+func TestResolveContainer_DevcontainerCustomPath(t *testing.T) {
+	dir := t.TempDir()
+	customDir := filepath.Join(dir, "custom")
+	if err := os.MkdirAll(customDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	jsonFile := filepath.Join(customDir, "devcontainer.json")
+	content := `{"image": "python:3.11"}`
+	if err := os.WriteFile(jsonFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Build: "test",
+		Devcontainer: config.DevcontainerOption{
+			Path:  "custom/devcontainer.json",
+			IsSet: true,
+		},
+	}
+
+	source, err := ResolveContainer(cfg, dir)
+	if err != nil {
+		t.Fatalf("ResolveContainer failed: %v", err)
+	}
+	if source.Type != "devcontainer" {
+		t.Errorf("expected type 'devcontainer', got %q", source.Type)
+	}
+	if source.Image != "python:3.11" {
+		t.Errorf("expected python:3.11, got %q", source.Image)
+	}
+}
+
+func TestResolveContainer_NoDevcontainer_DefaultImage(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{
+		Build: "test",
+		// No devcontainer.json exists, no config options
+	}
+
+	source, err := ResolveContainer(cfg, dir)
+	if err != nil {
+		t.Fatalf("ResolveContainer failed: %v", err)
+	}
+	if source.Type != "image" {
+		t.Errorf("expected type 'image', got %q", source.Type)
+	}
+	if source.Image != DefaultImage {
+		t.Errorf("expected default image %q, got %q", DefaultImage, source.Image)
+	}
+}
+
+func TestResolveContainer_ImageTakesPriority(t *testing.T) {
+	// Even if devcontainer.json exists, explicit image: should win
+	dir := t.TempDir()
+	devcontainerDir := filepath.Join(dir, ".devcontainer")
+	if err := os.MkdirAll(devcontainerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	jsonFile := filepath.Join(devcontainerDir, "devcontainer.json")
+	content := `{"image": "should-not-use"}`
+	if err := os.WriteFile(jsonFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Build: "test",
+		Image: "explicit:latest",
+	}
+
+	source, err := ResolveContainer(cfg, dir)
+	if err != nil {
+		t.Fatalf("ResolveContainer failed: %v", err)
+	}
+	if source.Image != "explicit:latest" {
+		t.Errorf("expected explicit image to take priority, got %q", source.Image)
 	}
 }

@@ -1,560 +1,292 @@
-# Containerization Deep Dive
+# Containerization
 
-## The Current Gap
+## Philosophy
 
-The design docs treat containerization as an afterthought: a `--docker` flag on the worker for "untrusted code." But this is backwards.
+**The Dockerfile is the config.**
 
-**Reality check:** Most CI users don't want builds running on bare metal. They want:
-- Reproducibility (same environment every time)
-- Isolation (builds can't mess up the host)
-- Clean state (no "works on my machine" drift)
+Cinch's job is simple:
+1. Figure out what container to use
+2. Run your command inside it
 
-The README pitch about "your cache is already warm" is compelling for certain workflows, but **containerization should be the default**, with bare metal as the escape hatch for those who truly want it.
+That's it. No `memory:` limits. No `cache:` directories. No `artifacts:` extraction. If you need something in your CI environment, put it in your Dockerfile.
 
-## The Devcontainer Insight
+## Container Resolution
 
-Here's the killer feature hiding in plain sight:
-
-**Most projects already have a `.devcontainer/` or `Dockerfile` that defines their build environment.**
-
-Instead of asking users to:
-1. Configure their CI environment separately
-2. Install tools on the worker machine
-3. Hope the worker matches their dev environment
-
-We can just:
-1. Use the devcontainer/Dockerfile that's already in their repo
-2. Build once, reuse across builds
-3. Guarantee "if it builds locally in the devcontainer, it builds in CI"
-
-```yaml
-# .cinch.yaml - the dream
-build: make check
-
-# That's it. We auto-detect and use .devcontainer/
-```
-
-## Execution Modes
-
-### Mode 1: Auto-Container (Default)
+Cinch resolves the container in priority order:
 
 ```yaml
 # .cinch.yaml
-build: make check
-# container: auto  (implicit default)
+
+build: make test
+
+# Container options (pick one, or use defaults):
+image: node:20                                    # Pre-built image, no build step
+dockerfile: docker/Dockerfile.ci                  # Build this Dockerfile
+devcontainer: ./.devcontainer/devcontainer.json   # Parse this JSON (DEFAULT)
+container: none                                   # Bare metal escape hatch
 ```
 
-Discovery order:
-1. `.devcontainer/devcontainer.json` → use that image/Dockerfile
-2. `.devcontainer/Dockerfile` → build and use
-3. `Dockerfile` or `Dockerfile.ci` in repo root → build and use
-4. Fall back to `cinch-builder:latest` (our minimal image)
+| Option | What it does |
+|--------|--------------|
+| `image:` | Use this pre-built image directly (e.g., `node:20`, `python:3.11`) |
+| `dockerfile:` | Build this Dockerfile and use the resulting image |
+| `devcontainer:` | Parse this JSON file for `image` or `build.dockerfile` |
+| `container: none` | Run directly on host (requires worker to allow it) |
 
-### Mode 2: Explicit Container
+**Default behavior:** `devcontainer: ./.devcontainer/devcontainer.json`
+
+If you specify nothing, we look for a devcontainer.json and parse it. This makes the "magic" explicit and shut-offable:
 
 ```yaml
-# .cinch.yaml
+# Disable devcontainer auto-detection, use ubuntu:22.04
+devcontainer: false
+```
+
+## The 80% Case
+
+Most projects either have a devcontainer or just need a standard base image:
+
+```yaml
+# Project with devcontainer - zero container config needed
+build: make test
+```
+
+```yaml
+# Project with no containers - just specify the image
 build: npm test
-
-container:
-  image: node:20-alpine
-  # OR
-  dockerfile: ./docker/Dockerfile.ci
+image: node:20
 ```
 
-### Mode 3: Bare Metal (Opt-in)
+Done. No Dockerfile needed for simple cases.
+
+## The 20% Case: Custom Dockerfile
+
+For projects that need a CI-specific environment:
+
+```dockerfile
+# docker/Dockerfile.ci
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    nodejs \
+    npm
+
+# All your CI "config" lives here.
+```
 
 ```yaml
 # .cinch.yaml
-build: make check
-
-container: none  # Explicit "run on host"
+build: make test
+dockerfile: docker/Dockerfile.ci
 ```
 
-Only use this when you:
-- Need GPU access that Docker can't provide
-- Have massive caches that can't be mounted
-- Trust the code completely
+**All complex configuration belongs in the Dockerfile.** Need specific Node version? Put it in the Dockerfile. Need postgres client? Put it in the Dockerfile.
 
-## The Caching Problem (And Solutions)
+## devcontainer.json Parsing
 
-### Problem: Containers = Cold Cache Every Time?
+When `devcontainer:` points to a JSON file (the default), we parse it for:
 
-If every build starts with a fresh container, we lose the "warm cache" advantage. `npm install` downloads everything. `cargo build` recompiles from scratch. This is the GitHub Actions experience we're trying to avoid.
+```json
+// Option A: Pre-built image
+{"image": "node:20"}
 
-### Solution: Persistent Cache Volumes
+// Option B: Build a Dockerfile
+{"build": {"dockerfile": "Dockerfile"}}
 
-Workers maintain persistent volumes that get mounted into every container:
-
-```
-Worker host filesystem:
-~/.cinch/
-├── cache/
-│   ├── npm/           # Mounted as ~/.npm in container
-│   ├── cargo/         # Mounted as ~/.cargo in container
-│   ├── pip/           # Mounted as ~/.cache/pip in container
-│   ├── go/            # Mounted as ~/go in container
-│   └── custom/        # User-defined caches
-├── images/            # Cached container images
-└── builds/            # Working directories (ephemeral)
+// Option C: Legacy field
+{"dockerFile": "Dockerfile"}
 ```
 
-### How It Works
+**What we support:**
+- `image` → use directly
+- `build.dockerfile` → build it (relative to devcontainer.json location)
+- `dockerFile` → legacy field, same as above
 
-```go
-// internal/worker/container/mounts.go
+**What we ignore:**
+- `features` - requires devcontainer CLI
+- `postCreateCommand` - interactive setup
+- `mounts`, `runArgs`, `capabilities` - too complex
+- Everything else
 
-// Standard cache mounts - auto-detected
-var defaultCacheMounts = []Mount{
-    // Node.js
-    {Host: "~/.cinch/cache/npm", Container: "/root/.npm"},
-    {Host: "~/.cinch/cache/npm", Container: "/home/node/.npm"},
+If the devcontainer.json uses features or other unsupported options, users should either:
+1. Add a Dockerfile that bakes in what they need
+2. Specify `image:` or `dockerfile:` explicitly in .cinch.yaml
 
-    // Rust
-    {Host: "~/.cinch/cache/cargo/registry", Container: "/root/.cargo/registry"},
-    {Host: "~/.cinch/cache/cargo/git", Container: "/root/.cargo/git"},
+## Resolution Flow
 
-    // Go
-    {Host: "~/.cinch/cache/go/pkg", Container: "/go/pkg"},
-
-    // Python
-    {Host: "~/.cinch/cache/pip", Container: "/root/.cache/pip"},
-
-    // Generic
-    {Host: "~/.cinch/cache/ccache", Container: "/root/.ccache"},
-}
+```
+.cinch.yaml parsed
+       │
+       ▼
+┌─────────────────────────────────────────────────────┐
+│ image: specified?                                   │
+│   YES → use that image directly                     │
+│                                                     │
+│ dockerfile: specified?                              │
+│   YES → build that Dockerfile                       │
+│                                                     │
+│ container: none?                                    │
+│   YES → run bare metal (if worker allows)           │
+│                                                     │
+│ devcontainer: false?                                │
+│   YES → use ubuntu:22.04                            │
+│                                                     │
+│ devcontainer: path (default .devcontainer/...)      │
+│   File exists?                                      │
+│     YES → parse JSON:                               │
+│       - has "image" → use it                        │
+│       - has "build.dockerfile" → build it           │
+│       - has "dockerFile" → build it                 │
+│       - else → error: can't determine image         │
+│     NO → use ubuntu:22.04                           │
+└─────────────────────────────────────────────────────┘
 ```
 
-### User-Defined Caches
+## Artifacts: Your Problem
+
+**Cinch does not extract artifacts from containers.**
+
+Your build command publishes its own artifacts:
 
 ```yaml
-# .cinch.yaml
-build: make check
-
-cache:
-  # Named caches that persist across builds
-  - name: node_modules
-    path: ./node_modules
-  - name: build-output
-    path: ./dist
+release: make release
 ```
 
-These get stored at `~/.cinch/cache/custom/{repo-hash}/{cache-name}/` on the worker.
-
-### Result
-
-First build: `npm install` downloads everything (cached for next time)
-Second build: `npm install` is instant (node_modules preserved)
-
-**We get the best of both worlds:** container isolation + warm caches.
-
-## Container Reuse Strategy
-
-### Question: Fresh Container Per Build, or Reuse?
-
-**Option A: Fresh container every time**
-- Pros: Clean state guaranteed, no drift
-- Cons: Container startup overhead (1-5 seconds)
-
-**Option B: Keep container running, exec into it**
-- Pros: Instant job start
-- Cons: State can leak between builds, cleanup complexity
-
-**Recommendation: Fresh container with image caching**
-
-```
-Build flow:
-1. Check if container image exists locally → use it
-2. If not, pull/build image → cache it
-3. Start fresh container with cache mounts
-4. Run command
-5. Stop and remove container (volumes persist)
+```makefile
+release:
+    go build -o myapp ./cmd/myapp
+    gh release create $(VERSION) myapp  # YOU upload
 ```
 
-The image caching means "fresh container" is fast (sub-second after first build), while volumes preserve caches across builds.
-
-### Devcontainer Image Caching
-
-For repos with devcontainers:
-
-```go
-func getContainerImage(repo *Repo, commit string) (string, error) {
-    // Hash the devcontainer config
-    configPath := filepath.Join(repo.Path, ".devcontainer/devcontainer.json")
-    configHash := hashFile(configPath)
-
-    imageName := fmt.Sprintf("cinch-dev-%s:%s", repo.ID, configHash[:12])
-
-    // Check if we already built this
-    if imageExists(imageName) {
-        return imageName, nil
-    }
-
-    // Build and tag
-    return buildDevcontainer(repo.Path, imageName)
-}
-```
-
-The image is rebuilt only when devcontainer config changes, not every build.
-
-## Artifact Extraction
-
-### Problem: How Do We Get Stuff Out of the Container?
-
-Build artifacts (binaries, test reports, coverage) are created inside the container. We need to get them out.
-
-### Solution 1: Output Directory Mount
+For checks/PRs, you just need pass/fail:
 
 ```yaml
-# .cinch.yaml
-build: make check
-
-output:
-  path: ./artifacts
+build: make test  # Exit code 0 = green, non-zero = red
 ```
 
-```go
-// Mount strategy
-mounts := []Mount{
-    // Source code (read-only where possible)
-    {Host: buildDir, Container: "/workspace", ReadOnly: false},
+## Caching
 
-    // Output directory (survives container death)
-    {Host: outputDir, Container: "/workspace/artifacts", ReadOnly: false},
-}
+Caching is handled at the worker level via Docker's build cache. No repo config needed.
+
+For faster dependency installation, use standard Docker layer caching:
+
+```dockerfile
+FROM node:20
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
 ```
 
-After build completes, `outputDir` on host contains whatever the build put in `./artifacts`.
+## Container Runtime Detection
 
-### Solution 2: Explicit Copy-Out
+### Fail, Don't Fall Back
+
+If no container runtime is available, we **fail loudly**. We do NOT silently run on bare metal.
+
+### Supported Runtimes
+
+| Runtime | Detection |
+|---------|-----------|
+| Docker Desktop | `docker info` |
+| Colima | `docker info` |
+| OrbStack | `docker info` |
+| Podman | `podman info` |
+| Rancher Desktop | `docker info` |
+
+All Docker-compatible runtimes expose the `docker` CLI.
+
+### Worker Startup
+
+```
+$ cinch worker start
+cinch worker v0.1.0
+  Runtime: docker (colima) v28.4.0
+
+Connecting to server...
+```
+
+```
+$ cinch worker start  (no runtime)
+ERROR: No container runtime found.
+
+Install one of:
+  macOS:   brew install colima && colima start
+  Linux:   apt install docker.io
+  Windows: Install Docker Desktop
+
+Or use --bare-metal if you know what you're doing.
+```
+
+## Bare Metal Escape Hatch
 
 ```yaml
-# .cinch.yaml
-build: make check
-
-artifacts:
-  - path: ./dist/app
-    name: app-binary
-  - path: ./coverage.xml
-    name: coverage-report
+build: make test
+container: none
 ```
 
-```go
-func extractArtifacts(containerID string, artifacts []Artifact) error {
-    for _, a := range artifacts {
-        // docker cp container:/workspace/path /host/path
-        cmd := exec.Command("docker", "cp",
-            fmt.Sprintf("%s:/workspace/%s", containerID, a.Path),
-            filepath.Join(outputDir, a.Name),
-        )
-        if err := cmd.Run(); err != nil {
-            log.Warnf("artifact %s not found", a.Path)
-        }
-    }
-    return nil
-}
-```
-
-### Solution 3: Logs Are Often Enough
-
-For most CI, you don't need artifacts extracted. The logs tell you pass/fail.
-
-```yaml
-# .cinch.yaml
-build: make test  # Just need exit code + logs
-```
-
-Only configure `output` or `artifacts` if you actually need the files.
-
-## Build Log Access Inside Container
-
-```go
-func runContainerBuild(job *Job) error {
-    // Create container
-    containerID := createContainer(job.Image, job.Mounts)
-    defer removeContainer(containerID)
-
-    // Start and attach to stdout/stderr
-    execID := createExec(containerID, job.Command)
-    stdout, stderr := attachExec(execID)
-
-    // Stream logs to server
-    go streamLogs(job.ID, stdout, "stdout")
-    go streamLogs(job.ID, stderr, "stderr")
-
-    // Wait for completion
-    exitCode := waitExec(execID)
-    return job.Complete(exitCode)
-}
-```
-
-## Detailed Container Execution Flow
-
-```
-Webhook received
-       │
-       ▼
-Server creates Job (status: pending)
-       │
-       ▼
-Server dispatches to Worker
-       │
-       ▼
-Worker receives Job
-       │
-       ▼
-┌──────────────────────────────────────────────────┐
-│ 1. Clone repo to ~/.cinch/builds/{job-id}/       │
-│                                                  │
-│ 2. Determine container strategy:                 │
-│    - Check .devcontainer/ → use/build that image │
-│    - Check container: in .cinch.yaml             │
-│    - Fall back to cinch-builder:latest           │
-│                                                  │
-│ 3. Prepare mounts:                               │
-│    - Build directory → /workspace                │
-│    - Cache directories → standard locations      │
-│    - Output directory → /workspace/output        │
-│                                                  │
-│ 4. Start container:                              │
-│    docker run --rm \                             │
-│      -v build:/workspace \                       │
-│      -v npm-cache:/root/.npm \                   │
-│      -v cargo-cache:/root/.cargo \              │
-│      -w /workspace \                             │
-│      --network host \                            │ (or restricted)
-│      $IMAGE \                                    │
-│      sh -c "$COMMAND"                            │
-│                                                  │
-│ 5. Stream stdout/stderr to server                │
-│                                                  │
-│ 6. Container exits                               │
-│                                                  │
-│ 7. Extract artifacts (if configured)             │
-│                                                  │
-│ 8. Report exit code to server                    │
-│                                                  │
-│ 9. Cleanup build directory (keep caches)         │
-└──────────────────────────────────────────────────┘
-       │
-       ▼
-Server updates Job status
-       │
-       ▼
-Server posts status to forge
-```
-
-## Container Runtime Options
-
-### Docker (Default)
-
-Most workers will have Docker. It's the obvious choice.
-
-```go
-type DockerRuntime struct {
-    client *docker.Client
-}
-
-func (d *DockerRuntime) Run(job *Job) error {
-    // Standard docker run flow
-}
-```
-
-### Podman (Rootless Alternative)
-
-Some users prefer rootless containers:
+Requires the worker to allow it:
 
 ```yaml
 # Worker config
-runtime: podman
+allow_bare_metal: true
 ```
 
-Podman is API-compatible, so same code works.
+Use cases:
+- GPU access
+- Massive local caches
+- You own the worker and trust all code
 
-### Bubblewrap (Minimal Isolation)
-
-For Linux users who don't want full container overhead:
+## Complete Config Reference
 
 ```yaml
-# Worker config
-runtime: bubblewrap
+# .cinch.yaml - complete container options
+
+build: make test
+release: make release
+
+# Container resolution (first match wins):
+image: node:20                                    # Pre-built image
+dockerfile: path/to/Dockerfile                    # Build this Dockerfile
+devcontainer: ./.devcontainer/devcontainer.json   # Parse JSON (DEFAULT)
+container: none                                   # Bare metal
+
+# To disable devcontainer auto-detection:
+devcontainer: false
 ```
 
-Lighter weight, but Linux-only and less reproducible.
+**That's it.** Five optional keys for container config. Everything else goes in your Dockerfile or Makefile.
 
-### None (Bare Metal)
+## What We Don't Support
 
-```yaml
-# Worker config
-runtime: none  # Run directly on host
-```
+Intentionally omitted:
 
-Maximum speed, no isolation. You trust the code.
-
-## Security Considerations
-
-### Network Access
-
-```yaml
-# .cinch.yaml
-container:
-  network: none      # No network access (safest)
-  network: host      # Full network access (most flexible)
-  network: internal  # Access to internal services only
-```
-
-Default: `host` (we want npm install to work)
-
-For untrusted code: `none` (with pre-populated caches)
-
-### Resource Limits
-
-```yaml
-# .cinch.yaml
-container:
-  memory: 4g
-  cpus: 2
-  timeout: 30m
-```
-
-```go
-containerConfig := &container.Config{
-    Image: image,
-}
-hostConfig := &container.HostConfig{
-    Resources: container.Resources{
-        Memory:   4 * 1024 * 1024 * 1024, // 4GB
-        NanoCPUs: 2 * 1000000000,          // 2 CPUs
-    },
-}
-```
-
-### User Namespaces
-
-Run as non-root inside container:
-
-```go
-hostConfig := &container.HostConfig{
-    UsernsMode: "host",  // or remap to non-root
-}
-```
-
-## The Warm Cache Reconciliation
-
-The README says "Your cache is already warm." With containers, is this still true?
-
-**Yes, with our approach:**
-
-| What | GitHub Actions | cinch (bare metal) | cinch (containerized) |
-|------|---------------|-------------------|----------------------|
-| npm cache | Cold. Upload/download artifact | Hot on disk | Hot via volume mount |
-| Docker images | Cold. Pull every time | Hot on disk | Hot on disk |
-| node_modules | Cold without actions/cache | Hot on disk | Hot via cache volume |
-| First build | Slow (everything cold) | Fast | Medium (image build) |
-| Subsequent builds | Medium (cache restore) | Fast | Fast |
-
-**The key insight:** Volume mounts give us warm caches inside containers. We're not throwing away the "warm cache" advantage—we're extending it into isolated environments.
-
-## Config Schema Update
-
-```yaml
-# .cinch.yaml - full container options
-
-build: make check
-
-# Container settings
-container:
-  # What to run in
-  image: node:20-alpine           # Explicit image
-  # OR
-  dockerfile: ./Dockerfile.ci      # Build from this
-  # OR
-  devcontainer: true              # Use .devcontainer/ (default if exists)
-  # OR
-  auto: true                      # Auto-detect (default)
-
-  # Resource limits
-  memory: 4g
-  cpus: 2
-
-  # Network
-  network: host                   # host | none | internal
-
-  # Extra mounts
-  mounts:
-    - /var/run/docker.sock:/var/run/docker.sock  # Docker-in-docker
-
-# Persistent caches (mounted into container)
-cache:
-  - name: dependencies
-    path: ./node_modules
-  - name: build-cache
-    path: ./.next/cache
-
-# Files to extract after build
-artifacts:
-  - path: ./dist
-    name: build-output
-  - path: ./coverage/lcov.info
-    name: coverage
-
-# Or: explicit "no container"
-# container: none
-```
+- **`memory:`, `cpus:` limits** - Worker operator concern
+- **`cache:` directories** - Use Docker layer caching
+- **`artifacts:` extraction** - Your Makefile publishes
+- **`mounts:` config** - Put it in your Dockerfile
+- **devcontainer features** - Use a Dockerfile instead
 
 ## Implementation Priority
 
-### Phase 1 (v0.1): Minimal Container Support
-- [ ] Docker runtime implementation
-- [ ] Auto-detect container: devcontainer.json > Dockerfile > default image
-- [ ] Mount workspace into container, run command, stream logs
-- [ ] Sticky worker routing (prefer same worker for warm host-level caches)
+### Phase 1 (v0.1): It Works
+- [x] Docker runtime (shells to `docker` CLI)
+- [x] Basic devcontainer.json parsing (image, build.dockerfile)
+- [x] Mount workspace, run command, stream logs
+- [x] `image:` config option
+- [x] `dockerfile:` config option
+- [x] `devcontainer: false` to disable auto-detect
+- [x] `container: none` bare metal escape hatch
+- [ ] Runtime detection with helpful errors
 
-**NOT in v0.1:**
-- No artifact extraction (your Makefile uploads to S3 if needed)
-- No explicit container config override (auto-detect only)
-- No custom cache volume config (rely on host-level caching via sticky routing)
-
-### Phase 2 (v0.2): Container Config + Caching
-- [ ] Explicit `container:` config option (override auto-detect)
-- [ ] `container: none` for bare metal
-- [ ] Cache volume mounts (npm, cargo, pip, go)
-- [ ] Parse devcontainer.json properly (features, mounts, etc.)
-
-### Phase 3 (v0.3): Advanced Features
+### Phase 2 (v0.2): Polish
 - [ ] Podman support
-- [ ] Resource limits
-- [ ] Network isolation modes
-- [ ] Bubblewrap for Linux minimal isolation
+- [ ] Better build caching (BuildKit)
 
-## Open Questions
-
-1. **Should we ship a default builder image?**
-   - Pro: Works out of the box
-   - Con: One more thing to maintain
-   - Recommendation: Yes, a minimal `cinch-builder` with common tools (git, make, curl, jq)
-
-2. **How do we handle Docker-in-Docker?**
-   - Some builds need to build Docker images
-   - Mount the socket? Use sysbox? Kaniko?
-   - Recommendation: Mount socket by default (optional), warn about security
-
-3. **What about Windows containers?**
-   - Reality: Most CI is Linux
-   - Windows containers are niche
-   - Recommendation: Linux containers only for v0.1
-
-4. **Should cache volumes be per-repo or shared?**
-   - Per-repo: More isolation, more disk usage
-   - Shared: Faster first builds, potential conflicts
-   - Recommendation: Shared by default, per-repo option
-
-## Summary
-
-- **Default behavior:** Auto-detect container (devcontainer > Dockerfile > default image)
-- **Caching:** Persistent volumes mounted into containers
-- **Artifacts:** Mount output directory or explicit copy-out
-- **Escape hatch:** `container: none` for bare metal
-- **Result:** Reproducible isolated builds with warm caches
-
-The README pitch evolves from "your cache is already warm" to **"your cache is already warm, and your builds are isolated and reproducible."**
+### Not Planned
+- devcontainer features
+- Artifact extraction
+- Per-job resource limits
+- Custom volume mounts

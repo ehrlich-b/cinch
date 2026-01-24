@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/ehrlich-b/cinch/internal/config"
 )
 
 // DefaultImage is used when no devcontainer or Dockerfile is found.
@@ -14,7 +16,7 @@ const DefaultImage = "ubuntu:22.04"
 
 // ImageSource describes where the container image comes from.
 type ImageSource struct {
-	// Type is "image", "dockerfile", or "devcontainer"
+	// Type is "image", "dockerfile", "devcontainer", or "bare-metal"
 	Type string
 
 	// Image is the image name (for Type="image") or tag (for built images)
@@ -27,7 +29,65 @@ type ImageSource struct {
 	Context string
 }
 
+// ResolveContainer figures out what container image to use based on config.
+// Priority: image > dockerfile > container:none > devcontainer:false > devcontainer:path
+func ResolveContainer(cfg *config.Config, repoDir string) (*ImageSource, error) {
+	// 1. Explicit image specified
+	if cfg.Image != "" {
+		return &ImageSource{
+			Type:  "image",
+			Image: cfg.Image,
+		}, nil
+	}
+
+	// 2. Explicit dockerfile specified
+	if cfg.Dockerfile != "" {
+		dockerfilePath := cfg.Dockerfile
+		if !filepath.IsAbs(dockerfilePath) {
+			dockerfilePath = filepath.Join(repoDir, dockerfilePath)
+		}
+		return &ImageSource{
+			Type:       "dockerfile",
+			Dockerfile: dockerfilePath,
+			Context:    filepath.Dir(dockerfilePath),
+		}, nil
+	}
+
+	// 3. Bare metal escape hatch
+	if cfg.Container == "none" {
+		return &ImageSource{
+			Type: "bare-metal",
+		}, nil
+	}
+
+	// 4. Devcontainer disabled - use default image
+	if cfg.Devcontainer.Disabled {
+		return &ImageSource{
+			Type:  "image",
+			Image: DefaultImage,
+		}, nil
+	}
+
+	// 5. Devcontainer path (default or custom)
+	devcontainerPath := cfg.Devcontainer.EffectivePath()
+	if !filepath.IsAbs(devcontainerPath) {
+		devcontainerPath = filepath.Join(repoDir, devcontainerPath)
+	}
+
+	// Check if devcontainer.json exists
+	if _, err := os.Stat(devcontainerPath); err == nil {
+		return parseDevcontainer(devcontainerPath, repoDir)
+	}
+
+	// No devcontainer.json found - use default image
+	return &ImageSource{
+		Type:  "image",
+		Image: DefaultImage,
+	}, nil
+}
+
 // DetectImage figures out what container image to use for a repo.
+// Deprecated: Use ResolveContainer with config instead.
 // Priority: .devcontainer/devcontainer.json > .devcontainer/Dockerfile > Dockerfile > default
 func DetectImage(repoDir string) (*ImageSource, error) {
 	// Check for devcontainer.json
@@ -131,6 +191,7 @@ func parseDevcontainer(jsonPath, repoDir string) (*ImageSource, error) {
 
 // PrepareImage ensures the image is ready to use.
 // For direct images, pulls if needed. For dockerfiles, builds.
+// For bare-metal, returns empty string (no container).
 func PrepareImage(ctx context.Context, source *ImageSource, jobID string, stdout, stderr io.Writer) (string, error) {
 	switch source.Type {
 	case "image":
@@ -151,6 +212,11 @@ func PrepareImage(ctx context.Context, source *ImageSource, jobID string, stdout
 			return "", fmt.Errorf("build image: %w", err)
 		}
 		return tag, nil
+
+	case "bare-metal":
+		// No container preparation needed
+		fmt.Fprintf(stdout, "Running in bare-metal mode (no container)\n")
+		return "", nil
 
 	default:
 		return "", fmt.Errorf("unknown image source type: %s", source.Type)

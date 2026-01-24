@@ -13,6 +13,7 @@ import (
 
 	"github.com/ehrlich-b/cinch/internal/config"
 	"github.com/ehrlich-b/cinch/internal/protocol"
+	"github.com/ehrlich-b/cinch/internal/worker/container"
 	"github.com/gorilla/websocket"
 )
 
@@ -475,25 +476,55 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 		env["CINCH_FORGE_TOKEN"] = assign.Repo.CloneToken
 	}
 
-	// Log what we're about to do
-	w.log.Info("executing job",
-		"job_id", jobID,
-		"repo", assign.Repo.CloneURL,
-		"branch", assign.Repo.Branch,
-		"commit", assign.Repo.Commit[:8],
-		"command", command,
-		"mode", "bare-metal",
-	)
-
-	// Execute command (stream to both server and local stdout/stderr)
-	executor := &Executor{
-		WorkDir: workDir,
-		Env:     env,
-		Stdout:  io.MultiWriter(streamer.Stdout(), os.Stdout),
-		Stderr:  io.MultiWriter(streamer.Stderr(), os.Stderr),
+	// Resolve container configuration
+	effectiveCfg := cfg
+	if effectiveCfg == nil {
+		effectiveCfg = &config.Config{}
 	}
 
-	exitCode, err := executor.Run(ctx, command)
+	// Determine execution mode
+	var exitCode int
+	stdout := io.MultiWriter(streamer.Stdout(), os.Stdout)
+	stderr := io.MultiWriter(streamer.Stderr(), os.Stderr)
+
+	if w.config.Docker && !effectiveCfg.IsBareMetalContainer() {
+		// Container mode
+		source, err := container.ResolveContainer(effectiveCfg, workDir)
+		if err != nil {
+			w.reportError(jobID, protocol.PhaseExecute, fmt.Sprintf("resolve container: %v", err))
+			return
+		}
+
+		if source.Type == "bare-metal" {
+			// Config says bare-metal
+			exitCode, err = w.runBareMetal(ctx, command, workDir, env, stdout, stderr)
+		} else {
+			// Run in container
+			w.log.Info("executing job",
+				"job_id", jobID,
+				"repo", assign.Repo.CloneURL,
+				"branch", assign.Repo.Branch,
+				"commit", assign.Repo.Commit[:8],
+				"command", command,
+				"mode", "container",
+				"container_type", source.Type,
+			)
+
+			exitCode, err = w.runInContainer(ctx, jobID, source, command, workDir, env, stdout, stderr)
+		}
+	} else {
+		// Bare-metal mode
+		w.log.Info("executing job",
+			"job_id", jobID,
+			"repo", assign.Repo.CloneURL,
+			"branch", assign.Repo.Branch,
+			"commit", assign.Repo.Commit[:8],
+			"command", command,
+			"mode", "bare-metal",
+		)
+
+		exitCode, err = w.runBareMetal(ctx, command, workDir, env, stdout, stderr)
+	}
 	if err != nil && ctx.Err() != nil {
 		// Context cancelled
 		w.reportError(jobID, protocol.PhaseExecute, "job cancelled")
@@ -576,4 +607,36 @@ func (w *Worker) ActiveJobCount() int {
 // WorkerID returns the assigned worker ID.
 func (w *Worker) WorkerID() string {
 	return w.workerID
+}
+
+// runBareMetal executes a command directly on the host.
+func (w *Worker) runBareMetal(ctx context.Context, command, workDir string, env map[string]string, stdout, stderr io.Writer) (int, error) {
+	executor := &Executor{
+		WorkDir: workDir,
+		Env:     env,
+		Stdout:  stdout,
+		Stderr:  stderr,
+	}
+	return executor.Run(ctx, command)
+}
+
+// runInContainer executes a command inside a container.
+func (w *Worker) runInContainer(ctx context.Context, jobID string, source *container.ImageSource, command, workDir string, env map[string]string, stdout, stderr io.Writer) (int, error) {
+	// Prepare image (pull or build)
+	image, err := container.PrepareImage(ctx, source, jobID, stdout, stderr)
+	if err != nil {
+		return 1, fmt.Errorf("prepare image: %w", err)
+	}
+
+	// Run command in container
+	docker := &container.Docker{
+		WorkDir:      workDir,
+		Image:        image,
+		Env:          env,
+		CacheVolumes: container.DefaultCacheVolumes(),
+		Stdout:       stdout,
+		Stderr:       stderr,
+	}
+
+	return docker.Run(ctx, command)
 }

@@ -6,30 +6,92 @@
 
 ## Current: MVP 1.2 - Container Execution
 
-- [ ] Docker runtime in worker (`internal/worker/container/docker.go`)
-- [ ] Cache volumes (~/.cinch/cache/ for npm, cargo, pip, go)
-- [ ] Devcontainer detection (use project's container)
-- [ ] Fallback: Dockerfile → default image (ubuntu:22.04)
-- [ ] `container: none` escape hatch in .cinch.yaml
+The container primitives exist (`internal/worker/container/`). This milestone wires them into the worker.
+
+- [x] Wire container runtime into `worker.go:executeJob()`
+  - Detect image source (config > devcontainer > ubuntu:22.04)
+  - Build/pull image
+  - Run command in container with workspace mount
+- [x] Container config options in .cinch.yaml
+  - `image: node:20` - pre-built image
+  - `dockerfile: path/to/Dockerfile` - build Dockerfile
+  - `devcontainer: path` or `devcontainer: false`
+  - `container: none` - bare metal escape hatch
+- [x] Cache volumes for warm builds (npm, cargo, pip, go)
+- [x] Devcontainer for cinch itself (`.devcontainer/`)
+- [ ] Wire service containers into job execution
+  - Create network, start services, wait for healthy
+  - Inject service hostnames as env vars
+  - Cleanup on job completion
+- [ ] Test matrix: devcontainer.json, Dockerfile, no container config
 
 ---
 
-## Next: MVP 1.3 - Service Containers
+## Next: MVP 1.3 - Forge Expansion (Tier 1)
 
-- [ ] Parse `services:` from .cinch.yaml
-- [ ] Docker network per job
-- [ ] Health checks with timeout
-- [ ] Environment variable injection (DATABASE_URL, etc.)
-- [ ] Auto-cleanup on job completion
+**Goal:** Cover the major forges. These represent 95%+ of the market.
+
+| Forge | Users | Priority | Notes |
+|-------|-------|----------|-------|
+| GitHub | 65M+ | ✅ Done | Full integration (App + Checks API) |
+| GitLab | 30M | **High** | Self-hosted king. Their CI complexity is our opportunity. |
+| Bitbucket | 10M+ | **High** | Atlassian/enterprise. Pipelines are frustrating. |
+
+GitLab positioning: We're not replacing GitLab as a forge—we're replacing `.gitlab-ci.yml` with something simpler. "Keep GitLab for code, use Cinch for CI."
+
+- [ ] GitLab integration
+  - Webhook parsing (push, tag, MR events)
+  - Status API (commit status or pipeline status)
+  - Clone token (deploy tokens or job tokens)
+  - Self-hosted instance support (custom base URL)
+- [ ] Bitbucket integration
+  - Webhook parsing
+  - Build status API
+  - App passwords / OAuth for cloning
+
+---
+
+## Then: MVP 1.4 - PR/MR Support
+
+Currently push-only. PRs are table stakes for real adoption.
+
+- [ ] GitHub Pull Request events
+- [ ] GitLab Merge Request events
+- [ ] Bitbucket Pull Request events
+- [ ] Forgejo/Gitea Pull Request events
+- [ ] Status checks on PR head commit
+
+---
+
+## Then: MVP 1.5 - Forge Expansion (Tier 2)
+
+Enterprise and ecosystem-specific forges.
+
+| Forge | Users | Notes |
+|-------|-------|-------|
+| Azure DevOps | Enterprise | Microsoft shops, deep Azure integration |
+| AWS CodeCommit | Enterprise | AWS ecosystem, declining but still used |
+| Gitee | Millions | Chinese market (if we want international reach) |
+
+- [ ] Azure DevOps integration
+- [ ] AWS CodeCommit integration
+- [ ] Gitee integration (optional - requires Chinese localization consideration)
 
 ---
 
 ## Backlog
 
-### Forges
-- [ ] GitLab integration (v0.2)
-- [ ] Bitbucket integration (v0.3)
-- [ ] PR support (not just push events)
+### Forge Expansion (Tier 3) - Self-Hosted / Niche
+
+Already done: Gitea, Forgejo (same codebase). These cover the self-hosted community well.
+
+| Forge | Status | Notes |
+|-------|--------|-------|
+| Gitea | ✅ Done | Popular self-hosted |
+| Forgejo | ✅ Done | Community fork, powers Codeberg |
+| Gogs | Maybe | Gitea predecessor, some legacy installs |
+| SourceHut | Maybe | Minimalist, email-based patches, very niche |
+| Gerrit | Maybe | Google-style code review, enterprise |
 
 ### Scale
 - [ ] Worker labels and routing
