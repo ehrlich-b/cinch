@@ -18,6 +18,7 @@ type Storage interface {
 	ListJobs(ctx context.Context, filter JobFilter) ([]*Job, error)
 	UpdateJobStatus(ctx context.Context, id string, status JobStatus, exitCode *int) error
 	UpdateJobWorker(ctx context.Context, jobID, workerID string) error
+	UpdateJobCheckRunID(ctx context.Context, id string, checkRunID int64) error
 
 	// Workers
 	CreateWorker(ctx context.Context, worker *Worker) error
@@ -63,16 +64,18 @@ const (
 
 // Job represents a CI job.
 type Job struct {
-	ID         string
-	RepoID     string
-	Commit     string
-	Branch     string
-	Status     JobStatus
-	ExitCode   *int
-	WorkerID   *string
-	StartedAt  *time.Time
-	FinishedAt *time.Time
-	CreatedAt  time.Time
+	ID             string
+	RepoID         string
+	Commit         string
+	Branch         string
+	Status         JobStatus
+	ExitCode       *int
+	WorkerID       *string
+	InstallationID *int64 // GitHub App installation ID (for status posting)
+	CheckRunID     *int64 // GitHub Check Run ID (for Checks API)
+	StartedAt      *time.Time
+	FinishedAt     *time.Time
+	CreatedAt      time.Time
 }
 
 // JobFilter for listing jobs.

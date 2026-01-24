@@ -21,6 +21,12 @@ type WebhookHandler struct {
 	forges     []forge.Forge
 	baseURL    string // Base URL for job links (e.g., "https://cinch.example.com")
 	log        *slog.Logger
+	githubApp  *GitHubAppHandler
+}
+
+// SetGitHubApp sets the GitHub App handler for installation-based status posting.
+func (h *WebhookHandler) SetGitHubApp(gh *GitHubAppHandler) {
+	h.githubApp = gh
 }
 
 // NewWebhookHandler creates a new webhook handler.
@@ -220,6 +226,31 @@ func (h *WebhookHandler) PostJobStatus(ctx context.Context, jobID string, state 
 	repo, err := h.storage.GetRepo(ctx, job.RepoID)
 	if err != nil {
 		return fmt.Errorf("get repo: %w", err)
+	}
+
+	// Use GitHub Check Run API if job has installation ID and check run ID
+	if job.InstallationID != nil && job.CheckRunID != nil && h.githubApp != nil && h.githubApp.IsConfigured() {
+		// Map state to GitHub conclusion
+		conclusion := state // success, failure already map directly
+		if state == "error" {
+			conclusion = "failure"
+		}
+
+		// Fetch logs for the check run output
+		logs, _ := h.storage.GetLogs(ctx, jobID)
+		var logText string
+		for _, log := range logs {
+			logText += log.Data
+		}
+
+		title := "Build " + state
+		if state == "success" {
+			title = "Build passed"
+		} else if state == "failure" || state == "error" {
+			title = "Build failed"
+		}
+
+		return h.githubApp.UpdateCheckRun(repo, *job.CheckRunID, *job.InstallationID, conclusion, title, description, logText)
 	}
 
 	// Build target URL for logs

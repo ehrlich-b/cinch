@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -230,13 +229,15 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 	}
 
 	// Create job
+	installationID := event.Installation.ID
 	job := &storage.Job{
-		ID:        fmt.Sprintf("j_%d", time.Now().UnixNano()),
-		RepoID:    repo.ID,
-		Commit:    commit,
-		Branch:    branch,
-		Status:    storage.JobStatusPending,
-		CreatedAt: time.Now(),
+		ID:             fmt.Sprintf("j_%d", time.Now().UnixNano()),
+		RepoID:         repo.ID,
+		Commit:         commit,
+		Branch:         branch,
+		Status:         storage.JobStatusPending,
+		InstallationID: &installationID,
+		CreatedAt:      time.Now(),
 	}
 
 	if err := h.storage.CreateJob(ctx, job); err != nil {
@@ -252,10 +253,27 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 		"commit", commit[:8],
 	)
 
-	// Post pending status
-	installationID := event.Installation.ID
-	if err := h.PostStatusWithInstallation(repo, commit, "pending", "Build queued", installationID); err != nil {
-		h.log.Warn("failed to post pending status", "error", err)
+	// Create GitHub Check Run
+	checkRunID, err := h.CreateCheckRun(repo, commit, job.ID, installationID)
+	if err != nil {
+		h.log.Warn("failed to create check run", "error", err)
+	} else {
+		// Save check run ID to job
+		if err := h.storage.UpdateJobCheckRunID(ctx, job.ID, checkRunID); err != nil {
+			h.log.Warn("failed to save check run ID", "error", err)
+		}
+		job.CheckRunID = &checkRunID
+	}
+
+	// Get clone token for private repos
+	var cloneToken string
+	if event.Repository.Private {
+		token, err := h.GetInstallationToken(installationID)
+		if err != nil {
+			h.log.Warn("failed to get clone token for private repo", "error", err)
+		} else {
+			cloneToken = token
+		}
 	}
 
 	// Enqueue job
@@ -264,6 +282,7 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 		Repo:           repo,
 		CloneURL:       repo.CloneURL,
 		Branch:         branch,
+		CloneToken:     cloneToken,
 		InstallationID: installationID,
 	}
 	h.dispatcher.Enqueue(queuedJob)
@@ -355,21 +374,67 @@ func (h *GitHubAppHandler) createAppJWT() (string, error) {
 	return token.SignedString(h.privateKey)
 }
 
-// PostStatus posts a commit status using installation token.
-func (h *GitHubAppHandler) PostStatus(ctx context.Context, repo *storage.Repo, commit, state, description string) error {
-	// We need to find the installation ID - for now, try to get it from recent webhook
-	// This is a limitation - we'll fix it properly later
-	return h.postStatusWithToken(repo, commit, state, description, 0)
+// CreateCheckRun creates a GitHub Check Run and returns its ID.
+func (h *GitHubAppHandler) CreateCheckRun(repo *storage.Repo, commit, jobID string, installationID int64) (int64, error) {
+	if installationID == 0 {
+		return 0, fmt.Errorf("no installation ID available")
+	}
+
+	token, err := h.GetInstallationToken(installationID)
+	if err != nil {
+		return 0, fmt.Errorf("get installation token: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/check-runs", repo.Owner, repo.Name)
+
+	payload := map[string]any{
+		"name":    "cinch",
+		"head_sha": commit,
+		"status":  "queued",
+	}
+	if h.baseURL != "" {
+		payload["details_url"] = fmt.Sprintf("%s/jobs/%s", h.baseURL, jobID)
+	}
+
+	payloadBytes, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(string(payloadBytes)))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("github api error: %d - %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode response: %w", err)
+	}
+
+	return result.ID, nil
 }
 
-// PostStatusWithInstallation posts status with a specific installation ID.
-func (h *GitHubAppHandler) PostStatusWithInstallation(repo *storage.Repo, commit, state, description string, installationID int64) error {
-	return h.postStatusWithToken(repo, commit, state, description, installationID)
-}
-
-func (h *GitHubAppHandler) postStatusWithToken(repo *storage.Repo, commit, state, description string, installationID int64) error {
+// UpdateCheckRun updates a GitHub Check Run with completion status.
+func (h *GitHubAppHandler) UpdateCheckRun(repo *storage.Repo, checkRunID int64, installationID int64, conclusion string, title string, summary string, logs string) error {
 	if installationID == 0 {
 		return fmt.Errorf("no installation ID available")
+	}
+	if checkRunID == 0 {
+		return fmt.Errorf("no check run ID available")
 	}
 
 	token, err := h.GetInstallationToken(installationID)
@@ -377,21 +442,30 @@ func (h *GitHubAppHandler) postStatusWithToken(repo *storage.Repo, commit, state
 		return fmt.Errorf("get installation token: %w", err)
 	}
 
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/statuses/%s", repo.Owner, repo.Name, commit)
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/check-runs/%d", repo.Owner, repo.Name, checkRunID)
 
-	// Add target URL if base URL is configured
-	payload := map[string]string{
-		"state":       state,
-		"description": description,
-		"context":     "cinch",
+	output := map[string]string{
+		"title":   title,
+		"summary": summary,
 	}
-	if h.baseURL != "" {
-		// We'd need job ID here - skip for now
+	if logs != "" {
+		// Truncate logs to fit GitHub's limit (65535 chars for text field)
+		if len(logs) > 60000 {
+			logs = "... (truncated)\n" + logs[len(logs)-60000:]
+		}
+		output["text"] = "```\n" + logs + "\n```"
+	}
+
+	payload := map[string]any{
+		"status":       "completed",
+		"conclusion":   conclusion, // success, failure, neutral, cancelled, skipped, timed_out, action_required
+		"completed_at": time.Now().UTC().Format(time.RFC3339),
+		"output":       output,
 	}
 
 	payloadBytes, _ := json.Marshal(payload)
 
-	req, err := http.NewRequest("POST", url, strings.NewReader(string(payloadBytes)))
+	req, err := http.NewRequest("PATCH", url, strings.NewReader(string(payloadBytes)))
 	if err != nil {
 		return err
 	}
@@ -406,7 +480,50 @@ func (h *GitHubAppHandler) postStatusWithToken(repo *storage.Repo, commit, state
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github api error: %d - %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// UpdateCheckRunInProgress marks a check run as in progress.
+func (h *GitHubAppHandler) UpdateCheckRunInProgress(repo *storage.Repo, checkRunID int64, installationID int64) error {
+	if installationID == 0 || checkRunID == 0 {
+		return nil // silently skip if not configured
+	}
+
+	token, err := h.GetInstallationToken(installationID)
+	if err != nil {
+		return fmt.Errorf("get installation token: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/check-runs/%d", repo.Owner, repo.Name, checkRunID)
+
+	payload := map[string]any{
+		"status":     "in_progress",
+		"started_at": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	payloadBytes, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("PATCH", url, strings.NewReader(string(payloadBytes)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("github api error: %d - %s", resp.StatusCode, string(body))
 	}

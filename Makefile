@@ -1,4 +1,4 @@
-.PHONY: build build-go test fmt lint clean web web-deps web-dev dev dev-worker run check fly-create fly-deploy fly-logs fly-status fly-ssh
+.PHONY: build build-go test fmt lint clean web web-deps web-dev dev dev-worker run check fly-create fly-deploy fly-logs fly-tail fly-status fly-ssh
 
 # Build the cinch binary (includes web assets)
 build: web build-go
@@ -90,6 +90,9 @@ fly-deploy:
 	fly deploy
 
 fly-logs:
+	fly logs -a $(FLY_APP) --no-tail
+
+fly-tail:
 	fly logs -a $(FLY_APP)
 
 fly-status:
