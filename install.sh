@@ -76,13 +76,24 @@ echo "$VERSION" > "$INSTALL_DIR/.version"
 # Check if install dir is in PATH
 case ":$PATH:" in
     *":$INSTALL_DIR:"*)
+        echo ""
+        echo "Run 'cinch --help' to get started."
         ;;
     *)
         echo ""
-        echo "Add to your shell profile:"
-        echo "  export PATH=\"\$PATH:$INSTALL_DIR\""
+        echo "WARNING: $INSTALL_DIR is not in your PATH!"
+        echo ""
+        echo "To fix this, run:"
+        echo ""
+        # Detect shell and give appropriate command
+        if [ "$(uname -s)" = "Darwin" ]; then
+            echo "  echo 'export PATH=\"\$HOME/.cinch/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
+        elif [ -n "$BASH_VERSION" ] || [ "$(basename "$SHELL")" = "bash" ]; then
+            echo "  echo 'export PATH=\"\$HOME/.cinch/bin:\$PATH\"' >> ~/.bashrc && source ~/.bashrc"
+        else
+            echo "  echo 'export PATH=\"\$HOME/.cinch/bin:\$PATH\"' >> ~/.profile"
+        fi
+        echo ""
+        echo "Then run 'cinch --help' to get started."
         ;;
 esac
-
-echo ""
-echo "Run 'cinch --help' to get started."
