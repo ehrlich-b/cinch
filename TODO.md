@@ -4,30 +4,7 @@
 
 ---
 
-## Current: MVP 1.2 - Container Execution
-
-The container primitives exist (`internal/worker/container/`). This milestone wires them into the worker.
-
-- [x] Wire container runtime into `worker.go:executeJob()`
-  - Detect image source (config > devcontainer > ubuntu:22.04)
-  - Build/pull image
-  - Run command in container with workspace mount
-- [x] Container config options in .cinch.yaml
-  - `image: node:20` - pre-built image
-  - `dockerfile: path/to/Dockerfile` - build Dockerfile
-  - `devcontainer: path` or `devcontainer: false`
-  - `container: none` - bare metal escape hatch
-- [x] Cache volumes for warm builds (npm, cargo, pip, go)
-- [x] Devcontainer for cinch itself (`.devcontainer/`)
-- [ ] Wire service containers into job execution
-  - Create network, start services, wait for healthy
-  - Inject service hostnames as env vars
-  - Cleanup on job completion
-- [ ] Test matrix: devcontainer.json, Dockerfile, no container config
-
----
-
-## Next: MVP 1.3 - Forge Expansion (Tier 1)
+## Current: MVP 1.3 - Forge Expansion (Tier 1)
 
 **Goal:** Cover the major forges. These represent 95%+ of the market.
 
@@ -111,6 +88,36 @@ Already done: Gitea, Forgejo (same codebase). These cover the self-hosted commun
 ---
 
 ## Done
+
+### MVP 1.2 - Container Execution & Bootstrap (2026-01-24)
+
+Container execution fully wired. Cinch releases itself.
+
+- [x] Wire container runtime into `worker.go:executeJob()`
+  - Detect image source (config > devcontainer > ubuntu:22.04)
+  - Build/pull image
+  - Run command in container with workspace mount
+- [x] Container config options in .cinch.yaml
+  - `image: node:20` - pre-built image
+  - `dockerfile: path/to/Dockerfile` - build Dockerfile
+  - `devcontainer: path` or `devcontainer: false`
+  - `container: none` - bare metal escape hatch
+- [x] Cache volumes for warm builds (npm, cargo, pip, go)
+- [x] Devcontainer for cinch itself (`.devcontainer/`)
+- [x] Multi-platform binary installation (`~/.cinch/bin/`)
+  - All platforms downloaded: linux-amd64, linux-arm64, darwin-amd64, darwin-arm64
+  - Symlink to local platform
+  - Linux binary injected into containers (macOS Mach-O can't run in Linux)
+- [x] `cinch release` command - create releases on any forge
+- [x] `cinch install` command - download and run install script
+- [x] Install script verifies binary works before swapping
+- [x] Bootstrap loop closed: v0.1.10 built v0.1.11
+
+**Remaining for containers:**
+- [ ] Wire service containers into job execution
+- [ ] Test matrix: devcontainer.json, Dockerfile, no container config
+
+---
 
 ### MVP 1.1 - Releases via Cinch (2026-01-24)
 
