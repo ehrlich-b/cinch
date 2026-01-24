@@ -57,7 +57,7 @@ clean:
 # -----------------------------------------------------------------------------
 
 web:
-	cd web && npm run build
+	cd web && npm install && npm run build
 
 web-deps:
 	cd web && npm install
