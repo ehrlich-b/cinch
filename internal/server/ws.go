@@ -50,6 +50,11 @@ type LogBroadcaster interface {
 	BroadcastJobComplete(jobID string, status string, exitCode *int)
 }
 
+// JWTValidator validates JWT tokens.
+type JWTValidator interface {
+	ValidateUserToken(tokenString string) string
+}
+
 // WSHandler handles WebSocket connections from workers.
 type WSHandler struct {
 	hub            *Hub
@@ -57,6 +62,7 @@ type WSHandler struct {
 	log            *slog.Logger
 	statusPoster   StatusPoster
 	logBroadcaster LogBroadcaster
+	jwtValidator   JWTValidator
 }
 
 // NewWSHandler creates a new WebSocket handler.
@@ -79,6 +85,11 @@ func (h *WSHandler) SetStatusPoster(sp StatusPoster) {
 // SetLogBroadcaster sets the log broadcaster for streaming logs to UI clients.
 func (h *WSHandler) SetLogBroadcaster(lb LogBroadcaster) {
 	h.logBroadcaster = lb
+}
+
+// SetJWTValidator sets the JWT validator for user token authentication.
+func (h *WSHandler) SetJWTValidator(v JWTValidator) {
+	h.jwtValidator = v
 }
 
 // ServeHTTP handles WebSocket upgrade requests.
@@ -138,17 +149,26 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // validateToken checks the token and returns the worker ID.
 func (h *WSHandler) validateToken(ctx context.Context, token string) (string, error) {
-	// Hash the token to compare against stored hash
+	// First try database token lookup (for worker tokens)
 	hash := hashToken(token)
 	tok, err := h.storage.GetTokenByHash(ctx, hash)
-	if err != nil {
-		return "", err
+	if err == nil {
+		// Return worker ID if bound, or token ID as worker ID
+		if tok.WorkerID != nil {
+			return *tok.WorkerID, nil
+		}
+		return tok.ID, nil
 	}
-	// Return worker ID if bound, or token ID as worker ID
-	if tok.WorkerID != nil {
-		return *tok.WorkerID, nil
+
+	// If database lookup failed and we have a JWT validator, try JWT
+	if h.jwtValidator != nil {
+		if username := h.jwtValidator.ValidateUserToken(token); username != "" {
+			// Use username as worker ID prefix for user tokens
+			return "user:" + username, nil
+		}
 	}
-	return tok.ID, nil
+
+	return "", err
 }
 
 // hashToken creates a SHA3-256 hash of the token.
