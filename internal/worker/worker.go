@@ -452,6 +452,16 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	env["CINCH_COMMIT"] = assign.Repo.Commit
 	env["CINCH_REPO"] = assign.Repo.CloneURL
 
+	// Log what we're about to do
+	w.log.Info("executing job",
+		"job_id", jobID,
+		"repo", assign.Repo.CloneURL,
+		"branch", assign.Repo.Branch,
+		"commit", assign.Repo.Commit[:8],
+		"command", command,
+		"mode", "bare-metal",
+	)
+
 	// Execute command (stream to both server and local stdout/stderr)
 	executor := &Executor{
 		WorkDir: workDir,
