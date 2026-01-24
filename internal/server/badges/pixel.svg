@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="112" height="24">
+  <rect width="112" height="24" fill="#1a1a2e"/>
+  <rect x="0" y="0" width="112" height="2" fill="{{.Color}}"/>
+  <rect x="0" y="22" width="112" height="2" fill="{{.Color}}"/>
+  <rect x="0" y="0" width="2" height="24" fill="{{.Color}}"/>
+  <rect x="110" y="0" width="2" height="24" fill="{{.Color}}"/>
+  <text x="12" y="16" font-family="Monaco,Consolas,monospace" font-size="10" fill="#eee" letter-spacing="1">CINCH</text>
+  <text x="58" y="16" font-family="Monaco,Consolas,monospace" font-size="10" fill="{{.Color}}" letter-spacing="1">{{.StatusShort}}</text>
+</svg>

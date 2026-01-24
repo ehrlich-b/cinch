@@ -9,10 +9,12 @@
 **Goal:** Make cinch presentable for public use.
 
 ### Build Badges
-- [ ] `/badge/{owner}/{repo}.svg` endpoint
-- [ ] Status: passing (green), failing (red), pending (yellow), unknown (gray)
-- [ ] Cache headers for CDN-friendly serving
-- [ ] Markdown snippet in repo settings page
+- [x] `/badge/{owner}/{repo}.svg` endpoint
+- [x] Status: passing (green), failing (red), running (yellow), unknown (gray)
+- [x] Cache headers for CDN-friendly serving
+- [x] 12 badge styles (shields, flat, modern, neon, electric, terminal, brutalist, gradient, holographic, pixel, minimal, outlined)
+- [x] Markdown snippet in `/badges` gallery page
+- [ ] Shields.io compatibility - support shields.io endpoint format so users can use either
 
 ### Website Polish
 - [ ] Landing page that doesn't look like dog shit

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="116" height="26">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="{{.Color}}"/>
+    </linearGradient>
+  </defs>
+  <rect width="116" height="26" rx="6" fill="url(#grad)"/>
+  <text x="14" y="17" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="11" font-weight="700" fill="#fff">cinch</text>
+  <text x="58" y="17" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="11" font-weight="500" fill="#fff">{{.Status}}</text>
+  <circle cx="102" cy="13" r="4" fill="#fff" fill-opacity="0.9"/>
+</svg>
