@@ -34,26 +34,56 @@ Outside of Cinch jobs, falls back to git remotes and prompts for token.
 
 ## Binary Injection
 
-**Key insight:** The worker already has `cinch` installed. Mount it into the container.
+**Key insight:** The worker already has `cinch` installed. Inject the correct Linux binary into containers.
+
+### The Challenge
+
+macOS binaries (Mach-O format) cannot run in Linux containers (ELF format), even when CPU architecture matches.
+A darwin/arm64 binary cannot run in a linux/arm64 container.
+
+### Solution: Multi-Platform Installation
+
+The install script downloads ALL platform variants:
+
+```
+~/.cinch/bin/
+├── cinch -> cinch-darwin-arm64  (symlink to local platform)
+├── cinch-darwin-arm64
+├── cinch-darwin-amd64
+├── cinch-linux-arm64
+└── cinch-linux-amd64
+```
+
+When injecting into containers, use the Linux binary:
 
 ```go
 // In container/docker.go Run()
-args := []string{"run", "--rm"}
-
-// Mount cinch binary from host
-cinchPath, _ := os.Executable()
-args = append(args, "-v", cinchPath+":/usr/local/bin/cinch:ro")
+// Use Linux binary - macOS Mach-O can't run in Linux containers
+if cinchPath, err := GetLinuxBinary(); err == nil {
+    args = append(args, "-v", cinchPath+":/usr/local/bin/cinch:ro")
+}
 ```
 
-Now every container job has `cinch` available automatically. No install step needed.
+### Binary Resolution
 
-### Architecture Matching
+`GetLinuxBinary()` checks:
+1. `~/.cinch/bin/cinch-linux-{arch}` - from install.sh
+2. If not present or version mismatch, downloads from GitHub releases
 
-Containers run with `--platform linux/{host_arch}` to ensure native execution (no emulation).
-This means binary injection works automatically - host and container share the same architecture.
+This ensures:
+- Workers running on macOS can inject Linux binaries into containers
+- Version consistency (binary matches running cinch version)
+- Zero config for users (install once, binary injection "just works")
 
-**Future:** Multi-arch testing (run amd64 container on arm64 host) would require downloading
-the correct cinch binary for the target architecture. Track in TODO.md.
+### Cinch's Own Releases
+
+For cinch's own CI (dogfooding), the release target uses the just-built native binary:
+
+```makefile
+./dist/cinch-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/aarch64/arm64/') release dist/*
+```
+
+This works because cinch builds all platform variants, so the linux binary is available in dist/.
 
 ## Forge APIs
 

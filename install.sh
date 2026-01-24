@@ -1,13 +1,17 @@
 #!/bin/sh
-# Cinch installer - downloads the latest release from GitHub
+# Cinch installer - downloads release binaries from GitHub
 # Usage: curl -fsSL https://cinch.sh/install.sh | sh
+#
+# Installs all platform variants to ~/.cinch/bin/ for container injection support.
+# Creates symlink to local platform as 'cinch'.
 
 set -e
 
 REPO="ehrlich-b/cinch"
-BINARY_NAME="cinch"
+INSTALL_DIR="$HOME/.cinch/bin"
+PLATFORMS="linux-amd64 linux-arm64 darwin-amd64 darwin-arm64"
 
-# Detect OS
+# Detect local platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$OS" in
     linux)  OS="linux" ;;
@@ -18,7 +22,6 @@ case "$OS" in
         ;;
 esac
 
-# Detect architecture
 ARCH=$(uname -m)
 case "$ARCH" in
     x86_64|amd64)  ARCH="amd64" ;;
@@ -29,38 +32,55 @@ case "$ARCH" in
         ;;
 esac
 
-# Get latest release tag
-VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+LOCAL_PLATFORM="$OS-$ARCH"
+
+# Get latest release tag (or use CINCH_VERSION if set)
+if [ -n "$CINCH_VERSION" ]; then
+    VERSION="$CINCH_VERSION"
+else
+    VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+fi
+
 if [ -z "$VERSION" ]; then
-    echo "Error: Could not determine latest version"
+    echo "Error: Could not determine version"
     exit 1
 fi
 
-DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/cinch-$OS-$ARCH"
+echo "Installing cinch $VERSION..."
+mkdir -p "$INSTALL_DIR"
 
-# Determine install directory
-if [ -w "/usr/local/bin" ]; then
-    INSTALL_DIR="/usr/local/bin"
-elif [ -d "$HOME/.local/bin" ]; then
-    INSTALL_DIR="$HOME/.local/bin"
+# Download all platform variants
+for platform in $PLATFORMS; do
+    echo "  Downloading cinch-$platform..."
+    DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/cinch-$platform"
+    if curl -fsSL "$DOWNLOAD_URL" -o "$INSTALL_DIR/cinch-$platform" 2>/dev/null; then
+        chmod +x "$INSTALL_DIR/cinch-$platform"
+    else
+        echo "    Warning: Could not download cinch-$platform (may not exist)"
+    fi
+done
+
+# Create symlink for local platform
+if [ -f "$INSTALL_DIR/cinch-$LOCAL_PLATFORM" ]; then
+    rm -f "$INSTALL_DIR/cinch"
+    ln -s "cinch-$LOCAL_PLATFORM" "$INSTALL_DIR/cinch"
+    echo "Installed cinch $VERSION to $INSTALL_DIR/cinch"
 else
-    mkdir -p "$HOME/.local/bin"
-    INSTALL_DIR="$HOME/.local/bin"
+    echo "Error: Could not download binary for $LOCAL_PLATFORM"
+    exit 1
 fi
 
-echo "Downloading cinch $VERSION for $OS/$ARCH..."
-curl -fsSL "$DOWNLOAD_URL" -o "$INSTALL_DIR/$BINARY_NAME"
-chmod +x "$INSTALL_DIR/$BINARY_NAME"
-
-echo "Installed cinch $VERSION to $INSTALL_DIR/$BINARY_NAME"
+# Write version file
+echo "$VERSION" > "$INSTALL_DIR/.version"
 
 # Check if install dir is in PATH
 case ":$PATH:" in
-    *":$INSTALL_DIR:"*) ;;
+    *":$INSTALL_DIR:"*)
+        ;;
     *)
         echo ""
-        echo "Note: $INSTALL_DIR is not in your PATH."
-        echo "Add it with: export PATH=\"\$PATH:$INSTALL_DIR\""
+        echo "Add to your shell profile:"
+        echo "  export PATH=\"\$PATH:$INSTALL_DIR\""
         ;;
 esac
 

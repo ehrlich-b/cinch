@@ -52,7 +52,8 @@ func (d *Docker) Run(ctx context.Context, command string) (int, error) {
 
 	// Inject cinch binary into container
 	// This makes `cinch release` available without installing anything
-	if cinchPath, err := os.Executable(); err == nil {
+	// Use Linux binary (macOS Mach-O can't run in Linux containers)
+	if cinchPath, err := GetLinuxBinary(); err == nil {
 		args = append(args, "-v", cinchPath+":/usr/local/bin/cinch:ro")
 	}
 
