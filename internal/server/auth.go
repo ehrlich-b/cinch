@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -23,7 +25,19 @@ const (
 
 	authCookieName     = "cinch_auth"
 	authCookieLifetime = 7 * 24 * time.Hour
+
+	// Device auth settings
+	deviceCodeExpiry    = 15 * time.Minute
+	deviceCodePollDelay = 5 // seconds
 )
+
+// deviceCode represents a pending device authorization request.
+type deviceCode struct {
+	UserCode   string    // Human-readable code (e.g., "CINCH-1234")
+	ExpiresAt  time.Time // When this code expires
+	Authorized bool      // Whether the user has authorized
+	Username   string    // Set when authorized
+}
 
 // AuthConfig holds GitHub OAuth configuration.
 type AuthConfig struct {
@@ -37,6 +51,10 @@ type AuthConfig struct {
 type AuthHandler struct {
 	config AuthConfig
 	log    *slog.Logger
+
+	// Device auth state (in-memory, keyed by device_code)
+	deviceCodes   map[string]*deviceCode
+	deviceCodesMu sync.RWMutex
 }
 
 // NewAuthHandler creates a new auth handler.
@@ -45,8 +63,9 @@ func NewAuthHandler(cfg AuthConfig, log *slog.Logger) *AuthHandler {
 		log = slog.Default()
 	}
 	return &AuthHandler{
-		config: cfg,
-		log:    log,
+		config:      cfg,
+		log:         log,
+		deviceCodes: make(map[string]*deviceCode),
 	}
 }
 
@@ -65,6 +84,12 @@ func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleLogout(w, r)
 	case "/me", "/me/":
 		h.handleMe(w, r)
+	case "/device", "/device/":
+		h.handleDevice(w, r)
+	case "/device/verify", "/device/verify/":
+		h.handleDeviceVerify(w, r)
+	case "/device/token", "/device/token/":
+		h.handleDeviceToken(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -517,6 +542,340 @@ func (h *AuthHandler) getGitHubUser(accessToken string) (*githubUser, error) {
 	}
 
 	return &user, nil
+}
+
+// --- Device Authorization Flow ---
+
+// handleDevice initiates a device authorization request (POST /auth/device).
+func (h *AuthHandler) handleDevice(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Generate unique device code (32 hex chars)
+	deviceCodeBytes := make([]byte, 16)
+	if _, err := rand.Read(deviceCodeBytes); err != nil {
+		h.log.Error("failed to generate device code", "error", err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	deviceCodeStr := hex.EncodeToString(deviceCodeBytes)
+
+	// Generate user-friendly code (CINCH-XXXX)
+	userCodeBytes := make([]byte, 2)
+	if _, err := rand.Read(userCodeBytes); err != nil {
+		h.log.Error("failed to generate user code", "error", err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	userCode := fmt.Sprintf("CINCH-%04d", int(userCodeBytes[0])<<8|int(userCodeBytes[1])%10000)
+
+	// Store the device code
+	h.deviceCodesMu.Lock()
+	h.deviceCodes[deviceCodeStr] = &deviceCode{
+		UserCode:  userCode,
+		ExpiresAt: time.Now().Add(deviceCodeExpiry),
+	}
+	h.deviceCodesMu.Unlock()
+
+	// Clean up expired codes periodically
+	go h.cleanupExpiredDeviceCodes()
+
+	// Build verification URL
+	verificationURI := "/auth/device/verify"
+	if h.config.BaseURL != "" {
+		verificationURI = h.config.BaseURL + verificationURI
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"device_code":      deviceCodeStr,
+		"user_code":        userCode,
+		"verification_uri": verificationURI,
+		"expires_in":       int(deviceCodeExpiry.Seconds()),
+		"interval":         deviceCodePollDelay,
+	})
+}
+
+// handleDeviceVerify shows the browser page for device verification (GET/POST /auth/device/verify).
+func (h *AuthHandler) handleDeviceVerify(w http.ResponseWriter, r *http.Request) {
+	userCode := r.URL.Query().Get("code")
+
+	if r.Method == http.MethodPost {
+		// Handle form submission
+		if err := r.ParseForm(); err == nil {
+			userCode = r.FormValue("code")
+		}
+
+		// Find the device code by user code
+		h.deviceCodesMu.Lock()
+		var foundDeviceCode string
+		for dc, info := range h.deviceCodes {
+			if info.UserCode == userCode && time.Now().Before(info.ExpiresAt) {
+				foundDeviceCode = dc
+				break
+			}
+		}
+		h.deviceCodesMu.Unlock()
+
+		if foundDeviceCode == "" {
+			h.renderDeviceVerifyPage(w, userCode, "Invalid or expired code")
+			return
+		}
+
+		// Check if user is authenticated
+		username, authenticated := h.getAuthFromCookie(r)
+		if !authenticated {
+			// Redirect to login, then back here
+			loginURL := fmt.Sprintf("/auth/login?return_to=%s", url.QueryEscape("/auth/device/verify?code="+userCode))
+			http.Redirect(w, r, loginURL, http.StatusFound)
+			return
+		}
+
+		// Authorize the device
+		h.deviceCodesMu.Lock()
+		if dc, ok := h.deviceCodes[foundDeviceCode]; ok {
+			dc.Authorized = true
+			dc.Username = username
+		}
+		h.deviceCodesMu.Unlock()
+
+		h.log.Info("device authorized", "user", username, "code", userCode)
+		h.renderDeviceVerifyPage(w, "", "Device authorized! You can close this window.")
+		return
+	}
+
+	// GET - show the verification page
+	h.renderDeviceVerifyPage(w, userCode, "")
+}
+
+func (h *AuthHandler) renderDeviceVerifyPage(w http.ResponseWriter, userCode, message string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+
+	messageHTML := ""
+	if message != "" {
+		if strings.Contains(message, "authorized") {
+			messageHTML = fmt.Sprintf(`<p class="success">%s</p>`, message)
+		} else {
+			messageHTML = fmt.Sprintf(`<p class="error">%s</p>`, message)
+		}
+	}
+
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verify Device - Cinch</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0d1117;
+  color: #c9d1d9;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.container {
+  text-align: center;
+  padding: 2rem;
+  max-width: 400px;
+}
+h1 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+  color: #f0f6fc;
+}
+p {
+  color: #8b949e;
+  margin-bottom: 1.5rem;
+}
+.code-display {
+  font-family: monospace;
+  font-size: 2rem;
+  font-weight: bold;
+  color: #58a6ff;
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: #161b22;
+  border-radius: 6px;
+  letter-spacing: 0.1em;
+}
+form { margin-top: 1rem; }
+input[type="text"] {
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  border-radius: 6px;
+  width: 100%%;
+  margin-bottom: 1rem;
+  text-align: center;
+  letter-spacing: 0.1em;
+}
+input[type="text"]::placeholder { color: #8b949e; }
+.btn {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  background: #238636;
+  color: #fff;
+  text-decoration: none;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  width: 100%%;
+}
+.btn:hover { background: #2ea043; }
+.error { color: #f85149; }
+.success { color: #3fb950; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Verify Device</h1>
+  %s
+  <p>Enter the code shown in your terminal to authorize the CLI.</p>
+  <form method="POST">
+    <input type="text" name="code" placeholder="CINCH-0000" value="%s" autocomplete="off" autofocus>
+    <button type="submit" class="btn">Authorize Device</button>
+  </form>
+</div>
+</body>
+</html>`, messageHTML, userCode)
+}
+
+// handleDeviceToken handles polling for the device token (POST /auth/device/token).
+func (h *AuthHandler) handleDeviceToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		DeviceCode string `json:"device_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid_request"})
+		return
+	}
+
+	h.deviceCodesMu.RLock()
+	dc, exists := h.deviceCodes[req.DeviceCode]
+	h.deviceCodesMu.RUnlock()
+
+	if !exists {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid_device_code"})
+		return
+	}
+
+	if time.Now().After(dc.ExpiresAt) {
+		// Clean up expired code
+		h.deviceCodesMu.Lock()
+		delete(h.deviceCodes, req.DeviceCode)
+		h.deviceCodesMu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "expired_token"})
+		return
+	}
+
+	if !dc.Authorized {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK) // 200 with authorization_pending
+		json.NewEncoder(w).Encode(map[string]string{"error": "authorization_pending"})
+		return
+	}
+
+	// Generate a long-lived user token
+	token, err := h.createUserToken(dc.Username)
+	if err != nil {
+		h.log.Error("failed to create user token", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "server_error"})
+		return
+	}
+
+	// Clean up the device code
+	h.deviceCodesMu.Lock()
+	delete(h.deviceCodes, req.DeviceCode)
+	h.deviceCodesMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"access_token": token,
+		"token_type":   "Bearer",
+		"user":         dc.Username,
+	})
+}
+
+// createUserToken creates a long-lived JWT for CLI use.
+func (h *AuthHandler) createUserToken(username string) (string, error) {
+	claims := jwt.MapClaims{
+		"sub":  username,
+		"type": "user",
+		"iat":  time.Now().Unix(),
+		"exp":  time.Now().Add(90 * 24 * time.Hour).Unix(), // 90 days
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(h.getJWTSigningKey())
+}
+
+// ValidateUserToken validates a Bearer token from the CLI.
+// Returns the username if valid, empty string if not.
+func (h *AuthHandler) ValidateUserToken(tokenString string) string {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return h.getJWTSigningKey(), nil
+	})
+	if err != nil || !token.Valid {
+		return ""
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return ""
+	}
+
+	// Check token type
+	tokenType, _ := claims["type"].(string)
+	if tokenType != "user" {
+		return ""
+	}
+
+	sub, ok := claims["sub"].(string)
+	if !ok || sub == "" {
+		return ""
+	}
+
+	return sub
+}
+
+func (h *AuthHandler) cleanupExpiredDeviceCodes() {
+	h.deviceCodesMu.Lock()
+	defer h.deviceCodesMu.Unlock()
+
+	now := time.Now()
+	for code, info := range h.deviceCodes {
+		if now.After(info.ExpiresAt) {
+			delete(h.deviceCodes, code)
+		}
+	}
 }
 
 // --- Helpers ---

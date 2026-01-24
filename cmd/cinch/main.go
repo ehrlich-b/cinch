@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -39,6 +41,9 @@ func main() {
 		logsCmd(),
 		configCmd(),
 		tokenCmd(),
+		loginCmd(),
+		logoutCmd(),
+		whoamiCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -122,6 +127,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Wire up dependencies
 	wsHandler.SetStatusPoster(webhookHandler)
 	wsHandler.SetLogBroadcaster(logStreamHandler)
+	wsHandler.SetJWTValidator(authHandler)
 
 	// Register forges (for webhook identification)
 	webhookHandler.RegisterForge(&forge.GitHub{})
@@ -231,14 +237,20 @@ func workerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "worker",
 		Short: "Start a worker that connects to the server",
-		RunE:  runWorker,
+		Long: `Start a worker that connects to a Cinch server.
+
+If --server and --token are not provided, uses credentials from ~/.cinch/config
+(set via 'cinch login').
+
+Example:
+  cinch worker                              # uses saved credentials
+  cinch worker --server wss://cinch.sh/ws/worker --token xxx`,
+		RunE: runWorker,
 	}
-	cmd.Flags().String("server", "", "Server WebSocket URL to connect to (e.g., wss://cinch.example.com/ws/worker)")
-	cmd.Flags().String("token", "", "Authentication token")
+	cmd.Flags().String("server", "", "Server WebSocket URL (uses saved credentials if not set)")
+	cmd.Flags().String("token", "", "Authentication token (uses saved credentials if not set)")
 	cmd.Flags().StringSlice("labels", nil, "Worker labels (e.g., linux-amd64,docker)")
 	cmd.Flags().Int("concurrency", 1, "Max concurrent jobs")
-	cmd.MarkFlagRequired("server")
-	cmd.MarkFlagRequired("token")
 	return cmd
 }
 
@@ -250,7 +262,33 @@ func runWorker(cmd *cobra.Command, args []string) error {
 
 	log := slog.Default()
 
-	cfg := worker.WorkerConfig{
+	// If server/token not provided, try to use saved credentials
+	if serverURL == "" || token == "" {
+		cliCfg, err := cli.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("load credentials: %w", err)
+		}
+
+		defaultServer, ok := cliCfg.Servers["default"]
+		if !ok || defaultServer.Token == "" {
+			return fmt.Errorf("not logged in - run 'cinch login' first, or provide --server and --token")
+		}
+
+		if serverURL == "" {
+			// Convert HTTP URL to WebSocket URL
+			wsURL := defaultServer.URL
+			wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
+			wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
+			serverURL = wsURL + "/ws/worker"
+		}
+		if token == "" {
+			token = defaultServer.Token
+		}
+
+		log.Info("using saved credentials", "user", defaultServer.User, "server", defaultServer.URL)
+	}
+
+	workerCfg := worker.WorkerConfig{
 		ServerURL:   serverURL,
 		Token:       token,
 		Labels:      labels,
@@ -258,7 +296,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		Docker:      true, // Assume Docker available
 	}
 
-	w := worker.NewWorker(cfg, log)
+	w := worker.NewWorker(workerCfg, log)
 
 	// Start worker
 	log.Info("starting worker", "server", serverURL, "labels", labels, "concurrency", concurrency)
@@ -434,4 +472,145 @@ func tokenCmd() *cobra.Command {
 		},
 	})
 	return cmd
+}
+
+func loginCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "login",
+		Short: "Authenticate with a Cinch server",
+		Long: `Authenticate with a Cinch server using device authorization.
+
+This opens your browser to complete authentication. Once authorized,
+credentials are saved to ~/.cinch/config.
+
+Example:
+  cinch login --server https://cinch.sh`,
+		RunE: runLogin,
+	}
+	cmd.Flags().String("server", "https://cinch.sh", "Server URL to authenticate with")
+	return cmd
+}
+
+func runLogin(cmd *cobra.Command, args []string) error {
+	serverURL, _ := cmd.Flags().GetString("server")
+
+	// Normalize URL (remove trailing slash)
+	serverURL = strings.TrimSuffix(serverURL, "/")
+
+	fmt.Printf("Logging in to %s...\n", serverURL)
+
+	// Request device code
+	deviceResp, err := cli.RequestDeviceCode(serverURL)
+	if err != nil {
+		return fmt.Errorf("failed to start login: %w", err)
+	}
+
+	// Show user code and open browser
+	fmt.Printf("\nYour code: %s\n", deviceResp.UserCode)
+	fmt.Printf("Opening browser to: %s\n", deviceResp.VerificationURI)
+	fmt.Println("\nWaiting for authorization...")
+
+	// Try to open browser
+	openBrowser(deviceResp.VerificationURI + "?code=" + deviceResp.UserCode)
+
+	// Poll for token
+	tokenResp, err := cli.PollForToken(serverURL, deviceResp.DeviceCode, deviceResp.Interval)
+	if err != nil {
+		return fmt.Errorf("authorization failed: %w", err)
+	}
+
+	// Save credentials
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	cfg.SetServerConfig("default", cli.ServerConfig{
+		URL:   serverURL,
+		Token: tokenResp.AccessToken,
+		User:  tokenResp.User,
+	})
+
+	if err := cli.SaveConfig(cfg); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+
+	fmt.Printf("\nLogged in as %s\n", tokenResp.User)
+	fmt.Printf("Credentials saved to %s\n", cli.DefaultConfigPath())
+
+	return nil
+}
+
+func logoutCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "logout",
+		Short: "Remove stored credentials",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := cli.LoadConfig()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			if len(cfg.Servers) == 0 {
+				fmt.Println("Not logged in")
+				return nil
+			}
+
+			// Clear all servers
+			cfg.Servers = make(map[string]cli.ServerConfig)
+			if err := cli.SaveConfig(cfg); err != nil {
+				return fmt.Errorf("save config: %w", err)
+			}
+
+			fmt.Println("Logged out")
+			return nil
+		},
+	}
+}
+
+func whoamiCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "whoami",
+		Short: "Show current authentication status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := cli.LoadConfig()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			if len(cfg.Servers) == 0 {
+				fmt.Println("Not logged in")
+				return nil
+			}
+
+			for name, sc := range cfg.Servers {
+				fmt.Printf("Server: %s (%s)\n", sc.URL, name)
+				fmt.Printf("User: %s\n", sc.User)
+			}
+
+			return nil
+		},
+	}
+}
+
+// openBrowser tries to open a URL in the default browser.
+func openBrowser(url string) {
+	var cmd string
+	var cmdArgs []string
+
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = "open"
+		cmdArgs = []string{url}
+	case "linux":
+		cmd = "xdg-open"
+		cmdArgs = []string{url}
+	case "windows":
+		cmd = "cmd"
+		cmdArgs = []string{"/c", "start", url}
+	default:
+		return
+	}
+
+	exec.Command(cmd, cmdArgs...).Start()
 }
