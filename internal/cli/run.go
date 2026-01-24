@@ -116,12 +116,22 @@ func runContainer(ctx context.Context, command, workDir string, env map[string]s
 		return 1
 	}
 
-	// Detect image source
-	fmt.Printf("Detecting container image...\n")
-	source, err := container.DetectImage(workDir)
+	// Resolve container image from config
+	fmt.Printf("Resolving container image...\n")
+	effectiveCfg := cfg
+	if effectiveCfg == nil {
+		// No config file, use defaults
+		effectiveCfg = &config.Config{}
+	}
+	source, err := container.ResolveContainer(effectiveCfg, workDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error detecting image: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error resolving container: %v\n", err)
 		return 1
+	}
+
+	// Handle bare-metal case (shouldn't happen if runContainer was called, but be safe)
+	if source.Type == "bare-metal" {
+		return runBareMetal(ctx, command, workDir, env)
 	}
 
 	switch source.Type {

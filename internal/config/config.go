@@ -35,8 +35,19 @@ type Config struct {
 	// Services are containers started before the build.
 	Services map[string]Service `yaml:"services" toml:"services" json:"services"`
 
-	// Container overrides auto-detection. Optional.
-	// Set to "none" for bare metal.
+	// Container resolution options (first match wins):
+
+	// Image is a pre-built image to use directly (e.g., "node:20").
+	Image string `yaml:"image" toml:"image" json:"image"`
+
+	// Dockerfile is the path to a Dockerfile to build.
+	Dockerfile string `yaml:"dockerfile" toml:"dockerfile" json:"dockerfile"`
+
+	// Devcontainer is the path to devcontainer.json, or false to disable.
+	// Default: .devcontainer/devcontainer.json
+	Devcontainer DevcontainerOption `yaml:"devcontainer" toml:"devcontainer" json:"devcontainer"`
+
+	// Container set to "none" for bare metal execution.
 	Container string `yaml:"container" toml:"container" json:"container"`
 }
 
@@ -52,6 +63,82 @@ type Service struct {
 type Healthcheck struct {
 	Cmd     string   `yaml:"cmd" toml:"cmd" json:"cmd"`
 	Timeout Duration `yaml:"timeout" toml:"timeout" json:"timeout"`
+}
+
+// DevcontainerOption can be a path string or false to disable.
+// Default (zero value) means use .devcontainer/devcontainer.json
+type DevcontainerOption struct {
+	Disabled bool   // true if explicitly set to false
+	Path     string // custom path if specified
+	IsSet    bool   // true if explicitly configured (vs default)
+}
+
+// DefaultDevcontainerPath is the default location for devcontainer.json.
+const DefaultDevcontainerPath = ".devcontainer/devcontainer.json"
+
+func (d *DevcontainerOption) UnmarshalYAML(node *yaml.Node) error {
+	d.IsSet = true
+
+	// Try boolean first
+	var b bool
+	if err := node.Decode(&b); err == nil {
+		if !b {
+			d.Disabled = true
+		}
+		return nil
+	}
+
+	// Try string
+	var s string
+	if err := node.Decode(&s); err != nil {
+		return fmt.Errorf("devcontainer must be a path string or false")
+	}
+	d.Path = s
+	return nil
+}
+
+func (d *DevcontainerOption) UnmarshalText(text []byte) error {
+	d.IsSet = true
+	s := string(text)
+	if s == "false" {
+		d.Disabled = true
+		return nil
+	}
+	d.Path = s
+	return nil
+}
+
+func (d *DevcontainerOption) UnmarshalJSON(data []byte) error {
+	d.IsSet = true
+
+	// Try boolean first
+	var b bool
+	if err := json.Unmarshal(data, &b); err == nil {
+		if !b {
+			d.Disabled = true
+		}
+		return nil
+	}
+
+	// Try string
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return fmt.Errorf("devcontainer must be a path string or false")
+	}
+	d.Path = s
+	return nil
+}
+
+// EffectivePath returns the path to use for devcontainer.json.
+// Returns empty string if disabled.
+func (d *DevcontainerOption) EffectivePath() string {
+	if d.Disabled {
+		return ""
+	}
+	if d.Path != "" {
+		return d.Path
+	}
+	return DefaultDevcontainerPath
 }
 
 // Duration wraps time.Duration for custom parsing.

@@ -1,0 +1,19 @@
+FROM golang:1.24-bookworm
+
+# Install Node.js 22 LTS
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs
+
+# Install Docker CLI (for container tests)
+RUN apt-get update && apt-get install -y \
+    docker.io \
+    make \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up Go environment
+ENV GOPATH=/go
+ENV PATH=$GOPATH/bin:$PATH
+
+WORKDIR /workspace

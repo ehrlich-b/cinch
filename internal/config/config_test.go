@@ -299,3 +299,133 @@ release: make release
 		t.Errorf("expected 'make release', got %q", cfg.Release)
 	}
 }
+
+func TestDevcontainerOptionYAML(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		wantPath string
+		disabled bool
+	}{
+		{
+			name:     "not specified uses default",
+			content:  "build: test",
+			wantPath: DefaultDevcontainerPath,
+			disabled: false,
+		},
+		{
+			name:     "explicit path",
+			content:  "build: test\ndevcontainer: custom/devcontainer.json",
+			wantPath: "custom/devcontainer.json",
+			disabled: false,
+		},
+		{
+			name:     "disabled with false",
+			content:  "build: test\ndevcontainer: false",
+			wantPath: "",
+			disabled: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, ".cinch.yaml"), []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg, _, err := Load(dir)
+			if err != nil {
+				t.Fatalf("Load failed: %v", err)
+			}
+
+			if cfg.Devcontainer.Disabled != tt.disabled {
+				t.Errorf("Disabled = %v, want %v", cfg.Devcontainer.Disabled, tt.disabled)
+			}
+			if got := cfg.Devcontainer.EffectivePath(); got != tt.wantPath {
+				t.Errorf("EffectivePath() = %q, want %q", got, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestDevcontainerOptionJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		wantPath string
+		disabled bool
+	}{
+		{
+			name:     "explicit path",
+			content:  `{"build": "test", "devcontainer": "my/path.json"}`,
+			wantPath: "my/path.json",
+			disabled: false,
+		},
+		{
+			name:     "disabled with false",
+			content:  `{"build": "test", "devcontainer": false}`,
+			wantPath: "",
+			disabled: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, ".cinch.json"), []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg, _, err := Load(dir)
+			if err != nil {
+				t.Fatalf("Load failed: %v", err)
+			}
+
+			if cfg.Devcontainer.Disabled != tt.disabled {
+				t.Errorf("Disabled = %v, want %v", cfg.Devcontainer.Disabled, tt.disabled)
+			}
+			if got := cfg.Devcontainer.EffectivePath(); got != tt.wantPath {
+				t.Errorf("EffectivePath() = %q, want %q", got, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestImageConfig(t *testing.T) {
+	dir := t.TempDir()
+	content := `build: npm test
+image: node:20
+`
+	if err := os.WriteFile(filepath.Join(dir, ".cinch.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Image != "node:20" {
+		t.Errorf("expected image 'node:20', got %q", cfg.Image)
+	}
+}
+
+func TestDockerfileConfig(t *testing.T) {
+	dir := t.TempDir()
+	content := `build: make test
+dockerfile: docker/Dockerfile.ci
+`
+	if err := os.WriteFile(filepath.Join(dir, ".cinch.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Dockerfile != "docker/Dockerfile.ci" {
+		t.Errorf("expected dockerfile 'docker/Dockerfile.ci', got %q", cfg.Dockerfile)
+	}
+}
