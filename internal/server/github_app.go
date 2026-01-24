@@ -276,7 +276,7 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 		}
 	}
 
-	// Enqueue job
+	// Enqueue job (worker will read .cinch.yaml for command)
 	queuedJob := &QueuedJob{
 		Job:            job,
 		Repo:           repo,
