@@ -376,11 +376,21 @@ Worker connects via `wss://` URLs automatically (gorilla/websocket handles TLS).
    - [x] `cinch login` command
    - [x] Config file (`~/.cinch/config`)
    - [x] Worker self-registration with Bearer token
-   - [x] `cinch repo add` command
-10. **Dogfood** - Cinch runs its own CI
-   - [ ] Add .cinch.yaml to this repo
-   - [ ] `cinch login` + `cinch repo add ehrlich-b/cinch`
-   - [ ] Run worker locally (Mac)
-   - [ ] Verify push → build → status check works
+   - [x] `cinch repo add` command (deprecated, use GitHub App)
+10. **GitHub App Integration** - See design/12-github-app.md 🚧
+   - [ ] Create GitHub App (manual setup in GitHub)
+   - [ ] Database: `installations` table
+   - [ ] Handle `installation` webhook (install/uninstall)
+   - [ ] Handle `installation_repositories` webhook (repo add/remove)
+   - [ ] Installation token generation (JWT → installation token)
+   - [ ] Status posting with installation tokens
+   - [ ] Clone tokens for workers
+   - [ ] Web UI: "Add to GitHub" button
+   - [ ] Web UI: Show installations and repos
+11. **Dogfood** - Cinch runs its own CI
+   - [x] Add .cinch.yaml to this repo
+   - [x] Run worker locally (Mac)
+   - [x] Verify push → build works
+   - [ ] Verify status check posts to GitHub (needs GitHub App)
 
 **No more features until dogfooding works.** Everything else can ship as-is or be cut.
