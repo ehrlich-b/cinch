@@ -14,7 +14,7 @@ import (
 // GitCloner handles git clone operations.
 type GitCloner struct {
 	// BaseDir is the base directory for clones.
-	// If empty, uses os.TempDir.
+	// If empty, uses ~/.cinch/work (for Docker mount compatibility).
 	BaseDir string
 }
 
@@ -23,7 +23,17 @@ type GitCloner struct {
 func (c *GitCloner) Clone(ctx context.Context, repo protocol.JobRepo) (string, error) {
 	baseDir := c.BaseDir
 	if baseDir == "" {
-		baseDir = os.TempDir()
+		// Use ~/.cinch/work instead of os.TempDir() because:
+		// - macOS temp dirs (/var/folders/...) can't be mounted by Docker/Colima
+		// - Home directory is always mountable
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		baseDir = filepath.Join(home, ".cinch", "work")
+		if err := os.MkdirAll(baseDir, 0755); err != nil {
+			return "", fmt.Errorf("create work dir: %w", err)
+		}
 	}
 
 	// Create work directory
