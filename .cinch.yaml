@@ -1,0 +1,3 @@
+# Cinch CI configuration
+command: make check
+timeout: 10m
