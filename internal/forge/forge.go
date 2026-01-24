@@ -69,3 +69,33 @@ const (
 	StatusFailure StatusState = "failure"
 	StatusError   StatusState = "error"
 )
+
+// Forge type constants - match storage.ForgeType values
+const (
+	TypeGitHub  = "github"
+	TypeGitLab  = "gitlab"
+	TypeForgejo = "forgejo"
+	TypeGitea   = "gitea"
+)
+
+// ForgeConfig holds configuration for creating a forge instance.
+type ForgeConfig struct {
+	Type    string // TypeGitHub, TypeForgejo, etc.
+	Token   string // API token for authentication
+	BaseURL string // Base URL for self-hosted instances (Forgejo, GitLab)
+}
+
+// New creates a Forge instance based on the config.
+// Returns nil if the forge type is unknown.
+func New(cfg ForgeConfig) Forge {
+	switch cfg.Type {
+	case TypeGitHub:
+		return &GitHub{Token: cfg.Token}
+	case TypeForgejo:
+		return &Forgejo{Token: cfg.Token, BaseURL: cfg.BaseURL}
+	case TypeGitea:
+		return &Forgejo{Token: cfg.Token, BaseURL: cfg.BaseURL, IsGitea: true}
+	default:
+		return nil
+	}
+}

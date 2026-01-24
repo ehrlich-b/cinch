@@ -350,8 +350,8 @@ func hashToken(token string) string {
 
 // mockStatusPoster is a no-op status poster for testing
 type mockStatusPoster struct {
-	t       *testing.T
-	mu      sync.Mutex
+	t        *testing.T
+	mu       sync.Mutex
 	statuses []statusUpdate
 }
 

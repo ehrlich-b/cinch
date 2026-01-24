@@ -1,5 +1,15 @@
 # Forge Integrations
 
+## Implementation Status
+
+| Forge | Status | Notes |
+|-------|--------|-------|
+| GitHub | **Complete** | Webhooks, Status API, Checks API, GitHub App |
+| Forgejo | **Complete** | Webhooks, Status API |
+| Gitea | **Complete** | Same as Forgejo (shared implementation) |
+| GitLab | Planned | v0.2 |
+| Bitbucket | Planned | v0.3 |
+
 ## Overview
 
 Cinch supports multiple git forges. Each forge needs:
@@ -9,55 +19,89 @@ Cinch supports multiple git forges. Each forge needs:
 
 ## Forge Interface
 
+Located in `internal/forge/forge.go`:
+
 ```go
 type Forge interface {
-    // Identify the forge from webhook headers/payload
+    // Name returns the forge name for display
+    Name() string
+
+    // Identify returns true if the request is from this forge
     Identify(r *http.Request) bool
 
-    // Parse webhook into normalized event
-    ParseWebhook(r *http.Request, secret string) (*WebhookEvent, error)
+    // ParsePush parses a push webhook and verifies the signature
+    ParsePush(r *http.Request, secret string) (*PushEvent, error)
 
-    // Post status check to commit
+    // PostStatus posts a commit status to the forge
     PostStatus(ctx context.Context, repo *Repo, commit string, status *Status) error
 
-    // Generate short-lived clone token
+    // CloneToken generates a short-lived token for cloning
     CloneToken(ctx context.Context, repo *Repo) (string, time.Time, error)
-
-    // Name for display
-    Name() string
 }
+```
 
-type WebhookEvent struct {
-    Type      EventType  // push, pull_request, etc.
-    Repo      *Repo
-    Commit    string
-    Branch    string
-    IsPR      bool
-    PRNumber  int
-    PRAction  string     // opened, synchronized, closed
-    Sender    string     // username who triggered
-    Timestamp time.Time
+## Factory Pattern
+
+Create forge instances via factory (no switch statements needed in handlers):
+
+```go
+// Type constants
+const (
+    TypeGitHub  = "github"
+    TypeGitLab  = "gitlab"
+    TypeForgejo = "forgejo"
+    TypeGitea   = "gitea"
+)
+
+// Create a forge instance
+f := forge.New(forge.ForgeConfig{
+    Type:    forge.TypeGitHub,
+    Token:   "ghs_xxx",
+    BaseURL: "",  // only needed for self-hosted (Forgejo, GitLab)
+})
+```
+
+## Adding a New Forge
+
+1. Create `internal/forge/newforge.go` implementing the `Forge` interface
+2. Add type constant to `internal/forge/forge.go`
+3. Add case to `forge.New()` factory function
+4. Register in `cmd/cinch/main.go`:
+   ```go
+   webhookHandler.RegisterForge(&forge.NewForge{})
+   ```
+5. Add tests in `internal/forge/newforge_test.go`
+
+## Data Types
+
+```go
+type PushEvent struct {
+    Repo   *Repo
+    Commit string // SHA of the head commit
+    Branch string // Branch name (without refs/heads/)
+    Sender string // Username who pushed
 }
 
 type Repo struct {
-    ForgeType  string    // github, gitlab, forgejo, etc.
-    Owner      string
-    Name       string
-    CloneURL   string
-    HTMLURL    string
-    Private    bool
+    ForgeType string // "github", "forgejo", etc.
+    Owner     string
+    Name      string
+    CloneURL  string
+    HTMLURL   string
+    Private   bool
 }
 
 type Status struct {
-    State       StatusState  // pending, success, failure, error
-    Context     string       // "cinch" or "cinch/build"
-    Description string       // "Build passed in 2m 34s"
-    TargetURL   string       // Link to logs
+    State       StatusState
+    Context     string // "cinch"
+    Description string // "Build passed in 2m 34s"
+    TargetURL   string // Link to job logs
 }
 
 type StatusState string
 const (
     StatusPending StatusState = "pending"
+    StatusRunning StatusState = "running"
     StatusSuccess StatusState = "success"
     StatusFailure StatusState = "failure"
     StatusError   StatusState = "error"

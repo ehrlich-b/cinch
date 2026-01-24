@@ -1,298 +1,160 @@
-# Two-Week Implementation Roadmap
+# Roadmap & Status
 
-## Overview
+## Current Status: v0.1 MVP Complete
 
-This roadmap assumes AI agents working full-time (~8 hours/day) for two weeks. Goal: working v0.1 with GitHub + Forgejo support, self-hosted only.
+**Last Updated:** 2026-01-23
 
-## Week 1: Core Infrastructure
+### What's Working
 
-### Day 1-2: Project Scaffolding & CLI
+- [x] Single binary: server, worker, CLI, web UI
+- [x] GitHub webhooks trigger builds
+- [x] GitHub App integration with Checks API (shows logs in GitHub UI)
+- [x] Forgejo/Gitea webhooks trigger builds
+- [x] Status checks posted back to forges
+- [x] Logs stream in real-time to web UI
+- [x] Logs stream to worker terminal (for debugging)
+- [x] WebSocket protocol with reconnection
+- [x] Job queue with dispatch when workers come online
+- [x] OAuth authentication (GitHub) for web UI
+- [x] Device flow authentication for CLI (`cinch login`)
+- [x] `cinch run` for local bare-metal execution
+- [x] `cinch server` with full HTTP routing
+- [x] `cinch worker` with job execution
+- [x] SQLite storage backend
+- [x] Deployed to Fly.io (cinch.fly.dev)
 
-**Goal:** Binary that compiles, subcommand routing works.
+### What's NOT Working Yet
 
-**Tasks:**
-- [ ] Initialize Go module (`go mod init github.com/ehrlich-b/cinch`)
-- [ ] Set up directory structure (see 00-overview.md)
-- [ ] Implement CLI framework with cobra
-  - [ ] `cinch version`
-  - [ ] `cinch server` (placeholder)
-  - [ ] `cinch worker` (placeholder)
-  - [ ] `cinch run` (placeholder)
-  - [ ] `cinch config` (placeholder)
-- [ ] Basic logging setup (structured, leveled)
-- [ ] Configuration loading (flags, env vars, config file)
-- [ ] Build script / Makefile
+- [ ] Container execution (bare-metal only currently)
+- [ ] Devcontainer auto-detection
+- [ ] Service containers (postgres, redis)
+- [ ] Fan-out to multiple workers
+- [ ] Worker labels/routing
+- [ ] GitLab support
+- [ ] Bitbucket support
 
-**Deliverable:** `cinch version` works, `cinch server` starts and exits cleanly.
+---
 
-### Day 3-4: Database Layer
+## MVP 1.1: GitHub Releases & Install Script
 
-**Goal:** SQLite working, all tables created, basic CRUD.
+**Goal:** Users can install Cinch with a single curl command.
 
-**Tasks:**
-- [ ] Implement database interface (`internal/db/db.go`)
-- [ ] SQLite implementation
-  - [ ] Connection management
-  - [ ] Migration system
-  - [ ] Initial schema (all tables from 04-database.md)
-- [ ] Repository methods
-  - [ ] CreateJob, GetJob, ListJobs, UpdateJobStatus
-  - [ ] CreateWorker, GetWorker, ListWorkers, UpdateWorkerStatus
-  - [ ] CreateRepo, GetRepo, GetRepoByName
-  - [ ] AppendLog, GetLogs
-  - [ ] CreateToken, ValidateToken, RevokeToken
-- [ ] Unit tests for all DB operations
+### Tasks
 
-**Deliverable:** Can create/read/update/delete all entities in SQLite.
-
-### Day 5-6: WebSocket Protocol & Worker
-
-**Goal:** Server accepts WebSocket connections, workers can connect and receive jobs.
-
-**Tasks:**
-- [ ] Define protocol types (`internal/protocol/protocol.go`)
-- [ ] Server WebSocket hub
-  - [ ] Connection handling
-  - [ ] Authentication (token validation)
-  - [ ] Worker registration
-  - [ ] Heartbeat (ping/pong)
-- [ ] Worker client
-  - [ ] Connect to server
-  - [ ] Handle reconnection with backoff
-  - [ ] Receive job assignments
-  - [ ] Send acknowledgments
-- [ ] Basic job dispatch logic (pick available worker)
-- [ ] Integration test: worker connects, receives dummy job
-
-**Deliverable:** `cinch worker` connects to `cinch server`, heartbeat works.
-
-### Day 7: Job Execution (Bare Metal)
-
-**Goal:** Worker can clone repos and execute commands on bare metal.
-
-**Tasks:**
-- [ ] Git clone logic
-  - [ ] Clone with token in URL
-  - [ ] Checkout specific commit
-  - [ ] Handle errors gracefully
-- [ ] Command executor
-  - [ ] Run command with timeout
-  - [ ] Capture stdout/stderr
-  - [ ] Stream logs to server via WebSocket
-  - [ ] Report exit code
-- [ ] cinch.yaml parser
-  - [ ] YAML parsing
-  - [ ] JSON fallback
-  - [ ] Validation
-  - [ ] Fetch from repo (via raw file URL or clone)
-- [ ] End-to-end test: push triggers clone + command execution
-
-**Deliverable:** Worker clones repo, runs `make ci`, streams logs back.
-
-### Day 7.5-8: Containerization (Core Feature)
-
-**Goal:** Worker runs builds in containers by default with warm caches.
-
-**Tasks:**
-- [ ] Container runtime interface (`internal/worker/container/container.go`)
-  - [ ] Define Runtime interface: Run, Pull, Build, Stop
-  - [ ] Container config: image, mounts, resources
-- [ ] Docker implementation
-  - [ ] Connect to Docker daemon
-  - [ ] Pull/build images
-  - [ ] Create and start containers
-  - [ ] Attach to stdout/stderr for log streaming
-  - [ ] Wait for exit and cleanup
-- [ ] Cache volume management
-  - [ ] Create persistent cache directories (~/.cinch/cache/)
-  - [ ] Standard cache mounts (npm, cargo, pip, go)
-  - [ ] Custom cache paths from config
-- [ ] Devcontainer detection
-  - [ ] Parse .devcontainer/devcontainer.json
-  - [ ] Build devcontainer image with caching
-  - [ ] Fall back to Dockerfile, then default image
-- [ ] Artifact extraction
-  - [ ] Output directory mount
-  - [ ] Post-build copy-out
-- [ ] Integration test: build runs in container with warm cache
-
-**Deliverable:** Push triggers containerized build using project's devcontainer.
-
-## Week 2: Forge Integration & Web UI
-
-### Day 9-10: GitHub Integration
-
-**Goal:** GitHub webhooks work, status checks posted.
-
-**Tasks:**
-- [ ] Forge interface (`internal/forge/forge.go`)
-- [ ] GitHub implementation
-  - [ ] Webhook parsing (push, pull_request)
-  - [ ] Signature verification (HMAC-SHA256)
-  - [ ] Status API posting (pending, success, failure)
-  - [ ] Clone token generation (if using GitHub App)
-- [ ] Webhook HTTP handler
-  - [ ] Route by forge type
-  - [ ] Create job from webhook
-  - [ ] Error handling
-- [ ] Full flow test: GitHub push → webhook → job → status posted
-
-**Deliverable:** Push to GitHub repo, green checkmark appears.
-
-### Day 11: Forgejo/Gitea Integration
-
-**Goal:** Forgejo works (same API as Gitea).
-
-**Tasks:**
-- [ ] Forgejo implementation (copy GitHub, adjust for Forgejo API)
-  - [ ] Webhook parsing
-  - [ ] Signature verification
-  - [ ] Status posting
-- [ ] Test with local Forgejo instance (docker-compose)
-- [ ] Verify works with Gitea too
-
-**Deliverable:** Push to Forgejo repo, checkmark appears.
-
-### Day 12-13: Web UI (Basic)
-
-**Goal:** Can view jobs and logs in browser.
-
-**Tasks:**
-- [ ] Static file embedding setup
-- [ ] HTML/CSS structure
-  - [ ] Dashboard page (job list)
-  - [ ] Job detail page (with logs)
-  - [ ] Workers page
-- [ ] JavaScript
-  - [ ] Fetch and display jobs
-  - [ ] WebSocket for real-time log streaming
-  - [ ] ANSI color rendering
-  - [ ] Auto-refresh job list
-- [ ] API endpoints
-  - [ ] GET /api/jobs
-  - [ ] GET /api/jobs/:id
-  - [ ] GET /api/workers
-  - [ ] WebSocket /ws/logs/:id
-- [ ] Polish: status colors, timestamps, responsive layout
-
-**Deliverable:** Can watch build logs in real-time in browser.
-
-### Day 13.5: CLI Completeness & Polish
-
-**Goal:** All CLI commands working.
-
-**Tasks:**
-- [ ] `cinch run` - local execution
-  - [ ] Parse local cinch.toml
-  - [ ] Execute command
-  - [ ] Set CI env vars
-- [ ] `cinch status` - show build status
-  - [ ] Detect current repo/branch
-  - [ ] Query server API
-  - [ ] Display formatted output
-- [ ] `cinch logs` - stream/view logs
-  - [ ] Fetch from server
-  - [ ] Follow mode with WebSocket
-- [ ] `cinch config` - validate config
-  - [ ] Parse and validate
-  - [ ] Pretty-print parsed result
-- [ ] `cinch token create/list/revoke` - token management
-
-**Deliverable:** All documented CLI commands functional.
-
-### Day 14: Documentation & Release
-
-**Goal:** Ready for first users.
-
-**Tasks:**
-- [ ] Installation script (`install.sh`)
+- [ ] GitHub Actions workflow for releases
+  - [ ] Build binaries: Linux/macOS (amd64/arm64)
+  - [ ] Create GitHub Release with changelog
+  - [ ] Upload binaries as release assets
+- [ ] Install script (`install.sh`)
   - [ ] Detect OS/arch
-  - [ ] Download appropriate binary
-  - [ ] Install to PATH
-- [ ] README updates
-  - [ ] Quick start guide
-  - [ ] Configuration reference
-  - [ ] FAQ
-- [ ] Example configs
-  - [ ] Basic cinch.toml examples
-  - [ ] Docker-compose for self-hosted setup
-- [ ] GitHub releases
-  - [ ] Build binaries for Linux/macOS/Windows (amd64/arm64)
-  - [ ] Create release with changelog
-- [ ] Smoke test full flow
-  - [ ] Fresh install
-  - [ ] Configure with GitHub repo
-  - [ ] Push and verify green checkmark
+  - [ ] Download from GitHub Releases
+  - [ ] Install to ~/.local/bin or /usr/local/bin
+- [ ] README quick start guide
+- [ ] Basic example configs
 
-**Deliverable:** v0.1.0 released, works end-to-end.
+### Success Criteria
 
-## Success Criteria for v0.1
+```bash
+curl -fsSL https://cinch.sh/install | sh
+cinch version
+```
 
-The mantra: **your Makefile is the pipeline.** Cinch runs one command. Services are the exception because Makefile postgres is pain.
+---
 
-- [ ] Single binary contains: server, worker, CLI, web UI
-- [ ] GitHub webhooks trigger builds
-- [ ] Forgejo webhooks trigger builds
-- [ ] Status checks posted back to forges
-- [ ] Logs stream in real-time to web UI
-- [ ] Devcontainer auto-detection (use project's container with zero config)
-- [ ] Fan-out to multiple workers (`workers: [linux, arm64]`)
-- [ ] Sticky worker routing (prefer last worker for warm cache)
-- [ ] **Service containers (postgres, redis) with health checks and auto-cleanup**
-- [ ] Self-hosted setup works with SQLite
-- [ ] Installation script works on Linux and macOS
+## MVP 1.2: Container Execution
 
-## What's NOT in v0.1
+**Goal:** Jobs run in containers by default with cache mounts.
 
-**Cut to keep it minimal:**
-- Artifact extraction - your Makefile uploads to S3 if you need artifacts
-- Scheduled/manual builds - push code or wait for v0.2
-- Trigger filtering (branches, paths) - all pushes trigger builds
-- Explicit container config - auto-detect only, override in v0.2
-- Resource limits (memory, CPU)
+### Tasks
 
-**Deferred infrastructure:**
-- Postgres support (v0.2 - SQLite is fine for self-hosted)
-- GitLab support (v0.2 - GitHub + Forgejo first)
-- Bitbucket support (v0.3)
-- Hosted service infrastructure (v0.3)
+- [ ] Docker runtime implementation
+- [ ] Cache volume management (~/.cinch/cache/)
+- [ ] Devcontainer detection (use project's container)
+- [ ] Fallback to Dockerfile, then default image
+- [ ] `container: none` escape hatch in config
 
-**Nice to have:**
-- Build badges (v0.2)
-- User authentication in web UI (self-hosted is single-user for now)
-- Notifications
+---
 
-## Risk Mitigation
+## MVP 1.3: Service Containers
 
-### Risk: GitHub App complexity
-**Mitigation:** Support Personal Access Token first. GitHub App is nice-to-have for v0.1.
+**Goal:** Spin up postgres/redis alongside builds.
 
-### Risk: WebSocket reliability
-**Mitigation:** Implement reconnection early. Test with network disruption scenarios.
+### Tasks
 
-### Risk: Log streaming performance
-**Mitigation:** Chunk logs appropriately. Add backpressure if worker produces faster than server can relay.
+- [ ] Parse `services:` from .cinch.yaml
+- [ ] Docker network per job
+- [ ] Health checks with timeout
+- [ ] Environment variable injection
+- [ ] Auto-cleanup on job completion
 
-### Risk: Web UI takes too long
-**Mitigation:** Keep it minimal. Job list + log viewer is the MVP. No fancy features.
+---
 
-### Risk: Containerization complexity
-**Mitigation:** Focus on Docker only for v0.1. Devcontainer detection can be basic (just use the image, don't parse all features). Fall back to a simple default image if detection fails.
+## Future Releases
 
-## Daily Standup Format
+### v0.2: Multi-Forge & Scale
 
-Each day, AI agent should:
-1. Report what was completed
-2. List any blockers
-3. Confirm next day's tasks
-4. Update checkboxes in this roadmap
+- [ ] GitLab integration
+- [ ] Postgres storage backend
+- [ ] Fan-out to multiple workers
+- [ ] Worker labels and routing
+- [ ] Build badges
 
-## Definition of Done
+### v0.3: Hosted Service
 
-A task is done when:
-- Code compiles without warnings
-- Unit tests pass
-- Integration tests pass (where applicable)
-- Feature works end-to-end
-- No obvious security issues
-- Code is reasonably documented (godoc comments)
+- [ ] Bitbucket integration
+- [ ] Multi-tenant isolation
+- [ ] Usage metering
+- [ ] Team management
+
+---
+
+## Architecture Notes
+
+### Forge Abstraction
+
+The forge system is designed for easy extension:
+
+```go
+// Add a new forge by implementing this interface
+type Forge interface {
+    Name() string
+    Identify(r *http.Request) bool
+    ParsePush(r *http.Request, secret string) (*PushEvent, error)
+    PostStatus(ctx context.Context, repo *Repo, commit string, status *Status) error
+    CloneToken(ctx context.Context, repo *Repo) (string, time.Time, error)
+}
+
+// Create instances via factory
+f := forge.New(forge.ForgeConfig{
+    Type:    forge.TypeGitHub,  // or TypeGitLab, TypeForgejo, TypeGitea
+    Token:   "...",
+    BaseURL: "...",  // for self-hosted instances
+})
+```
+
+To add a new forge:
+1. Create `internal/forge/newforge.go` implementing the interface
+2. Add type constant in `internal/forge/forge.go`
+3. Add case to `forge.New()` factory
+4. Register in `cmd/cinch/main.go` webhook handler
+
+### Job Flow
+
+```
+Webhook → Parse → Create Job → Queue → Dispatch → Worker → Execute → Report
+                                  ↓
+                            Wait for worker
+                            (jobs queue until
+                            eligible worker
+                            comes online)
+```
+
+### Config Loading
+
+Worker reads `.cinch.yaml` from the cloned repo, not from server config. This allows per-repo configuration without server-side setup.
+
+```yaml
+# .cinch.yaml
+command: make check
+timeout: 30m
+```

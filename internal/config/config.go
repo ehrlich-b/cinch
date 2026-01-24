@@ -186,4 +186,5 @@ func (c *Config) applyDefaults() {
 func (c *Config) IsBareMetalContainer() bool {
 	return c.Container == "none"
 }
+
 // test comment Fri Jan 23 20:41:23 EST 2026

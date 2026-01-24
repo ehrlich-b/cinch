@@ -388,9 +388,9 @@ func (h *GitHubAppHandler) CreateCheckRun(repo *storage.Repo, commit, jobID stri
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/check-runs", repo.Owner, repo.Name)
 
 	payload := map[string]any{
-		"name":    "cinch",
+		"name":     "cinch",
 		"head_sha": commit,
-		"status":  "queued",
+		"status":   "queued",
 	}
 	if h.baseURL != "" {
 		payload["details_url"] = fmt.Sprintf("%s/jobs/%s", h.baseURL, jobID)

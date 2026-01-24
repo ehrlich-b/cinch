@@ -62,14 +62,14 @@ type WorkerAvailableNotifier interface {
 
 // WSHandler handles WebSocket connections from workers.
 type WSHandler struct {
-	hub              *Hub
-	storage          storage.Storage
-	log              *slog.Logger
-	statusPoster     StatusPoster
-	logBroadcaster   LogBroadcaster
-	jwtValidator     JWTValidator
-	githubApp        *GitHubAppHandler
-	workerNotifier   WorkerAvailableNotifier
+	hub            *Hub
+	storage        storage.Storage
+	log            *slog.Logger
+	statusPoster   StatusPoster
+	logBroadcaster LogBroadcaster
+	jwtValidator   JWTValidator
+	githubApp      *GitHubAppHandler
+	workerNotifier WorkerAvailableNotifier
 }
 
 // NewWSHandler creates a new WebSocket handler.
