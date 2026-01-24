@@ -190,23 +190,20 @@ func (h *WebhookHandler) postStatus(ctx context.Context, f forge.Forge, repo *st
 	}
 
 	// Create forge instance with token
-	switch f.Name() {
-	case "github":
-		gh := &forge.GitHub{Token: repo.ForgeToken}
-		return gh.PostStatus(ctx, &forge.Repo{
-			Owner: repo.Owner,
-			Name:  repo.Name,
-		}, commit, status)
-	case "forgejo", "gitea":
-		fg := &forge.Forgejo{Token: repo.ForgeToken}
-		return fg.PostStatus(ctx, &forge.Repo{
-			Owner:   repo.Owner,
-			Name:    repo.Name,
-			HTMLURL: repo.HTMLURL,
-		}, commit, status)
+	forgeInstance := forge.New(forge.ForgeConfig{
+		Type:    f.Name(),
+		Token:   repo.ForgeToken,
+		BaseURL: repo.HTMLURL, // Used by Forgejo to derive API URL
+	})
+	if forgeInstance == nil {
+		return fmt.Errorf("unknown forge: %s", f.Name())
 	}
 
-	return fmt.Errorf("unknown forge: %s", f.Name())
+	return forgeInstance.PostStatus(ctx, &forge.Repo{
+		Owner:   repo.Owner,
+		Name:    repo.Name,
+		HTMLURL: repo.HTMLURL,
+	}, commit, status)
 }
 
 func generateJobID() string {
@@ -267,21 +264,18 @@ func (h *WebhookHandler) PostJobStatus(ctx context.Context, jobID string, state 
 	}
 
 	// Post based on forge type
-	switch repo.ForgeType {
-	case storage.ForgeTypeGitHub:
-		gh := &forge.GitHub{Token: repo.ForgeToken}
-		return gh.PostStatus(ctx, &forge.Repo{
-			Owner: repo.Owner,
-			Name:  repo.Name,
-		}, job.Commit, status)
-	case storage.ForgeTypeForgejo, storage.ForgeTypeGitea:
-		fg := &forge.Forgejo{Token: repo.ForgeToken}
-		return fg.PostStatus(ctx, &forge.Repo{
-			Owner:   repo.Owner,
-			Name:    repo.Name,
-			HTMLURL: repo.HTMLURL,
-		}, job.Commit, status)
+	forgeInstance := forge.New(forge.ForgeConfig{
+		Type:    string(repo.ForgeType),
+		Token:   repo.ForgeToken,
+		BaseURL: repo.HTMLURL,
+	})
+	if forgeInstance == nil {
+		return fmt.Errorf("unknown forge type: %s", repo.ForgeType)
 	}
 
-	return fmt.Errorf("unknown forge type: %s", repo.ForgeType)
+	return forgeInstance.PostStatus(ctx, &forge.Repo{
+		Owner:   repo.Owner,
+		Name:    repo.Name,
+		HTMLURL: repo.HTMLURL,
+	}, job.Commit, status)
 }
