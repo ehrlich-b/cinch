@@ -193,6 +193,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// WebSocket for UI log streaming - public for now
 	mux.HandleFunc("/ws/logs/", logStreamHandler.ServeHTTP)
 
+	// Install script for curl | sh
+	mux.HandleFunc("/install.sh", server.InstallScriptHandler)
+
 	// Serve embedded web assets
 	webFS, err := fs.Sub(web.Assets, "dist")
 	if err != nil {
