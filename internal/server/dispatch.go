@@ -243,6 +243,15 @@ func (d *Dispatcher) QueueLength() int {
 	return len(d.queue)
 }
 
+// NotifyWorkerAvailable signals that a worker has become available.
+// This triggers an immediate dispatch attempt for queued jobs.
+func (d *Dispatcher) NotifyWorkerAvailable() {
+	select {
+	case d.queueCh <- struct{}{}:
+	default:
+	}
+}
+
 // PendingJobs returns jobs currently in the queue.
 func (d *Dispatcher) PendingJobs() []*QueuedJob {
 	d.mu.Lock()
