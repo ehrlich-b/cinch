@@ -23,6 +23,7 @@ import (
 	"github.com/ehrlich-b/cinch/internal/server"
 	"github.com/ehrlich-b/cinch/internal/storage"
 	"github.com/ehrlich-b/cinch/internal/worker"
+	"github.com/ehrlich-b/cinch/internal/worker/container"
 	"github.com/ehrlich-b/cinch/web"
 	"github.com/spf13/cobra"
 )
@@ -38,6 +39,9 @@ func parseAppID(s string) int64 {
 var version = "dev"
 
 func main() {
+	// Share version with container package for binary download
+	container.SetVersion(version)
+
 	rootCmd := &cobra.Command{
 		Use:     "cinch",
 		Short:   "CI that's a cinch",
