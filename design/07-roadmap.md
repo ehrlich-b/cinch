@@ -35,27 +35,33 @@
 
 ---
 
-## MVP 1.1: GitHub Releases & Install Script
+## MVP 1.1: GitHub Releases & Install Script - COMPLETE
 
 **Goal:** Users can install Cinch with a single curl command.
 
 ### Tasks
 
-- [ ] GitHub Actions workflow for releases
-  - [ ] Build binaries: Linux/macOS (amd64/arm64)
-  - [ ] Create GitHub Release with changelog
-  - [ ] Upload binaries as release assets
-- [ ] Install script (`install.sh`)
-  - [ ] Detect OS/arch
-  - [ ] Download from GitHub Releases
-  - [ ] Install to ~/.local/bin or /usr/local/bin
-- [ ] README quick start guide
-- [ ] Basic example configs
+- [x] GitHub Actions workflow for releases
+  - [x] Build binaries: Linux/macOS (amd64/arm64)
+  - [x] Create GitHub Release with changelog
+  - [x] Upload binaries as release assets
+- [x] GitHub Actions CI workflow (tests + lint on push/PR)
+- [x] Install script (`install.sh`)
+  - [x] Detect OS/arch
+  - [x] Download from GitHub Releases
+  - [x] Install to ~/.local/bin or /usr/local/bin
+- [x] README quick start guide
 
-### Success Criteria
+### Ready to Release
 
+Tag `v0.1.0` to trigger first release:
 ```bash
-curl -fsSL https://cinch.sh/install | sh
+git tag v0.1.0 && git push --tags
+```
+
+Then users can install with:
+```bash
+curl -fsSL https://raw.githubusercontent.com/ehrlich-b/cinch/main/install.sh | sh
 cinch version
 ```
 

@@ -6,15 +6,18 @@
 
 ## Current: MVP 1.1 - GitHub Releases
 
-- [ ] GitHub Actions release workflow
-  - [ ] Trigger on tag push (v*)
-  - [ ] Build: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64
-  - [ ] Create GitHub Release with binaries
-- [ ] Install script (`install.sh`)
-  - [ ] Detect OS/arch
-  - [ ] Download from GitHub Releases
-  - [ ] Install to ~/.local/bin or /usr/local/bin
-- [ ] README quick start guide
+- [x] GitHub Actions release workflow
+  - [x] Trigger on tag push (v*)
+  - [x] Build: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64
+  - [x] Create GitHub Release with binaries
+- [x] Install script (`install.sh`)
+  - [x] Detect OS/arch
+  - [x] Download from GitHub Releases
+  - [x] Install to ~/.local/bin or /usr/local/bin
+- [x] README quick start guide
+- [x] GitHub Actions CI workflow (tests + lint on push/PR)
+
+**Ready to release:** Tag `v0.1.0` to create first release.
 
 ---
 
