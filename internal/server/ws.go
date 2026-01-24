@@ -292,6 +292,29 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 	worker.Hostname = reg.Hostname
 	worker.Version = reg.Version
 
+	// Ensure worker exists in database (for FK constraint)
+	ctx := context.Background()
+	_, err = h.storage.GetWorker(ctx, worker.ID)
+	if err != nil {
+		// Create worker record
+		dbWorker := &storage.Worker{
+			ID:        worker.ID,
+			Name:      worker.Hostname,
+			Labels:    worker.Labels,
+			Status:    storage.WorkerStatusOnline,
+			LastSeen:  time.Now(),
+			CreatedAt: time.Now(),
+		}
+		if createErr := h.storage.CreateWorker(ctx, dbWorker); createErr != nil {
+			h.log.Warn("failed to create worker record", "worker_id", worker.ID, "error", createErr)
+			// Continue anyway - hub registration still works
+		}
+	} else {
+		// Update existing worker status
+		_ = h.storage.UpdateWorkerStatus(ctx, worker.ID, storage.WorkerStatusOnline)
+		_ = h.storage.UpdateWorkerLastSeen(ctx, worker.ID)
+	}
+
 	// Register with hub
 	h.hub.Register(worker)
 
