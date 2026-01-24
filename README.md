@@ -12,7 +12,7 @@ Push code, get a green checkmark. Your Makefile is the pipeline.
 ## Install
 
 ```bash
-curl -fsSL https://cinch.sh/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ehrlich-b/cinch/main/install.sh | sh
 ```
 
 Or build from source: `make build`
@@ -98,4 +98,3 @@ See `CLAUDE.md` for architecture details.
 ## License
 
 MIT
-# Cinch CI
