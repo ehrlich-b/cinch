@@ -371,12 +371,12 @@ Worker connects via `wss://` URLs automatically (gorilla/websocket handles TLS).
    - [x] Create GitHub OAuth app (callback: `https://cinch.sh/auth/callback`)
    - [x] Deploy to Fly.io
    - [x] DNS: cinch.sh CNAME cinch.fly.dev (Cloudflare, proxied)
-9. **CLI Auth & Self-Registration** - See design/11-cli-auth.md 🚧
+9. **CLI Auth & Self-Registration** - See design/11-cli-auth.md ✅
    - [x] Device auth flow (`POST /auth/device`, polling, browser verify)
    - [x] `cinch login` command
    - [x] Config file (`~/.cinch/config`)
    - [x] Worker self-registration with Bearer token
-   - [ ] `cinch repo add` command
+   - [x] `cinch repo add` command
 10. **Dogfood** - Cinch runs its own CI
    - [ ] Add .cinch.yaml to this repo
    - [ ] `cinch login` + `cinch repo add ehrlich-b/cinch`

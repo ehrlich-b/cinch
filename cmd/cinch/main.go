@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -44,6 +46,7 @@ func main() {
 		loginCmd(),
 		logoutCmd(),
 		whoamiCmd(),
+		repoCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -588,6 +591,165 @@ func whoamiCmd() *cobra.Command {
 				fmt.Printf("User: %s\n", sc.User)
 			}
 
+			return nil
+		},
+	}
+}
+
+func repoCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "repo",
+		Short: "Manage repositories",
+	}
+	cmd.AddCommand(repoAddCmd())
+	cmd.AddCommand(repoListCmd())
+	return cmd
+}
+
+func repoAddCmd() *cobra.Command {
+	var forge string
+
+	cmd := &cobra.Command{
+		Use:   "add <owner/name>",
+		Short: "Add a repository to Cinch",
+		Long: `Add a repository to Cinch for CI.
+
+Example:
+  cinch repo add ehrlich-b/cinch
+
+After adding, configure the webhook in GitHub/GitLab:
+  - URL: shown in output
+  - Secret: shown in output
+  - Events: push`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRepoAdd(args[0], forge)
+		},
+	}
+	cmd.Flags().StringVar(&forge, "forge", "github", "Forge type (github, forgejo, gitea)")
+	return cmd
+}
+
+func runRepoAdd(repoPath string, forgeType string) error {
+	parts := strings.SplitN(repoPath, "/", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid repo format: use owner/name")
+	}
+	owner, name := parts[0], parts[1]
+
+	// Load credentials
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	serverCfg, ok := cfg.Servers["default"]
+	if !ok || serverCfg.Token == "" {
+		return fmt.Errorf("not logged in - run 'cinch login' first")
+	}
+
+	// Build clone URL based on forge
+	var cloneURL string
+	switch forgeType {
+	case "github":
+		cloneURL = fmt.Sprintf("https://github.com/%s/%s.git", owner, name)
+	case "forgejo", "gitea":
+		// For self-hosted, user needs to provide URL
+		return fmt.Errorf("forgejo/gitea requires --clone-url flag (not yet implemented)")
+	default:
+		return fmt.Errorf("unknown forge type: %s", forgeType)
+	}
+
+	// Create repo via API
+	reqBody := fmt.Sprintf(`{"forge_type":"%s","owner":"%s","name":"%s","clone_url":"%s"}`,
+		forgeType, owner, name, cloneURL)
+
+	req, err := http.NewRequest("POST", serverCfg.URL+"/api/repos",
+		strings.NewReader(reqBody))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+serverCfg.Token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		ID            string `json:"id"`
+		WebhookSecret string `json:"webhook_secret"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	webhookURL := serverCfg.URL + "/webhooks"
+
+	fmt.Printf("Added repo %s/%s\n", owner, name)
+	fmt.Println()
+	fmt.Println("Configure webhook in GitHub:")
+	fmt.Printf("  URL: %s\n", webhookURL)
+	fmt.Printf("  Secret: %s\n", result.WebhookSecret)
+	fmt.Println("  Content type: application/json")
+	fmt.Println("  Events: push")
+
+	return nil
+}
+
+func repoListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List repositories",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := cli.LoadConfig()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			serverCfg, ok := cfg.Servers["default"]
+			if !ok || serverCfg.Token == "" {
+				return fmt.Errorf("not logged in - run 'cinch login' first")
+			}
+
+			req, err := http.NewRequest("GET", serverCfg.URL+"/api/repos", nil)
+			if err != nil {
+				return fmt.Errorf("create request: %w", err)
+			}
+			req.Header.Set("Authorization", "Bearer "+serverCfg.Token)
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return fmt.Errorf("request failed: %w", err)
+			}
+			defer resp.Body.Close()
+
+			var result struct {
+				Repos []struct {
+					ID    string `json:"id"`
+					Owner string `json:"owner"`
+					Name  string `json:"name"`
+				} `json:"repos"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				return fmt.Errorf("decode response: %w", err)
+			}
+
+			if len(result.Repos) == 0 {
+				fmt.Println("No repositories configured")
+				return nil
+			}
+
+			for _, r := range result.Repos {
+				fmt.Printf("%s/%s\n", r.Owner, r.Name)
+			}
 			return nil
 		},
 	}
