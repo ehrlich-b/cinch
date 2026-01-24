@@ -9,8 +9,7 @@
 Cinch builds itself. No GitHub Actions.
 
 - [x] Install script (`install.sh`) - detects OS/arch, downloads from GitHub Releases
-- [ ] `make release` target - cross-compiles all platforms, uploads to GitHub Releases
-- [ ] Tag-triggered builds - worker detects tag push, runs release
+- [x] `make release` target - cross-compiles all platforms, uploads to GitHub Releases
 - [ ] First release: `v0.1.0`
 
 Release process:

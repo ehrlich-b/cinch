@@ -68,15 +68,21 @@ ci: build-go
 # -------- Release --------
 #
 # Cross-compile and upload to GitHub Releases.
-# Requires: gh CLI authenticated, git tag on HEAD
+# When run via Cinch, GITHUB_TOKEN is automatically available.
+# Requires: git tag on HEAD
 #
-# Usage: git tag v0.1.0 && make release
+# Usage: git tag v0.1.0 && git push --tags
+#        (Cinch worker runs this automatically, or run locally)
 
 VERSION := $(shell git describe --tags --always)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 release: web
+	@if [ -z "$$GITHUB_TOKEN" ]; then \
+		echo "Error: GITHUB_TOKEN not set. Run via Cinch or set manually."; \
+		exit 1; \
+	fi
 	@if ! git describe --tags --exact-match HEAD 2>/dev/null; then \
 		echo "Error: HEAD is not tagged. Run: git tag vX.Y.Z"; \
 		exit 1; \

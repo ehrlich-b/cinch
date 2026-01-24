@@ -105,6 +105,7 @@ type JobRepo struct {
 	CloneToken string `json:"clone_token,omitempty"`
 	Commit     string `json:"commit"`
 	Branch     string `json:"branch"`
+	ForgeType  string `json:"forge_type"` // github, gitlab, forgejo, gitea
 	IsPR       bool   `json:"is_pr"`
 	PRNumber   int    `json:"pr_number,omitempty"`
 }

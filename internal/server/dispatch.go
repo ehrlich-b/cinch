@@ -157,6 +157,7 @@ func (d *Dispatcher) tryAssign(qj *QueuedJob) bool {
 			Branch:     qj.Branch,
 			Commit:     qj.Job.Commit,
 			CloneToken: qj.CloneToken,
+			ForgeType:  string(qj.Repo.ForgeType),
 		},
 		Config: qj.Config,
 	}

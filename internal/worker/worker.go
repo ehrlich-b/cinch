@@ -451,6 +451,21 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	env["CINCH_BRANCH"] = assign.Repo.Branch
 	env["CINCH_COMMIT"] = assign.Repo.Commit
 	env["CINCH_REPO"] = assign.Repo.CloneURL
+	env["CINCH_FORGE"] = assign.Repo.ForgeType
+
+	// Set forge-specific token env var for API access (releases, comments, etc.)
+	if assign.Repo.CloneToken != "" {
+		switch assign.Repo.ForgeType {
+		case "github":
+			env["GITHUB_TOKEN"] = assign.Repo.CloneToken
+		case "gitlab":
+			env["GITLAB_TOKEN"] = assign.Repo.CloneToken
+			env["CI_JOB_TOKEN"] = assign.Repo.CloneToken // GitLab compat
+		case "forgejo", "gitea":
+			env["GITEA_TOKEN"] = assign.Repo.CloneToken
+		}
+		env["CINCH_FORGE_TOKEN"] = assign.Repo.CloneToken
+	}
 
 	// Log what we're about to do
 	w.log.Info("executing job",

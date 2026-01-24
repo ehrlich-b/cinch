@@ -38,8 +38,14 @@ func TestDispatcherEnqueue(t *testing.T) {
 		t.Fatalf("CreateJob failed: %v", err)
 	}
 
+	repo := &storage.Repo{
+		ID:        "r_1",
+		ForgeType: storage.ForgeTypeGitHub,
+		CloneURL:  "https://github.com/test/repo.git",
+	}
 	queued := &QueuedJob{
 		Job:      job,
+		Repo:     repo,
 		Labels:   []string{"linux"},
 		Config:   protocol.JobConfig{Command: "make test"},
 		CloneURL: "https://github.com/test/repo.git",
@@ -115,8 +121,14 @@ func TestDispatcherAssignment(t *testing.T) {
 		t.Fatalf("CreateJob failed: %v", err)
 	}
 
+	repo := &storage.Repo{
+		ID:        "r_1",
+		ForgeType: storage.ForgeTypeGitHub,
+		CloneURL:  "https://github.com/test/repo.git",
+	}
 	queued := &QueuedJob{
 		Job:      job,
+		Repo:     repo,
 		Labels:   []string{"linux"},
 		Config:   protocol.JobConfig{Command: "make test"},
 		CloneURL: "https://github.com/test/repo.git",
@@ -186,8 +198,14 @@ func TestDispatcherNoMatchingWorker(t *testing.T) {
 		t.Fatalf("CreateJob failed: %v", err)
 	}
 
+	repo := &storage.Repo{
+		ID:        "r_1",
+		ForgeType: storage.ForgeTypeGitHub,
+		CloneURL:  "https://github.com/test/repo.git",
+	}
 	queued := &QueuedJob{
 		Job:    job,
+		Repo:   repo,
 		Labels: []string{"windows"},
 		Config: protocol.JobConfig{Command: "make test"},
 	}
