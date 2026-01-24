@@ -63,6 +63,7 @@ type WSHandler struct {
 	statusPoster   StatusPoster
 	logBroadcaster LogBroadcaster
 	jwtValidator   JWTValidator
+	githubApp      *GitHubAppHandler
 }
 
 // NewWSHandler creates a new WebSocket handler.
@@ -90,6 +91,11 @@ func (h *WSHandler) SetLogBroadcaster(lb LogBroadcaster) {
 // SetJWTValidator sets the JWT validator for user token authentication.
 func (h *WSHandler) SetJWTValidator(v JWTValidator) {
 	h.jwtValidator = v
+}
+
+// SetGitHubApp sets the GitHub App handler for status posting.
+func (h *WSHandler) SetGitHubApp(app *GitHubAppHandler) {
+	h.githubApp = app
 }
 
 // ServeHTTP handles WebSocket upgrade requests.

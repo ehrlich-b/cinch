@@ -30,17 +30,18 @@ type Dispatcher struct {
 
 // QueuedJob represents a job waiting for a worker.
 type QueuedJob struct {
-	Job        *storage.Job
-	Repo       *storage.Repo // Storage repo (for forge token, webhook secret)
-	Labels     []string
-	Config     protocol.JobConfig // Command, env vars, etc.
-	CloneURL   string             // Clone URL
-	Branch     string             // Branch to checkout
-	CloneToken string             // Token for cloning private repos
-	Forge      interface{}        // Forge implementation (for status posting)
-	QueuedAt   time.Time
-	Attempts   int
-	MaxRetries int
+	Job            *storage.Job
+	Repo           *storage.Repo // Storage repo (for forge token, webhook secret)
+	Labels         []string
+	Config         protocol.JobConfig // Command, env vars, etc.
+	CloneURL       string             // Clone URL
+	Branch         string             // Branch to checkout
+	CloneToken     string             // Token for cloning private repos
+	Forge          interface{}        // Forge implementation (for status posting)
+	InstallationID int64              // GitHub App installation ID
+	QueuedAt       time.Time
+	Attempts       int
+	MaxRetries     int
 }
 
 // NewDispatcher creates a new job dispatcher.

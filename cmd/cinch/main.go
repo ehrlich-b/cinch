@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -25,6 +26,14 @@ import (
 	"github.com/ehrlich-b/cinch/web"
 	"github.com/spf13/cobra"
 )
+
+func parseAppID(s string) int64 {
+	if s == "" {
+		return 0
+	}
+	id, _ := strconv.ParseInt(s, 10, 64)
+	return id
+}
 
 var version = "dev"
 
@@ -127,10 +136,25 @@ func runServer(cmd *cobra.Command, args []string) error {
 	apiHandler := server.NewAPIHandler(store, hub, log)
 	logStreamHandler := server.NewLogStreamHandler(store, log)
 
+	// Create GitHub App handler
+	githubAppConfig := server.GitHubAppConfig{
+		AppID:         parseAppID(os.Getenv("CINCH_GITHUB_APP_ID")),
+		PrivateKey:    os.Getenv("CINCH_GITHUB_APP_PRIVATE_KEY"),
+		WebhookSecret: os.Getenv("CINCH_GITHUB_APP_WEBHOOK_SECRET"),
+	}
+	githubAppHandler, err := server.NewGitHubAppHandler(githubAppConfig, store, dispatcher, baseURL, log)
+	if err != nil {
+		return fmt.Errorf("create github app handler: %w", err)
+	}
+	if githubAppHandler.IsConfigured() {
+		log.Info("GitHub App configured", "app_id", githubAppConfig.AppID)
+	}
+
 	// Wire up dependencies
 	wsHandler.SetStatusPoster(webhookHandler)
 	wsHandler.SetLogBroadcaster(logStreamHandler)
 	wsHandler.SetJWTValidator(authHandler)
+	wsHandler.SetGitHubApp(githubAppHandler)
 
 	// Register forges (for webhook identification)
 	webhookHandler.RegisterForge(&forge.GitHub{})
@@ -151,7 +175,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Read-only endpoints are public, mutations require auth
 	mux.Handle("/api/", noCache(authMiddleware(apiHandler, authHandler)))
 
-	// Webhook endpoint (no caching) - public (has signature verification)
+	// Webhook endpoints (no caching) - public (has signature verification)
+	mux.Handle("/webhooks/github-app", noCache(githubAppHandler))
 	mux.Handle("/webhooks", noCache(webhookHandler))
 	mux.Handle("/webhooks/", noCache(webhookHandler))
 
