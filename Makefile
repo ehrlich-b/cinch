@@ -75,10 +75,6 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 release: web
-	@if [ -z "$$GITHUB_TOKEN" ]; then \
-		echo "Error: GITHUB_TOKEN not set"; \
-		exit 1; \
-	fi
 	@if [ -z "$(VERSION)" ]; then \
 		echo "Error: CINCH_TAG not set (run via Cinch CI on tag push)"; \
 		exit 1; \
@@ -92,8 +88,8 @@ release: web
 		echo "  $$os/$$arch"; \
 		GOOS=$$os GOARCH=$$arch go build -ldflags="$(LDFLAGS)" -o $$output ./cmd/cinch; \
 	done
-	@echo "Creating GitHub release $(VERSION)..."
-	gh release create $(VERSION) dist/* --generate-notes
+	@echo "Creating release $(VERSION)..."
+	cinch release dist/*
 
 # -----------------------------------------------------------------------------
 # Fly.io Deployment (manual)

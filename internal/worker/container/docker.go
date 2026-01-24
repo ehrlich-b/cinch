@@ -49,6 +49,12 @@ func (d *Docker) Run(ctx context.Context, command string) (int, error) {
 		args = append(args, "-w", "/workspace")
 	}
 
+	// Inject cinch binary into container
+	// This makes `cinch release` available without installing anything
+	if cinchPath, err := os.Executable(); err == nil {
+		args = append(args, "-v", cinchPath+":/usr/local/bin/cinch:ro")
+	}
+
 	// Mount cache volumes
 	for volName, containerPath := range d.CacheVolumes {
 		args = append(args, "-v", volName+":"+containerPath)

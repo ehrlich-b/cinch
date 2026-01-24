@@ -4,7 +4,7 @@ FROM golang:1.24-bookworm
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs
 
-# Install Docker CLI (for container tests)
+# Install Docker CLI and tools
 RUN apt-get update && apt-get install -y \
     docker.io \
     make \

@@ -48,6 +48,7 @@ func main() {
 		serverCmd(),
 		workerCmd(),
 		runCmd(),
+		releaseCmd(),
 		statusCmd(),
 		logsCmd(),
 		configCmd(),
@@ -781,6 +782,37 @@ func repoListCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func releaseCmd() *cobra.Command {
+	var opts cli.ReleaseOptions
+
+	cmd := &cobra.Command{
+		Use:   "release [files...]",
+		Short: "Create a release on the forge and upload assets",
+		Long: `Create a release on the detected forge (GitHub, GitLab, Gitea, etc.)
+and upload the specified files as release assets.
+
+When running inside a Cinch job, forge, tag, repository, and token are
+auto-detected from environment variables. Outside of CI, use flags.`,
+		Example: `  cinch release dist/*
+  cinch release --tag v1.0.0 dist/myapp-linux-amd64
+  cinch release --forge github --repo owner/repo dist/*`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.Files = args
+			return cli.Release(opts)
+		},
+	}
+
+	cmd.Flags().StringVar(&opts.Forge, "forge", "", "Override forge detection (github, gitlab, gitea)")
+	cmd.Flags().StringVar(&opts.Tag, "tag", "", "Override tag (default: CINCH_TAG)")
+	cmd.Flags().StringVar(&opts.Repo, "repo", "", "Override repository (owner/repo)")
+	cmd.Flags().StringVar(&opts.Token, "token", "", "Override token (default: CINCH_FORGE_TOKEN)")
+	cmd.Flags().BoolVar(&opts.Draft, "draft", false, "Create as draft release")
+	cmd.Flags().BoolVar(&opts.Prerelease, "prerelease", false, "Mark as prerelease")
+
+	return cmd
 }
 
 // openBrowser tries to open a URL in the default browser.
