@@ -74,6 +74,8 @@ func (s *SQLiteStorage) migrate() error {
 			status TEXT NOT NULL DEFAULT 'pending',
 			exit_code INTEGER,
 			worker_id TEXT,
+			installation_id INTEGER,
+			check_run_id INTEGER,
 			started_at DATETIME,
 			finished_at DATETIME,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -108,6 +110,11 @@ func (s *SQLiteStorage) migrate() error {
 			return fmt.Errorf("execute migration: %w", err)
 		}
 	}
+
+	// Add columns to existing jobs tables (ignore if exists)
+	s.db.Exec("ALTER TABLE jobs ADD COLUMN installation_id INTEGER")
+	s.db.Exec("ALTER TABLE jobs ADD COLUMN check_run_id INTEGER")
+
 	return nil
 }
 
@@ -119,28 +126,35 @@ func (s *SQLiteStorage) Close() error {
 
 func (s *SQLiteStorage) CreateJob(ctx context.Context, job *Job) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO jobs (id, repo_id, commit_sha, branch, status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		job.ID, job.RepoID, job.Commit, job.Branch, job.Status, job.CreatedAt)
+		`INSERT INTO jobs (id, repo_id, commit_sha, branch, status, installation_id, check_run_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		job.ID, job.RepoID, job.Commit, job.Branch, job.Status, job.InstallationID, job.CheckRunID, job.CreatedAt)
 	return err
 }
 
 func (s *SQLiteStorage) GetJob(ctx context.Context, id string) (*Job, error) {
 	job := &Job{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, repo_id, commit_sha, branch, status, exit_code, worker_id,
+		`SELECT id, repo_id, commit_sha, branch, status, exit_code, worker_id, installation_id, check_run_id,
 		        started_at, finished_at, created_at
 		 FROM jobs WHERE id = ?`, id).Scan(
 		&job.ID, &job.RepoID, &job.Commit, &job.Branch, &job.Status,
-		&job.ExitCode, &job.WorkerID, &job.StartedAt, &job.FinishedAt, &job.CreatedAt)
+		&job.ExitCode, &job.WorkerID, &job.InstallationID, &job.CheckRunID, &job.StartedAt, &job.FinishedAt, &job.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
 	return job, err
 }
 
+func (s *SQLiteStorage) UpdateJobCheckRunID(ctx context.Context, id string, checkRunID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE jobs SET check_run_id = ? WHERE id = ?`,
+		checkRunID, id)
+	return err
+}
+
 func (s *SQLiteStorage) ListJobs(ctx context.Context, filter JobFilter) ([]*Job, error) {
-	query := `SELECT id, repo_id, commit_sha, branch, status, exit_code, worker_id,
+	query := `SELECT id, repo_id, commit_sha, branch, status, exit_code, worker_id, installation_id, check_run_id,
 	                 started_at, finished_at, created_at FROM jobs WHERE 1=1`
 	args := []any{}
 
@@ -178,7 +192,7 @@ func (s *SQLiteStorage) ListJobs(ctx context.Context, filter JobFilter) ([]*Job,
 	for rows.Next() {
 		job := &Job{}
 		if err := rows.Scan(&job.ID, &job.RepoID, &job.Commit, &job.Branch,
-			&job.Status, &job.ExitCode, &job.WorkerID, &job.StartedAt,
+			&job.Status, &job.ExitCode, &job.WorkerID, &job.InstallationID, &job.CheckRunID, &job.StartedAt,
 			&job.FinishedAt, &job.CreatedAt); err != nil {
 			return nil, err
 		}
