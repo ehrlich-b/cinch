@@ -638,16 +638,5 @@ func (w *Worker) runInContainer(ctx context.Context, jobID string, source *conta
 		Stderr:       stderr,
 	}
 
-	// Debug: show what's in the workspace
-	fmt.Fprintf(stdout, "--- workspace: %s ---\n", workDir)
-	debugDocker := &container.Docker{
-		WorkDir: workDir,
-		Image:   image,
-		Stdout:  stdout,
-		Stderr:  stderr,
-	}
-	_, _ = debugDocker.Run(ctx, "ls -la")
-	fmt.Fprintf(stdout, "--- running: %s ---\n", command)
-
 	return docker.Run(ctx, command)
 }
