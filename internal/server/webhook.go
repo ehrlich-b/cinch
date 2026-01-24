@@ -147,7 +147,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Repo:     repo,
 		Forge:    matchedForge,
 		CloneURL: event.Repo.CloneURL,
+		Ref:      event.Ref,
 		Branch:   event.Branch,
+		Tag:      event.Tag,
 		Config: protocol.JobConfig{
 			Command: repo.Command,
 		},

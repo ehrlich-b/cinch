@@ -448,7 +448,9 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 		env[k] = v
 	}
 	env["CINCH_JOB_ID"] = jobID
+	env["CINCH_REF"] = assign.Repo.Ref
 	env["CINCH_BRANCH"] = assign.Repo.Branch
+	env["CINCH_TAG"] = assign.Repo.Tag
 	env["CINCH_COMMIT"] = assign.Repo.Commit
 	env["CINCH_REPO"] = assign.Repo.CloneURL
 	env["CINCH_FORGE"] = assign.Repo.ForgeType

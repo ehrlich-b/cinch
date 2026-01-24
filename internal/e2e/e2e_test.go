@@ -546,6 +546,7 @@ func TestE2EJobCancellation(t *testing.T) {
 		Job:      job,
 		Repo:     repo,
 		CloneURL: "https://github.com/test/repo.git",
+		Ref:      "refs/heads/main",
 		Branch:   "main",
 		Config:   protocol.JobConfig{Command: "sleep 60"},
 	})

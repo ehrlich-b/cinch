@@ -32,7 +32,9 @@ type Forge interface {
 type PushEvent struct {
 	Repo   *Repo
 	Commit string // SHA of the head commit
-	Branch string // Branch name (without refs/heads/)
+	Ref    string // Full ref (refs/heads/main or refs/tags/v1.0.0)
+	Branch string // Branch name (empty for tag pushes)
+	Tag    string // Tag name (empty for branch pushes)
 	Sender string // Username who pushed
 }
 

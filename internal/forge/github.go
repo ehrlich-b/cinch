@@ -63,13 +63,18 @@ func (g *GitHub) ParsePush(r *http.Request, secret string) (*PushEvent, error) {
 		return nil, fmt.Errorf("parse payload: %w", err)
 	}
 
-	// Skip branch deletions
+	// Skip deletions
 	if payload.Deleted {
-		return nil, errors.New("branch deletion event")
+		return nil, errors.New("ref deletion event")
 	}
 
-	// Extract branch name from ref (refs/heads/main -> main)
-	branch := strings.TrimPrefix(payload.Ref, "refs/heads/")
+	// Parse ref to determine if branch or tag
+	var branch, tag string
+	if strings.HasPrefix(payload.Ref, "refs/tags/") {
+		tag = strings.TrimPrefix(payload.Ref, "refs/tags/")
+	} else {
+		branch = strings.TrimPrefix(payload.Ref, "refs/heads/")
+	}
 
 	return &PushEvent{
 		Repo: &Repo{
@@ -81,7 +86,9 @@ func (g *GitHub) ParsePush(r *http.Request, secret string) (*PushEvent, error) {
 			Private:   payload.Repository.Private,
 		},
 		Commit: payload.After,
+		Ref:    payload.Ref,
 		Branch: branch,
+		Tag:    tag,
 		Sender: payload.Sender.Login,
 	}, nil
 }
