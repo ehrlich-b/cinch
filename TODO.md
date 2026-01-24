@@ -97,9 +97,11 @@ Already done: Gitea, Forgejo (same codebase). These cover the self-hosted commun
 - [ ] `cinch logs -f` - stream logs from CLI
 - [ ] Filter jobs by repo/status/branch in UI
 - [ ] Show current job per worker in UI
+- [ ] Homepage should only show your own jobs (not all jobs)
 
 ### Known Issues
 - [ ] **Rejected jobs not re-queued** - When a worker rejects a job (at max concurrency), the job is not put back in the queue. See `ws.go:403` TODO.
+- [ ] **Worker should check dependencies on startup** - Probe for docker/podman before accepting jobs. Fail fast with "no container runtime found" instead of failing on first job.
 
 ---
 
