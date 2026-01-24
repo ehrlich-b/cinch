@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Trust mounted workspace (git safe.directory check fails on mounted volumes)
+RUN git config --global --add safe.directory /workspace
+
 # Set up Go environment
 ENV GOPATH=/go
 ENV PATH=$GOPATH/bin:$PATH
