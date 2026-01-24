@@ -1,4 +1,4 @@
-.PHONY: build build-go test fmt lint clean web web-deps web-dev dev dev-worker run check
+.PHONY: build build-go test fmt lint clean web web-deps web-dev dev dev-worker run check fly-create fly-deploy fly-logs fly-status fly-ssh
 
 # Build the cinch binary (includes web assets)
 build: web build-go
@@ -64,3 +64,39 @@ validate: build-go
 # Run cinch run using config file
 ci: build-go
 	./bin/cinch run
+
+# -------- Fly.io Deployment --------
+#
+# First-time setup:
+#   1. make fly-create   (create app, allocate IPs, volume)
+#   2. make fly-deploy   (deploy)
+#
+# Subsequent deploys: make fly-deploy
+
+FLY_APP := cinch
+
+fly-create:
+	@echo "Creating Fly.io application..."
+	fly apps create $(FLY_APP)
+	fly volumes create cinch_data --size 1 --region iad -a $(FLY_APP) -y
+	@echo ""
+	@echo "App created!"
+	@echo "1. In Cloudflare: cinch.sh CNAME $(FLY_APP).fly.dev (proxied)"
+	@echo "2. Set SSL mode: Full (Strict)"
+	@echo "3. Run: make fly-deploy"
+
+fly-deploy:
+	@echo "Deploying to Fly.io..."
+	fly deploy
+
+fly-logs:
+	fly logs -a $(FLY_APP)
+
+fly-status:
+	@fly status -a $(FLY_APP)
+	@echo ""
+	@echo "IPs (point cinch.sh DNS here):"
+	@fly ips list -a $(FLY_APP)
+
+fly-ssh:
+	fly ssh console -a $(FLY_APP)

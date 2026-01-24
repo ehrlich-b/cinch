@@ -1,0 +1,28 @@
+app = "cinch"
+primary_region = "iad"
+
+[build]
+
+[env]
+  CINCH_ADDR = "0.0.0.0:8080"
+  CINCH_BASE_URL = "https://cinch.sh"
+  CINCH_DATA_DIR = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 250
+    soft_limit = 200
+
+[mounts]
+  source = "cinch_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
