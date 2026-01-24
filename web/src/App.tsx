@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 
-type Page = 'jobs' | 'workers' | 'settings'
+type Page = 'jobs' | 'workers' | 'settings' | 'badges'
 
 interface AuthState {
   authenticated: boolean
@@ -44,6 +44,12 @@ export function App() {
           >
             Settings
           </button>
+          <button
+            className={page === 'badges' ? 'active' : ''}
+            onClick={() => setPage('badges')}
+          >
+            Badges
+          </button>
         </nav>
         <div className="auth">
           {auth.loading ? null : auth.authenticated ? (
@@ -63,6 +69,7 @@ export function App() {
         )}
         {page === 'workers' && <WorkersPage />}
         {page === 'settings' && <SettingsPage />}
+        {page === 'badges' && <BadgesPage />}
       </main>
     </div>
   )
@@ -234,6 +241,287 @@ function SettingsPage() {
       <p>Settings page coming soon...</p>
     </div>
   )
+}
+
+// Badge style definitions
+const BADGE_STYLES = {
+  // Free tier
+  flat: { name: 'Flat', tier: 'free', desc: 'Classic shields.io style' },
+  modern: { name: 'Modern', tier: 'free', desc: 'Clean dark theme' },
+  // Pro tier
+  neon: { name: 'Neon Glow', tier: 'pro', desc: 'Cyberpunk with glow effects' },
+  electric: { name: 'Electric', tier: 'pro', desc: 'Bold uppercase with subtle glow' },
+  terminal: { name: 'Terminal', tier: 'pro', desc: 'CLI aesthetic with cursor' },
+  glass: { name: 'Glass', tier: 'pro', desc: 'Glassmorphism effect' },
+  holographic: { name: 'Holographic', tier: 'pro', desc: 'Iridescent border' },
+  pixel: { name: 'Pixel', tier: 'pro', desc: 'Retro 8-bit style' },
+  minimal: { name: 'Minimal', tier: 'pro', desc: 'Ultra-clean status pill' },
+  outlined: { name: 'Outlined', tier: 'pro', desc: 'Ghost style, any background' },
+} as const
+
+type BadgeStyle = keyof typeof BADGE_STYLES
+type BadgeStatus = 'passing' | 'failing' | 'running' | 'unknown'
+
+function BadgesPage() {
+  const [selectedStyle, setSelectedStyle] = useState<BadgeStyle>('neon')
+  const [selectedStatus, setSelectedStatus] = useState<BadgeStatus>('passing')
+  const [copied, setCopied] = useState(false)
+
+  const exampleOwner = 'yourname'
+  const exampleRepo = 'yourrepo'
+  const badgeUrl = `https://cinch.sh/badge/${exampleOwner}/${exampleRepo}.svg?style=${selectedStyle}`
+  const markdownSnippet = `[![Build Status](${badgeUrl})](https://cinch.sh/${exampleOwner}/${exampleRepo})`
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(markdownSnippet)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="badges-page">
+      <div className="badges-hero">
+        <h2>Build Badges</h2>
+        <p className="badges-subtitle">Show off your build status with style</p>
+      </div>
+
+      <div className="badges-preview-section">
+        <div className="badge-preview-large">
+          <BadgeSVG style={selectedStyle} status={selectedStatus} />
+        </div>
+        <div className="status-toggles">
+          {(['passing', 'failing', 'running', 'unknown'] as const).map(status => (
+            <button
+              key={status}
+              className={`status-toggle ${selectedStatus === status ? 'active' : ''}`}
+              onClick={() => setSelectedStatus(status)}
+            >
+              {status}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="badges-grid">
+        {(Object.entries(BADGE_STYLES) as [BadgeStyle, typeof BADGE_STYLES[BadgeStyle]][]).map(([key, style]) => (
+          <div
+            key={key}
+            className={`badge-card ${selectedStyle === key ? 'selected' : ''} ${style.tier === 'pro' ? 'pro' : ''}`}
+            onClick={() => setSelectedStyle(key)}
+          >
+            {style.tier === 'pro' && <span className="pro-badge">PRO</span>}
+            <div className="badge-card-preview">
+              <BadgeSVG style={key} status="passing" />
+            </div>
+            <div className="badge-card-info">
+              <span className="badge-card-name">{style.name}</span>
+              <span className="badge-card-desc">{style.desc}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="badge-usage">
+        <h3>Add to your README</h3>
+        <div className="code-block">
+          <code>{markdownSnippet}</code>
+          <button onClick={copyToClipboard} className="copy-btn">
+            {copied ? '✓ Copied' : 'Copy'}
+          </button>
+        </div>
+        <p className="usage-note">
+          Replace <code>yourname/yourrepo</code> with your repository path.
+          Add <code>?branch=main</code> to show status for a specific branch.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// SVG Badge component - renders inline SVG for each style
+function BadgeSVG({ style, status }: { style: BadgeStyle; status: BadgeStatus }) {
+  const colors = {
+    passing: { main: '#22c55e', glow: '#4ade80', text: 'passing' },
+    failing: { main: '#ef4444', glow: '#f87171', text: 'failing' },
+    running: { main: '#eab308', glow: '#facc15', text: 'running' },
+    unknown: { main: '#6b7280', glow: '#9ca3af', text: 'unknown' },
+  }
+  const c = colors[status]
+
+  switch (style) {
+    case 'flat':
+      return (
+        <svg width="108" height="20" xmlns="http://www.w3.org/2000/svg">
+          <linearGradient id="flat-b" x2="0" y2="100%">
+            <stop offset="0" stopColor="#bbb" stopOpacity=".1"/>
+            <stop offset="1" stopOpacity=".1"/>
+          </linearGradient>
+          <clipPath id="flat-a"><rect width="108" height="20" rx="3"/></clipPath>
+          <g clipPath="url(#flat-a)">
+            <path fill="#555" d="M0 0h49v20H0z"/>
+            <path fill={c.main} d="M49 0h59v20H49z"/>
+            <path fill="url(#flat-b)" d="M0 0h108v20H0z"/>
+          </g>
+          <g fill="#fff" textAnchor="middle" fontFamily="DejaVu Sans,Verdana,sans-serif" fontSize="11">
+            <text x="24.5" y="15" fillOpacity=".3">cinch</text>
+            <text x="24.5" y="14">cinch</text>
+            <text x="77.5" y="15" fillOpacity=".3">{c.text}</text>
+            <text x="77.5" y="14">{c.text}</text>
+          </g>
+        </svg>
+      )
+
+    case 'modern':
+      return (
+        <svg width="116" height="26" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="mod-bg" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#27272a"/>
+              <stop offset="100%" stopColor="#18181b"/>
+            </linearGradient>
+          </defs>
+          <rect width="116" height="26" rx="6" fill="url(#mod-bg)"/>
+          <circle cx="16" cy="13" r="5" fill={c.main}/>
+          <text x="28" y="17" fontFamily="-apple-system,sans-serif" fontSize="11" fontWeight="600" fill="#71717a">cinch</text>
+          <text x="66" y="17" fontFamily="-apple-system,sans-serif" fontSize="11" fontWeight="500" fill="#a1a1aa">{c.text}</text>
+        </svg>
+      )
+
+    case 'neon':
+      return (
+        <svg width="130" height="32" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id={`neon-glow-${status}`} x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="3" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <linearGradient id={`neon-grad-${status}`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor={c.main}/>
+              <stop offset="100%" stopColor={c.glow}/>
+            </linearGradient>
+          </defs>
+          <rect width="130" height="32" rx="6" fill="#0a0a0a"/>
+          <rect x="1" y="1" width="128" height="30" rx="5" fill="none" stroke={`url(#neon-grad-${status})`} strokeWidth="1.5" filter={`url(#neon-glow-${status})`} opacity="0.6"/>
+          <text x="14" y="21" fontFamily="JetBrains Mono,monospace" fontSize="13" fontWeight="700" fill="#888">cinch</text>
+          <line x1="60" y1="8" x2="60" y2="24" stroke="#333" strokeWidth="1"/>
+          <text x="70" y="21" fontFamily="JetBrains Mono,monospace" fontSize="13" fontWeight="600" fill={`url(#neon-grad-${status})`} filter={`url(#neon-glow-${status})`}>{c.text}</text>
+        </svg>
+      )
+
+    case 'electric':
+      return (
+        <svg width="140" height="28" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id={`elec-${status}`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor={c.main}/>
+              <stop offset="100%" stopColor={c.glow}/>
+            </linearGradient>
+            <filter id={`elec-glow-${status}`} x="-100%" y="-100%" width="300%" height="300%">
+              <feGaussianBlur stdDeviation="2" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <rect width="140" height="28" rx="4" fill="#0c0c0c"/>
+          <rect x="0" y="0" width="140" height="1" fill={`url(#elec-${status})`} opacity="0.3"/>
+          <text x="16" y="18" fontFamily="Inter,sans-serif" fontSize="12" fontWeight="800" fill="#666" letterSpacing="1">CINCH</text>
+          <rect x="68" y="6" width="1" height="16" fill="#333"/>
+          <text x="80" y="18" fontFamily="Inter,sans-serif" fontSize="12" fontWeight="600" fill={`url(#elec-${status})`} filter={`url(#elec-glow-${status})`}>{c.text.toUpperCase()}</text>
+        </svg>
+      )
+
+    case 'terminal':
+      return (
+        <svg width="145" height="24" xmlns="http://www.w3.org/2000/svg">
+          <rect width="145" height="24" rx="4" fill="#0d1117"/>
+          <rect x="1" y="1" width="143" height="22" rx="3" fill="none" stroke="#30363d" strokeWidth="1"/>
+          <text x="8" y="16" fontFamily="SF Mono,monospace" fontSize="11" fill={c.main}>$</text>
+          <text x="20" y="16" fontFamily="SF Mono,monospace" fontSize="11" fill="#c9d1d9">cinch</text>
+          <text x="58" y="16" fontFamily="SF Mono,monospace" fontSize="11" fill="#484f58">[</text>
+          <text x="64" y="16" fontFamily="SF Mono,monospace" fontSize="11" fill={c.main} fontWeight="bold">{c.text.toUpperCase()}</text>
+          <text x="122" y="16" fontFamily="SF Mono,monospace" fontSize="11" fill="#484f58">]</text>
+          <rect x="132" y="6" width="7" height="12" fill="#58a6ff" opacity="0.8"/>
+        </svg>
+      )
+
+    case 'glass':
+      return (
+        <svg width="120" height="30" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="glass-bg" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.15"/>
+              <stop offset="100%" stopColor="#ffffff" stopOpacity="0.05"/>
+            </linearGradient>
+            <filter id="glass-blur" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="10"/>
+            </filter>
+          </defs>
+          <circle cx="20" cy="15" r="20" fill="#3b82f6" filter="url(#glass-blur)" opacity="0.5"/>
+          <circle cx="100" cy="15" r="20" fill={c.main} filter="url(#glass-blur)" opacity="0.5"/>
+          <rect x="2" y="2" width="116" height="26" rx="13" fill="url(#glass-bg)"/>
+          <rect x="2" y="2" width="116" height="26" rx="13" fill="none" stroke="#ffffff" strokeOpacity="0.2" strokeWidth="1"/>
+          <circle cx="18" cy="15" r="5" fill="#3b82f6"/>
+          <text x="30" y="19" fontFamily="-apple-system,sans-serif" fontSize="11" fontWeight="600" fill="#fff">cinch</text>
+          <text x="68" y="19" fontFamily="-apple-system,sans-serif" fontSize="11" fontWeight="500" fill={c.glow}>{c.text}</text>
+        </svg>
+      )
+
+    case 'holographic':
+      return (
+        <svg width="120" height="28" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="holo-border" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#ff00ff"/>
+              <stop offset="33%" stopColor="#00ffff"/>
+              <stop offset="66%" stopColor="#ffff00"/>
+              <stop offset="100%" stopColor="#ff00ff"/>
+            </linearGradient>
+          </defs>
+          <rect width="120" height="28" rx="6" fill="#0a0a0a"/>
+          <rect x="1" y="1" width="118" height="26" rx="5" fill="none" stroke="url(#holo-border)" strokeWidth="1"/>
+          <text x="16" y="18" fontFamily="Inter,sans-serif" fontSize="11" fontWeight="700" fill="#888">cinch</text>
+          <text x="60" y="18" fontFamily="Inter,sans-serif" fontSize="11" fontWeight="600" fill={c.glow}>{c.text}</text>
+          <circle cx="106" cy="14" r="4" fill={c.main}/>
+        </svg>
+      )
+
+    case 'pixel':
+      return (
+        <svg width="112" height="24" xmlns="http://www.w3.org/2000/svg">
+          <rect width="112" height="24" fill="#1a1a2e"/>
+          <rect x="0" y="0" width="112" height="2" fill={c.main}/>
+          <rect x="0" y="22" width="112" height="2" fill={c.main}/>
+          <rect x="0" y="0" width="2" height="24" fill={c.main}/>
+          <rect x="110" y="0" width="2" height="24" fill={c.main}/>
+          <text x="12" y="16" fontFamily="Monaco,monospace" fontSize="10" fill="#eee" letterSpacing="1">CINCH</text>
+          <text x="58" y="16" fontFamily="Monaco,monospace" fontSize="10" fill={c.main} letterSpacing="1">{c.text.toUpperCase().slice(0,4)}</text>
+        </svg>
+      )
+
+    case 'minimal':
+      return (
+        <svg width="72" height="24" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id={`min-${status}`} x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor={c.main}/>
+              <stop offset="100%" stopColor={c.glow}/>
+            </linearGradient>
+          </defs>
+          <rect width="72" height="24" rx="12" fill={`url(#min-${status})`}/>
+          <path d="M16 10 L20 14 L28 6" stroke="#fff" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          <text x="38" y="16" fontFamily="-apple-system,sans-serif" fontSize="11" fontWeight="600" fill="#fff">cinch</text>
+        </svg>
+      )
+
+    case 'outlined':
+      return (
+        <svg width="108" height="24" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="1" width="106" height="22" rx="4" fill="none" stroke={c.main} strokeWidth="1.5"/>
+          <line x1="50" y1="5" x2="50" y2="19" stroke={c.main} strokeWidth="1" opacity="0.5"/>
+          <text x="25" y="16" fontFamily="-apple-system,sans-serif" fontSize="11" fontWeight="600" fill={c.main} textAnchor="middle">cinch</text>
+          <text x="78" y="16" fontFamily="-apple-system,sans-serif" fontSize="11" fontWeight="500" fill={c.main} textAnchor="middle">{c.text}</text>
+        </svg>
+      )
+  }
 }
 
 function StatusIcon({ status }: { status: string }) {
