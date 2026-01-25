@@ -142,7 +142,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	wsHandler := server.NewWSHandler(hub, store, log)
 	dispatcher := server.NewDispatcher(hub, store, wsHandler, log)
 	webhookHandler := server.NewWebhookHandler(store, dispatcher, baseURL, log)
-	apiHandler := server.NewAPIHandler(store, hub, log)
+	apiHandler := server.NewAPIHandler(store, hub, authHandler, log)
 	logStreamHandler := server.NewLogStreamHandler(store, log)
 	badgeHandler := server.NewBadgeHandler(store, log, baseURL)
 

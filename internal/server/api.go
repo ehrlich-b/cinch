@@ -19,17 +19,19 @@ import (
 type APIHandler struct {
 	storage storage.Storage
 	hub     *Hub
+	auth    *AuthHandler
 	log     *slog.Logger
 }
 
 // NewAPIHandler creates a new API handler.
-func NewAPIHandler(store storage.Storage, hub *Hub, log *slog.Logger) *APIHandler {
+func NewAPIHandler(store storage.Storage, hub *Hub, auth *AuthHandler, log *slog.Logger) *APIHandler {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &APIHandler{
 		storage: store,
 		hub:     hub,
+		auth:    auth,
 		log:     log,
 	}
 }
@@ -95,6 +97,19 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Give me pro (free during beta)
 	case path == "/give-me-pro" && r.Method == http.MethodPost:
 		h.giveMePro(w, r)
+
+	// User/Account
+	case path == "/user" && r.Method == http.MethodGet:
+		h.getUser(w, r)
+	case path == "/user" && r.Method == http.MethodDelete:
+		h.deleteUser(w, r)
+	case strings.HasPrefix(path, "/user/forges/"):
+		forgeType := strings.TrimPrefix(path, "/user/forges/")
+		if r.Method == http.MethodDelete {
+			h.disconnectForge(w, r, forgeType)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
@@ -544,6 +559,192 @@ func (h *APIHandler) revokeToken(w http.ResponseWriter, r *http.Request, tokenID
 func (h *APIHandler) giveMePro(w http.ResponseWriter, r *http.Request) {
 	// Free during beta - just return success
 	h.writeJSON(w, map[string]any{"ok": true, "message": "Pro activated! Free during beta."})
+}
+
+// --- User/Account ---
+
+type connectedForge struct {
+	Type        string     `json:"type"`
+	Username    string     `json:"username,omitempty"`
+	ConnectedAt *time.Time `json:"connected_at,omitempty"`
+}
+
+type userResponse struct {
+	ID              string           `json:"id"`
+	Name            string           `json:"name"`
+	Email           string           `json:"email,omitempty"`
+	ConnectedForges []connectedForge `json:"connected_forges"`
+	CreatedAt       time.Time        `json:"created_at"`
+}
+
+func (h *APIHandler) getUser(w http.ResponseWriter, r *http.Request) {
+	// Get username from auth context
+	username := h.auth.GetUser(r)
+	if username == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := h.storage.GetUserByName(r.Context(), username)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get user", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Build connected forges list
+	forges := []connectedForge{}
+
+	// GitHub is always connected if they're logged in (it's the auth provider)
+	// We track the connection time if we have it, otherwise use account creation time
+	githubConnectedAt := user.GitHubConnectedAt
+	if githubConnectedAt.IsZero() {
+		githubConnectedAt = user.CreatedAt
+	}
+	forges = append(forges, connectedForge{
+		Type:        "github",
+		Username:    user.Name,
+		ConnectedAt: &githubConnectedAt,
+	})
+
+	// GitLab
+	if user.GitLabCredentials != "" {
+		forges = append(forges, connectedForge{
+			Type:        "gitlab",
+			ConnectedAt: &user.GitLabCredentialsAt,
+		})
+	}
+
+	// Forgejo/Codeberg
+	if user.ForgejoCredentials != "" {
+		forges = append(forges, connectedForge{
+			Type:        "forgejo",
+			ConnectedAt: &user.ForgejoCredentialsAt,
+		})
+	}
+
+	resp := userResponse{
+		ID:              user.ID,
+		Name:            user.Name,
+		Email:           user.Email,
+		ConnectedForges: forges,
+		CreatedAt:       user.CreatedAt,
+	}
+
+	h.writeJSON(w, resp)
+}
+
+func (h *APIHandler) disconnectForge(w http.ResponseWriter, r *http.Request, forgeType string) {
+	username := h.auth.GetUser(r)
+	if username == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := h.storage.GetUserByName(r.Context(), username)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get user", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Count connected forges to detect "last forge" scenario
+	connectedCount := 1 // GitHub is always connected
+	if user.GitLabCredentials != "" {
+		connectedCount++
+	}
+	if user.ForgejoCredentials != "" {
+		connectedCount++
+	}
+
+	switch forgeType {
+	case "gitlab":
+		if user.GitLabCredentials == "" {
+			http.Error(w, "GitLab not connected", http.StatusBadRequest)
+			return
+		}
+		if err := h.storage.ClearUserGitLabCredentials(r.Context(), user.ID); err != nil {
+			h.log.Error("failed to disconnect GitLab", "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		h.log.Info("user disconnected GitLab", "user", username)
+
+	case "forgejo", "codeberg":
+		if user.ForgejoCredentials == "" {
+			http.Error(w, "Forgejo/Codeberg not connected", http.StatusBadRequest)
+			return
+		}
+		if err := h.storage.ClearUserForgejoCredentials(r.Context(), user.ID); err != nil {
+			h.log.Error("failed to disconnect Forgejo", "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		h.log.Info("user disconnected Forgejo/Codeberg", "user", username)
+
+	case "github":
+		// GitHub is the login provider - warn them
+		if connectedCount == 1 {
+			// This is the ONLY connected forge
+			h.writeJSON(w, map[string]any{
+				"error":   "last_login_method",
+				"message": "GitHub is your only login method. Disconnecting it will lock you out. Did you mean to delete your account?",
+			})
+			return
+		}
+		// For now, don't allow disconnecting GitHub even if other forges connected
+		// (we'd need to support login via other forges first)
+		http.Error(w, "Cannot disconnect GitHub (it's your login method). Connect another forge as primary first.", http.StatusBadRequest)
+		return
+
+	default:
+		http.Error(w, "unknown forge type", http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *APIHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
+	username := h.auth.GetUser(r)
+	if username == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := h.storage.GetUserByName(r.Context(), username)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get user", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete the user
+	if err := h.storage.DeleteUser(r.Context(), user.ID); err != nil {
+		h.log.Error("failed to delete user", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	h.log.Info("user deleted account", "user", username, "user_id", user.ID)
+
+	// Return success - frontend should clear cookies and redirect
+	h.writeJSON(w, map[string]any{
+		"ok":      true,
+		"message": "Account deleted successfully",
+	})
 }
 
 // --- Helpers ---

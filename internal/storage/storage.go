@@ -48,8 +48,16 @@ type Storage interface {
 	// Users
 	GetOrCreateUser(ctx context.Context, name string) (*User, error)
 	GetUserByName(ctx context.Context, name string) (*User, error)
+	GetUserByEmail(ctx context.Context, email string) (*User, error)
+	UpdateUserEmail(ctx context.Context, userID, email string) error
+	AddUserEmail(ctx context.Context, userID, email string) error
+	UpdateUserGitHubConnected(ctx context.Context, userID string) error
 	UpdateUserGitLabCredentials(ctx context.Context, userID, credentials string) error
 	UpdateUserForgejoCredentials(ctx context.Context, userID, credentials string) error
+	ClearUserGitLabCredentials(ctx context.Context, userID string) error
+	ClearUserForgejoCredentials(ctx context.Context, userID string) error
+	ClearUserGitHubConnected(ctx context.Context, userID string) error
+	DeleteUser(ctx context.Context, id string) error
 
 	// Lifecycle
 	Close() error
@@ -126,6 +134,9 @@ const (
 type User struct {
 	ID                    string
 	Name                  string    // Username (from primary auth provider)
+	Email                 string    // Primary email (for account linking)
+	Emails                []string  // All known emails (for account linking during OAuth)
+	GitHubConnectedAt     time.Time // When GitHub was connected (zero = not connected)
 	GitLabCredentials     string    // JSON-encoded OAuth credentials (access_token, refresh_token, expires_at, base_url)
 	GitLabCredentialsAt   time.Time // When GitLab was connected
 	ForgejoCredentials    string    // JSON-encoded OAuth credentials for Forgejo/Codeberg

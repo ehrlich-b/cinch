@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -131,6 +132,12 @@ func (s *SQLiteStorage) migrate() error {
 	// Add Forgejo credentials columns
 	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN forgejo_credentials TEXT NOT NULL DEFAULT ''")
 	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN forgejo_credentials_at DATETIME")
+
+	// Add email and GitHub connection tracking
+	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
+	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN emails TEXT NOT NULL DEFAULT ''") // JSON array
+	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN github_connected_at DATETIME")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 
 	return nil
 }
@@ -439,11 +446,14 @@ func (s *SQLiteStorage) RevokeToken(ctx context.Context, id string) error {
 
 func (s *SQLiteStorage) GetOrCreateUser(ctx context.Context, name string) (*User, error) {
 	user := &User{}
-	var gitlabCredentialsAt, forgejoCredentialsAt sql.NullTime
+	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
+	var emailsJSON string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, gitlab_credentials, gitlab_credentials_at, forgejo_credentials, forgejo_credentials_at, created_at
+		`SELECT id, name, email, emails, github_connected_at, gitlab_credentials, gitlab_credentials_at,
+		        forgejo_credentials, forgejo_credentials_at, created_at
 		 FROM users WHERE name = ?`, name).Scan(
-		&user.ID, &user.Name, &user.GitLabCredentials, &gitlabCredentialsAt,
+		&user.ID, &user.Name, &user.Email, &emailsJSON, &githubConnectedAt,
+		&user.GitLabCredentials, &gitlabCredentialsAt,
 		&user.ForgejoCredentials, &forgejoCredentialsAt, &user.CreatedAt)
 	if err == nil {
 		if gitlabCredentialsAt.Valid {
@@ -452,6 +462,13 @@ func (s *SQLiteStorage) GetOrCreateUser(ctx context.Context, name string) (*User
 		if forgejoCredentialsAt.Valid {
 			user.ForgejoCredentialsAt = forgejoCredentialsAt.Time
 		}
+		if githubConnectedAt.Valid {
+			user.GitHubConnectedAt = githubConnectedAt.Time
+		}
+		if emailsJSON != "" {
+			user.Emails = parseEmailsJSON(emailsJSON)
+		}
+		return user, nil
 	}
 	if err == sql.ErrNoRows {
 		// Create new user
@@ -468,32 +485,39 @@ func (s *SQLiteStorage) GetOrCreateUser(ctx context.Context, name string) (*User
 		}
 		return user, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	return user, nil
+	return nil, err
 }
 
 func (s *SQLiteStorage) GetUserByName(ctx context.Context, name string) (*User, error) {
 	user := &User{}
-	var gitlabCredentialsAt, forgejoCredentialsAt sql.NullTime
+	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
+	var emailsJSON string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, gitlab_credentials, gitlab_credentials_at, forgejo_credentials, forgejo_credentials_at, created_at
+		`SELECT id, name, email, emails, github_connected_at, gitlab_credentials, gitlab_credentials_at,
+		        forgejo_credentials, forgejo_credentials_at, created_at
 		 FROM users WHERE name = ?`, name).Scan(
-		&user.ID, &user.Name, &user.GitLabCredentials, &gitlabCredentialsAt,
+		&user.ID, &user.Name, &user.Email, &emailsJSON, &githubConnectedAt,
+		&user.GitLabCredentials, &gitlabCredentialsAt,
 		&user.ForgejoCredentials, &forgejoCredentialsAt, &user.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
-	if err == nil {
-		if gitlabCredentialsAt.Valid {
-			user.GitLabCredentialsAt = gitlabCredentialsAt.Time
-		}
-		if forgejoCredentialsAt.Valid {
-			user.ForgejoCredentialsAt = forgejoCredentialsAt.Time
-		}
+	if err != nil {
+		return nil, err
 	}
-	return user, err
+	if gitlabCredentialsAt.Valid {
+		user.GitLabCredentialsAt = gitlabCredentialsAt.Time
+	}
+	if forgejoCredentialsAt.Valid {
+		user.ForgejoCredentialsAt = forgejoCredentialsAt.Time
+	}
+	if githubConnectedAt.Valid {
+		user.GitHubConnectedAt = githubConnectedAt.Time
+	}
+	if emailsJSON != "" {
+		user.Emails = parseEmailsJSON(emailsJSON)
+	}
+	return user, nil
 }
 
 func (s *SQLiteStorage) UpdateUserGitLabCredentials(ctx context.Context, userID, credentials string) error {
@@ -508,6 +532,140 @@ func (s *SQLiteStorage) UpdateUserForgejoCredentials(ctx context.Context, userID
 		`UPDATE users SET forgejo_credentials = ?, forgejo_credentials_at = ? WHERE id = ?`,
 		credentials, time.Now(), userID)
 	return err
+}
+
+func (s *SQLiteStorage) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	user := &User{}
+	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
+	var emailsJSON string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, email, emails, github_connected_at, gitlab_credentials, gitlab_credentials_at,
+		        forgejo_credentials, forgejo_credentials_at, created_at
+		 FROM users WHERE email = ? OR emails LIKE ?`, email, "%"+email+"%").Scan(
+		&user.ID, &user.Name, &user.Email, &emailsJSON, &githubConnectedAt,
+		&user.GitLabCredentials, &gitlabCredentialsAt,
+		&user.ForgejoCredentials, &forgejoCredentialsAt, &user.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if gitlabCredentialsAt.Valid {
+		user.GitLabCredentialsAt = gitlabCredentialsAt.Time
+	}
+	if forgejoCredentialsAt.Valid {
+		user.ForgejoCredentialsAt = forgejoCredentialsAt.Time
+	}
+	if githubConnectedAt.Valid {
+		user.GitHubConnectedAt = githubConnectedAt.Time
+	}
+	if emailsJSON != "" {
+		// Parse JSON array of emails
+		user.Emails = parseEmailsJSON(emailsJSON)
+	}
+	return user, nil
+}
+
+func (s *SQLiteStorage) UpdateUserEmail(ctx context.Context, userID, email string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET email = ? WHERE id = ?`,
+		email, userID)
+	return err
+}
+
+func (s *SQLiteStorage) AddUserEmail(ctx context.Context, userID, email string) error {
+	// Get current emails
+	var emailsJSON string
+	err := s.db.QueryRowContext(ctx, `SELECT emails FROM users WHERE id = ?`, userID).Scan(&emailsJSON)
+	if err != nil {
+		return err
+	}
+
+	emails := parseEmailsJSON(emailsJSON)
+	// Check if email already exists
+	if slices.Contains(emails, email) {
+		return nil // Already exists
+	}
+	emails = append(emails, email)
+
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE users SET emails = ? WHERE id = ?`,
+		formatEmailsJSON(emails), userID)
+	return err
+}
+
+func (s *SQLiteStorage) UpdateUserGitHubConnected(ctx context.Context, userID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET github_connected_at = ? WHERE id = ?`,
+		time.Now(), userID)
+	return err
+}
+
+func (s *SQLiteStorage) ClearUserGitLabCredentials(ctx context.Context, userID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET gitlab_credentials = '', gitlab_credentials_at = NULL WHERE id = ?`,
+		userID)
+	return err
+}
+
+func (s *SQLiteStorage) ClearUserForgejoCredentials(ctx context.Context, userID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET forgejo_credentials = '', forgejo_credentials_at = NULL WHERE id = ?`,
+		userID)
+	return err
+}
+
+func (s *SQLiteStorage) ClearUserGitHubConnected(ctx context.Context, userID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET github_connected_at = NULL WHERE id = ?`,
+		userID)
+	return err
+}
+
+func (s *SQLiteStorage) DeleteUser(ctx context.Context, id string) error {
+	// Delete user and all associated data
+	// Note: repos are not currently linked to users, so they remain
+	// In a future version, we might want to cascade delete repos too
+
+	// Delete tokens created by this user (we don't have user_id on tokens yet, so skip)
+	// For now, just delete the user record
+	_, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	return err
+}
+
+// Helper functions for emails JSON
+func parseEmailsJSON(s string) []string {
+	if s == "" || s == "[]" {
+		return nil
+	}
+	// Simple JSON array parsing: ["a","b","c"]
+	s = strings.TrimPrefix(s, "[")
+	s = strings.TrimSuffix(s, "]")
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	var emails []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		p = strings.Trim(p, "\"")
+		if p != "" {
+			emails = append(emails, p)
+		}
+	}
+	return emails
+}
+
+func formatEmailsJSON(emails []string) string {
+	if len(emails) == 0 {
+		return "[]"
+	}
+	var parts []string
+	for _, e := range emails {
+		parts = append(parts, "\""+e+"\"")
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }
 
 // --- Logs ---
