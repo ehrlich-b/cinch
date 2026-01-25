@@ -1,4 +1,6 @@
-# cinch [![CI](https://cinch.sh/badge/github.com/ehrlich-b/cinch.svg)](https://cinch.sh/jobs)
+# cinch
+
+[![GitHub](https://cinch.sh/badge/github.com/ehrlich-b/cinch.svg)](https://cinch.sh/jobs) [![GitLab](https://cinch.sh/badge/gitlab.com/ehrlich-b/cinch.svg)](https://cinch.sh/jobs) [![Codeberg](https://cinch.sh/badge/codeberg.org/ehrlich/cinch.svg)](https://cinch.sh/jobs)
 
 CI that's a cinch.
 
@@ -20,10 +22,11 @@ Or build from source: `make build`
 ## Usage
 
 ```bash
-cinch worker --server https://cinch.sh --token <your-token>
+cinch login    # Auth via browser
+cinch worker   # Start building
 ```
 
-Add `.cinch.yaml` to your repo, configure the webhook, push. Done.
+Add `.cinch.yaml` to your repo, push. Done.
 
 ```yaml
 # .cinch.yaml
