@@ -144,15 +144,19 @@ See `design/12-multi-forge-presence.md` for mechanical details.
 - [x] Release support (`cinch release` uploads to GitLab package registry)
 - [x] CLI manual fallback (`cinch repo add --forge gitlab --token xxx`)
 
-**Server-side (automated onboarding) - NOT DONE:**
+**Server-side (automated onboarding):**
 - [ ] Register GitLab OAuth app (gitlab.com and document for self-hosted)
-- [ ] `GET /auth/gitlab` - Start OAuth flow
-- [ ] `GET /auth/gitlab/callback` - Exchange code, store temp token
-- [ ] Project selector UI after OAuth
-- [ ] Webhook creation via OAuth token
-- [ ] PAT auto-creation attempt via API
-- [ ] Graceful fallback: if PAT creation fails (403 free tier), prompt for manual token
-- [ ] Self-hosted instance support (custom base URL)
+- [x] `GET /auth/gitlab` - Start OAuth flow
+- [x] `GET /auth/gitlab/callback` - Exchange code, store temp token
+- [x] `GET /api/gitlab/projects` - List user's projects
+- [x] `POST /api/gitlab/setup` - Create webhook + attempt PAT creation
+- [x] Webhook creation via OAuth token
+- [x] PAT auto-creation attempt via API (Project Access Tokens)
+- [x] Graceful fallback with options: manual token OR OAuth session
+- [x] OAuth token refresh in forge (when using OAuth session fallback)
+- [x] Self-hosted instance support (CINCH_GITLAB_URL env var)
+- [ ] Project selector UI after OAuth (frontend work needed)
+- [ ] Manual token / OAuth choice UI (for free tier fallback)
 
 ### Forgejo/Gitea Hybrid Flow
 
