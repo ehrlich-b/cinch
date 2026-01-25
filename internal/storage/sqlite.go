@@ -435,11 +435,20 @@ func (s *SQLiteStorage) RevokeToken(ctx context.Context, id string) error {
 
 func (s *SQLiteStorage) GetOrCreateUser(ctx context.Context, name string) (*User, error) {
 	user := &User{}
+	var gitlabCredentialsAt, forgejoCredentialsAt sql.NullTime
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, name, gitlab_credentials, gitlab_credentials_at, forgejo_credentials, forgejo_credentials_at, created_at
 		 FROM users WHERE name = ?`, name).Scan(
-		&user.ID, &user.Name, &user.GitLabCredentials, &user.GitLabCredentialsAt,
-		&user.ForgejoCredentials, &user.ForgejoCredentialsAt, &user.CreatedAt)
+		&user.ID, &user.Name, &user.GitLabCredentials, &gitlabCredentialsAt,
+		&user.ForgejoCredentials, &forgejoCredentialsAt, &user.CreatedAt)
+	if err == nil {
+		if gitlabCredentialsAt.Valid {
+			user.GitLabCredentialsAt = gitlabCredentialsAt.Time
+		}
+		if forgejoCredentialsAt.Valid {
+			user.ForgejoCredentialsAt = forgejoCredentialsAt.Time
+		}
+	}
 	if err == sql.ErrNoRows {
 		// Create new user
 		user = &User{
@@ -463,13 +472,22 @@ func (s *SQLiteStorage) GetOrCreateUser(ctx context.Context, name string) (*User
 
 func (s *SQLiteStorage) GetUserByName(ctx context.Context, name string) (*User, error) {
 	user := &User{}
+	var gitlabCredentialsAt, forgejoCredentialsAt sql.NullTime
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, name, gitlab_credentials, gitlab_credentials_at, forgejo_credentials, forgejo_credentials_at, created_at
 		 FROM users WHERE name = ?`, name).Scan(
-		&user.ID, &user.Name, &user.GitLabCredentials, &user.GitLabCredentialsAt,
-		&user.ForgejoCredentials, &user.ForgejoCredentialsAt, &user.CreatedAt)
+		&user.ID, &user.Name, &user.GitLabCredentials, &gitlabCredentialsAt,
+		&user.ForgejoCredentials, &forgejoCredentialsAt, &user.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
+	}
+	if err == nil {
+		if gitlabCredentialsAt.Valid {
+			user.GitLabCredentialsAt = gitlabCredentialsAt.Time
+		}
+		if forgejoCredentialsAt.Valid {
+			user.ForgejoCredentialsAt = forgejoCredentialsAt.Time
+		}
 	}
 	return user, err
 }
