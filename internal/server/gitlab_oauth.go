@@ -524,6 +524,41 @@ func (h *GitLabOAuthHandler) fetchProjects(token *gitlabOAuthToken) ([]gitlabPro
 }
 
 func (h *GitLabOAuthHandler) createWebhook(token *gitlabOAuthToken, projectID int, webhookURL, secret string) error {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	// First, delete any existing webhooks pointing to our URL (for idempotent re-onboarding)
+	listReq, err := http.NewRequest("GET",
+		fmt.Sprintf("%s/api/v4/projects/%d/hooks", token.GitLabURL, projectID),
+		nil)
+	if err == nil {
+		listReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
+		listResp, err := client.Do(listReq)
+		if err == nil && listResp.StatusCode == http.StatusOK {
+			var hooks []struct {
+				ID  int    `json:"id"`
+				URL string `json:"url"`
+			}
+			if json.NewDecoder(listResp.Body).Decode(&hooks) == nil {
+				for _, hook := range hooks {
+					if hook.URL == webhookURL {
+						// Delete this webhook
+						delReq, _ := http.NewRequest("DELETE",
+							fmt.Sprintf("%s/api/v4/projects/%d/hooks/%d", token.GitLabURL, projectID, hook.ID),
+							nil)
+						delReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
+						delResp, _ := client.Do(delReq)
+						if delResp != nil {
+							delResp.Body.Close()
+						}
+						h.log.Info("deleted existing webhook", "project_id", projectID, "hook_id", hook.ID)
+					}
+				}
+			}
+			listResp.Body.Close()
+		}
+	}
+
+	// Now create the new webhook
 	data := url.Values{}
 	data.Set("url", webhookURL)
 	data.Set("token", secret)
@@ -540,7 +575,6 @@ func (h *GitLabOAuthHandler) createWebhook(token *gitlabOAuthToken, projectID in
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("webhook request failed: %w", err)
