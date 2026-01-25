@@ -227,7 +227,7 @@ function LandingPage({ auth, setAuth, onNavigate }: {
       <section className="pricing-section" id="pricing">
         <div className="container">
           <h2>Pricing</h2>
-          <p className="pricing-subtitle">Free while in beta. Self-hosting always free.</p>
+          <p className="pricing-subtitle">Free while in beta. MIT licensed. Self-host anytime.</p>
           <div className="pricing-grid-landing">
             <div className="plan-card">
               <div className="plan-name">Public Repos</div>
@@ -268,12 +268,12 @@ function LandingPage({ auth, setAuth, onNavigate }: {
             <div className="plan-card">
               <div className="plan-name">Enterprise</div>
               <div className="plan-price">Custom</div>
-              <div className="plan-note">Self-hosted or managed</div>
+              <div className="plan-note">For teams that need support</div>
               <ul className="plan-features-list">
-                <li>Run your own server</li>
-                <li>Full control</li>
-                <li>No limits</li>
-                <li>Priority support available</li>
+                <li>Dedicated support</li>
+                <li>SLA guarantees</li>
+                <li>Custom integrations</li>
+                <li>Managed hosting option</li>
               </ul>
               <div className="plan-cta"></div>
             </div>
@@ -291,7 +291,7 @@ function LandingPage({ auth, setAuth, onNavigate }: {
           </div>
         </div>
         <div className="footer-copy">
-          Open source under MIT license. Built by <a href="mailto:bryan@ehrlich.dev" style={{ color: 'inherit' }}>Bryan Ehrlich</a>.
+          MIT License. Built by <a href="https://github.com/ehrlich-b" style={{ color: 'inherit' }}>Bryan Ehrlich</a>.
         </div>
       </footer>
     </div>
