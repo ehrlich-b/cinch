@@ -8,9 +8,9 @@ Forgejo and Gitea share the same API (Forgejo is a fork of Gitea), so one implem
 
 Users should click one button and be done. No copying tokens. No manual webhook setup.
 
-**Can Forgejo/Gitea match this?** Almost, but not quite. Close enough that it hurts.
+**Can Forgejo/Gitea match this?** No, but we can get close with a hybrid approach.
 
-## Why Forgejo/Gitea Falls Short
+## Why Full Automation Is Impossible
 
 ### The Problem: Token API Requires Password Auth
 
@@ -32,18 +32,104 @@ This is a [known limitation](https://github.com/go-gitea/gitea/issues/21186). Th
 If a user does OAuth with Cinch, we can:
 - ✓ Create webhooks via API
 - ✓ Create deploy keys (read-only SSH clone access)
-- ✓ Post commit statuses
+- ✓ Post commit statuses (while token is valid)
 - ✗ Create a token that outlives the OAuth session
 
-### The Catch
+### What We NEED for Runtime
 
-OAuth tokens expire (default 1 hour). To keep working, we'd need to store the refresh token forever - same problem as Bitbucket.
+To post commit statuses, we need `write:repository` scope ([source](https://github.com/go-gitea/gitea/blob/main/routers/api/v1/api.go)). Options:
+- **Personal Access Token** - Doesn't expire, user controls it
+- **OAuth token** - Expires every 1-2 hours, requires refresh token storage
 
-**Unlike GitLab**, we can't use OAuth to create a project-scoped token that lives independently.
+### Why NOT Store Refresh Tokens (The Woodpecker Approach)
 
-## What's Actually Implemented
+[Woodpecker CI stores OAuth refresh tokens](https://woodpecker-ci.org/docs/administration/configuration/forges/forgejo) and refreshes forever. This works, but:
+- We hold account-level credentials forever
+- User can't easily see what we have access to
+- If Forgejo OAuth scopes change, our stored tokens may break
+- Less transparent than "here's the one token I gave you"
 
-Currently: **Manual flow only**
+**Note:** OAuth scopes in Forgejo [aren't fully implemented](https://forgejo.org/docs/latest/user/oauth2-provider/) - tokens currently grant full admin access. A [PR to improve this](https://codeberg.org/forgejo/forgejo/pulls/6197) was closed.
+
+## The Hybrid Approach (Best We Can Do)
+
+### For Codeberg (and other major instances with our OAuth app)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    SETUP (hybrid flow)                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  User clicks "Add Codeberg"                                     │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌─────────────────┐    OAuth    ┌─────────────────┐           │
+│  │   Cinch Web     │ ──────────► │    Codeberg     │           │
+│  │                 │ ◄────────── │                 │           │
+│  └─────────────────┘   token     └─────────────────┘           │
+│         │                                                       │
+│         │ Use token ONCE to:                                    │
+│         ├──► Create webhook (automated!)                        │
+│         ├──► Get repo metadata                                  │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌─────────────────┐                                           │
+│  │ THROW AWAY      │  Don't store refresh token                │
+│  │ OAuth token     │                                           │
+│  └─────────────────┘                                           │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  "One more step: Create a token for status posting"     │   │
+│  │                                                         │   │
+│  │  1. Click here: [link to user's token settings]         │   │
+│  │  2. Create token with "repository" scope                │   │
+│  │  3. Paste it here: [___________________________]        │   │
+│  │                                                         │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│         │                                                       │
+│         ▼                                                       │
+│  Store user's PAT (doesn't expire)                             │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why this works:**
+- Webhook setup is automated (fewer errors)
+- We don't store refresh tokens (more secure)
+- PAT doesn't expire (no refresh dance)
+- User knows exactly what credential we hold
+- User can revoke it anytime from Forgejo settings
+
+**Comparison:**
+
+| Aspect | Full manual | Hybrid | Store refresh (Woodpecker) |
+|--------|-------------|--------|----------------------------|
+| Webhook setup | Manual | Automated | Automated |
+| What we store | PAT | PAT | Refresh token (account-level) |
+| Token expiry | Never | Never | Must refresh hourly |
+| Transparency | Clear | Clear | Opaque |
+| User effort | 3 steps | 2 steps | 1 step |
+
+### For Self-Hosted (no OAuth app registered)
+
+Fall back to full manual, but with the same "paste token here" UI:
+
+```bash
+# Cinch shows:
+"We don't have an OAuth app for git.yourcompany.com.
+ Please set up manually:
+
+ 1. Create webhook: [shows URL and secret]
+ 2. Create token with 'repository' scope
+ 3. Paste token here: [___________________________]"
+```
+
+Same UI, just without the automated webhook step.
+
+## What's Actually Implemented (Current)
+
+Currently: **Manual flow only** (CLI-based)
 
 ```bash
 # User creates token in Forgejo/Gitea UI
@@ -55,43 +141,19 @@ cinch repo add \
   --token {token}
 ```
 
-This works. It's not grug, but it works.
+This works but requires users to figure out webhook setup on their own.
 
-## Could We Do Better?
+## How Other CI Systems Do It
 
-### Option A: OAuth + Keep Refresh Token (Like Bitbucket)
+| System | Approach | Token Storage | Our Take |
+|--------|----------|---------------|----------|
+| [Woodpecker CI](https://woodpecker-ci.org/docs/administration/configuration/forges/forgejo) | OAuth + refresh forever | Account-level creds | Too much trust |
+| [Jenkins](https://plugins.jenkins.io/gitea/) | Manual PAT only | User-provided token | Works, but no automation |
+| **Cinch (proposed)** | OAuth for setup + manual PAT | User-provided token | Best of both |
 
-```
-1. User clicks "Add Forgejo"
-2. OAuth dance
-3. Cinch stores refresh token
-4. Cinch creates webhook via API
-5. Use OAuth token for clone + status
-6. Refresh every hour forever
-```
+Jenkins [requires `write:repository` scope](https://deepwiki.com/jenkinsci/gitea-plugin/4.5-credentials-and-authentication) for status posting, same as us.
 
-**Problem:** Each Forgejo/Gitea instance is separate. We'd need:
-- Instance-specific OAuth app registration
-- Or users "bring their own" OAuth credentials
-- Still holding account-level creds forever
-
-**Not great, but possible.**
-
-### Option B: OAuth + Deploy Key (Partial Automation)
-
-```
-1. User clicks "Add Forgejo"
-2. OAuth dance
-3. Cinch creates webhook via API
-4. Cinch creates deploy key (SSH, read-only)
-5. For status posting... still need OAuth refresh token
-```
-
-Deploy keys let us clone without the user's token, but we still need a token for posting status.
-
-**Doesn't solve the core problem.**
-
-### Option C: Ask Forgejo to Fix Their API
+## The Dream: Upstream Fix
 
 The real fix: allow OAuth tokens to create access tokens.
 
@@ -115,7 +177,9 @@ If this worked, we could:
 
 Forgejo/Gitea issue: https://github.com/go-gitea/gitea/issues/21186
 
-## Current Implementation Details
+There's also [discussion about enhanced ephemeral credentials](https://codeberg.org/forgejo/forgejo/issues/3571) (like GitLab's `$CI_JOB_TOKEN`) but that's for Forgejo Actions, not external CI.
+
+## API Details
 
 ### Webhook Handling
 
@@ -143,13 +207,34 @@ func (f *Forgejo) ParsePush(r *http.Request, secret string) (*PushEvent, error) 
 }
 ```
 
-**Webhook security:** HMAC-SHA256, same as GitHub. This part is good.
+**Webhook security:** HMAC-SHA256, same as GitHub.
 
-### Commit Status API
+### Create Webhook (OAuth setup step)
+
+```
+POST /api/v1/repos/{owner}/{repo}/hooks
+Authorization: token {oauth_access_token}
+Content-Type: application/json
+
+{
+  "type": "forgejo",
+  "config": {
+    "url": "https://cinch.sh/webhooks/forgejo",
+    "content_type": "json",
+    "secret": "{generated_secret}"
+  },
+  "events": ["push"],
+  "active": true
+}
+```
+
+This works with OAuth tokens. We use this ONCE during setup, then throw away the OAuth token.
+
+### Commit Status API (runtime)
 
 ```
 POST /api/v1/repos/{owner}/{repo}/statuses/{sha}
-Authorization: token {access_token}
+Authorization: token {personal_access_token}
 Content-Type: application/json
 
 {
@@ -162,12 +247,14 @@ Content-Type: application/json
 
 States: `pending`, `success`, `error`, `failure`, `warning`
 
+**Requires `write:repository` scope** on the PAT.
+
 ### Releases API
 
 ```
 # Create release
 POST /api/v1/repos/{owner}/{repo}/releases
-Authorization: token {access_token}
+Authorization: token {personal_access_token}
 
 {
   "tag_name": "v1.0.0",
@@ -178,92 +265,114 @@ Authorization: token {access_token}
 
 # Upload asset
 POST /api/v1/repos/{owner}/{repo}/releases/{id}/assets?name={filename}
-Authorization: token {access_token}
+Authorization: token {personal_access_token}
 Content-Type: application/octet-stream
 
 <binary data>
 ```
 
-**Releases work well.** Same API design as GitHub.
+Same API design as GitHub. Also requires `write:repository` scope.
 
-## The Self-Hosted Complexity
+## Instance Strategy
 
-Every Forgejo/Gitea instance is independent:
-- codeberg.org
-- gitea.com
-- git.mycompany.com
-- git.someotherthing.org
+Every Forgejo/Gitea instance is independent - there's no central authority.
 
-There's no central "Forgejo Inc" that manages OAuth apps.
+### Tier 1: Codeberg (OAuth app pre-registered)
 
-**For OAuth to work, either:**
-1. User registers OAuth app on their instance, gives us credentials
-2. We maintain a list of "known instances" with pre-registered apps
-3. Instance admins install a Cinch OAuth app
+We register an OAuth app on codeberg.org. Users get the hybrid flow:
+- Automated webhook setup
+- Manual PAT for status posting
 
-None of these are grug.
+### Tier 2: Other Major Instances (gitea.com, etc.)
 
-## Prominent Instances
+Consider registering OAuth apps if demand warrants. Same hybrid flow.
 
-| Instance | Type | Notes |
-|----------|------|-------|
-| codeberg.org | Forgejo | Largest, 300k+ repos, community-run |
-| gitea.com | Gitea | Official Gitea hosting |
-| Self-hosted | Both | Many companies/individuals |
+### Tier 3: Self-Hosted (no OAuth app)
 
-Codeberg is the only instance big enough that pre-registering an OAuth app might be worth it.
+Fall back to full manual with good UI:
+- Show webhook URL and secret
+- Instructions for PAT creation
+- Same "paste token here" UI
+
+### Instance Detection
+
+```
+codeberg.org     → Use Cinch's Codeberg OAuth app
+gitea.com        → Use Cinch's Gitea.com OAuth app (if registered)
+git.example.com  → Manual setup (no OAuth app)
+```
 
 ## Implementation Plan
 
-### Current: Manual Flow (Done)
+### Phase 1: Improve Manual Flow (Current Priority)
 
-- ✓ Webhook parsing
-- ✓ Signature verification
-- ✓ Commit status posting
-- ✓ Releases
-- ✓ `cinch repo add --forge forgejo`
+1. Web UI for "Add Forgejo repo"
+2. Show webhook URL and secret clearly
+3. "Paste token here" text input
+4. Step-by-step instructions with screenshots
+5. Link directly to token creation page
 
-### Future: OAuth Flow (Maybe)
+### Phase 2: Hybrid Flow for Codeberg
 
-1. OAuth support for Codeberg specifically
-2. "Bring your own OAuth app" for other instances
-3. Store refresh tokens (reluctantly)
-4. Auto-create webhooks
+1. Register OAuth app on Codeberg
+2. OAuth callback handler
+3. Use OAuth to create webhook
+4. Throw away OAuth token (don't store refresh)
+5. Prompt for manual PAT
 
-### Future: Push for API Fix
+### Phase 3: Other Instances
 
-1. File issue/PR with Forgejo to allow OAuth token creation
-2. If accepted, implement proper grug flow
-3. This is the real solution
+1. Register on gitea.com if demand exists
+2. "Bring your own OAuth app" for enterprises
+3. Instance URL detection and routing
 
 ## Database Schema
 
 ```sql
--- Current: manual token
+-- Store user's PAT (doesn't expire)
 repos.forge_type = 'forgejo' or 'gitea'
-repos.forge_token = 'user_provided_token'
+repos.forge_token = 'user_provided_pat'  -- encrypted
 repos.webhook_secret = 'shared_secret_for_hmac'
 repos.clone_url = 'https://codeberg.org/owner/repo.git'
 repos.html_url = 'https://codeberg.org/owner/repo'
-
--- Future OAuth: would add
-repos.forge_refresh_token = 'encrypted_refresh'
 repos.forge_instance_url = 'https://codeberg.org'
+
+-- NO refresh token stored
+-- repos.forge_refresh_token is NOT used
 ```
 
 ## Error Messages
 
 ```
-# Manual setup
-"Forgejo/Gitea requires manual setup:
- 1. Create an access token in Settings → Applications
- 2. Create a webhook pointing to https://cinch.sh/webhooks
- 3. Run: cinch repo add --forge forgejo --url {url} --token {token}"
+# Hybrid flow (Codeberg)
+"Almost done! We've set up the webhook.
 
-# Why no one-click (if asked)
-"Forgejo/Gitea's API doesn't allow creating tokens via OAuth.
- We'd need your password, and that's not happening.
- Manual token setup is the secure option."
+ One more step: Create a token for build status updates.
+
+ 1. Go to: https://codeberg.org/user/settings/applications
+ 2. Click 'Generate New Token'
+ 3. Name it 'Cinch CI' (or whatever you like)
+ 4. Select scope: 'repository' (read & write)
+ 5. Paste it here: [___________________________]"
+
+# Manual flow (self-hosted)
+"We don't have automatic setup for git.yourcompany.com.
+
+ 1. Create webhook:
+    URL: https://cinch.sh/webhooks/forgejo
+    Secret: {generated_secret}
+    Events: Push
+
+ 2. Create access token:
+    Go to: Settings → Applications → Generate New Token
+    Scope: repository (read & write)
+
+ 3. Paste token here: [___________________________]"
+
+# Why we need a separate token (if asked)
+"Forgejo's API doesn't let us create tokens automatically.
+ Your token is stored securely and only used to post build status.
+ You can revoke it anytime from Forgejo settings."
 ```
 
 ## Forgejo vs Gitea
@@ -280,23 +389,42 @@ In Cinch, both are handled by the same `Forgejo` struct with an `IsGitea` boolea
 
 ## Summary
 
-| Aspect | Grug? | Notes |
-|--------|-------|-------|
-| Setup flow | ✗ Manual | Token + webhook created by user |
-| Token management | ✓ Simple | User's token, stored directly |
-| Webhook setup | ✗ Manual | User configures in forge UI |
-| Token refresh | ✓ None | Tokens don't expire |
-| Releases | ✓ Good | Same API as GitHub |
-| Self-hosted | ~ Fragmented | Each instance is separate |
+| Aspect | Current | With Hybrid Flow |
+|--------|---------|------------------|
+| Setup flow | Full manual | Webhook automated, token manual |
+| Token storage | PAT | PAT (same) |
+| Webhook setup | Manual | Automated (on known instances) |
+| Token refresh | None needed | None needed |
+| Releases | Good | Good |
+| Security | Good | Good (no refresh token stored) |
 
-**Forgejo/Gitea gets a C+. Would be a B+ if OAuth could create tokens.**
+**Forgejo/Gitea gets a B- with the hybrid flow.** Better than full manual, more secure than storing refresh tokens.
 
-## The Irony
+## The Target User
 
 Forgejo/Gitea users are exactly our target audience - self-hosters, open source enthusiasts, people who care about owning their infrastructure.
 
-And yet their platform doesn't support the seamless integration we want to give them.
+The hybrid approach respects this:
+- We automate what we can (webhooks)
+- We're transparent about what we store (their PAT)
+- We don't hold account-level OAuth credentials
+- User can revoke access anytime from Forgejo settings
 
-**The fix is upstream.** If Forgejo accepted a PR to allow OAuth-based token creation, we could give these users the GitHub App experience.
+## Future: The Real Fix
 
-Until then: manual setup with clear instructions.
+**The fix is upstream.** If Forgejo allowed OAuth-based token creation:
+
+```
+POST /api/v1/users/{username}/tokens
+Authorization: Bearer {oauth_token}  ← Should work but doesn't
+```
+
+Then we could:
+1. OAuth dance
+2. Create scoped token via API
+3. Throw away OAuth
+4. Full grug experience
+
+Tracked at: https://github.com/go-gitea/gitea/issues/21186
+
+Until then: hybrid flow with clear instructions.

@@ -14,8 +14,10 @@ This folder contains detailed design documents for each git forge integration.
 |-------|------------------------------|----------------|-------------|
 | GitHub | ✓ GitHub App private key | ✓ Auto-configured | **A** |
 | GitLab | ~ Project Access Token (via OAuth trick) | ✓ Via API | **B+** |
-| Forgejo/Gitea | ✗ Token API needs password | ✓ Via API | **C+** |
+| Forgejo/Gitea | ✗ Token API needs password | ✓ Via API | **B-** (hybrid) |
 | Bitbucket | ✗ No repo-scoped token API | ✓ Via API | Not planned |
+
+**Note on Forgejo/Gitea:** We can automate webhook setup via OAuth, then ask user to paste a PAT for status posting. This is more secure than storing OAuth refresh tokens forever (like Woodpecker CI does).
 
 ### Why GitHub Wins
 
