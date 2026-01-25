@@ -63,6 +63,7 @@ func main() {
 		logoutCmd(),
 		whoamiCmd(),
 		repoCmd(),
+		gitlabCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -759,6 +760,138 @@ func runRepoAdd(repoPath string, forgeType string, forgeURL string, forgeToken s
 		return fmt.Errorf("not logged in - run 'cinch login' first")
 	}
 
+	// For GitLab, try to use stored OAuth credentials for automatic webhook setup
+	if forgeType == "gitlab" && forgeToken == "" {
+		return runGitLabRepoAdd(serverCfg, repoPath, owner, name, forgeURL)
+	}
+
+	// For other forges or when token is provided, use manual setup
+	return runManualRepoAdd(serverCfg, repoPath, forgeType, forgeURL, forgeToken, owner, name)
+}
+
+func runGitLabRepoAdd(serverCfg cli.ServerConfig, repoPath, owner, name, forgeURL string) error {
+	// First, get list of projects to find the project ID
+	req, err := http.NewRequest("GET", serverCfg.URL+"/api/gitlab/projects", nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+serverCfg.Token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body)
+		if strings.Contains(string(body), "GitLab not connected") {
+			fmt.Println("GitLab not connected. Run 'cinch gitlab connect' first.")
+			return fmt.Errorf("GitLab not connected")
+		}
+		return fmt.Errorf("authentication required")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to list projects: %s", string(body))
+	}
+
+	var projects []struct {
+		ID                int    `json:"id"`
+		PathWithNamespace string `json:"path_with_namespace"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
+		return fmt.Errorf("decode projects: %w", err)
+	}
+
+	// Find matching project
+	var projectID int
+	for _, p := range projects {
+		if strings.EqualFold(p.PathWithNamespace, repoPath) {
+			projectID = p.ID
+			break
+		}
+	}
+
+	if projectID == 0 {
+		return fmt.Errorf("project %s not found in your GitLab account", repoPath)
+	}
+
+	// Call setup endpoint
+	setupData := map[string]any{
+		"project_id":   projectID,
+		"project_path": repoPath,
+		"use_oauth":    true, // Use OAuth token by default
+	}
+	setupBody, _ := json.Marshal(setupData)
+
+	req, err = http.NewRequest("POST", serverCfg.URL+"/api/gitlab/setup",
+		bytes.NewReader(setupBody))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+serverCfg.Token)
+
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	// Check if we need manual token (free tier)
+	if resp.StatusCode == http.StatusAccepted {
+		// Webhook created but need manual token
+		fmt.Printf("Added repo %s - webhook created!\n", repoPath)
+		fmt.Println()
+		fmt.Println("For build status updates, choose an option:")
+		if options, ok := result["options"].([]any); ok {
+			for i, opt := range options {
+				if optMap, ok := opt.(map[string]any); ok {
+					fmt.Printf("  %d. %s\n", i+1, optMap["label"])
+					if desc, ok := optMap["description"].(string); ok {
+						fmt.Printf("     %s\n", desc)
+					}
+					if url, ok := optMap["token_url"].(string); ok {
+						fmt.Printf("     Create token at: %s\n", url)
+					}
+				}
+			}
+		}
+		fmt.Println()
+		fmt.Println("Use the web UI to complete setup, or run:")
+		fmt.Printf("  cinch repo add %s --forge gitlab --token <your-token>\n", repoPath)
+		return nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		if errMsg, ok := result["error"].(string); ok {
+			return fmt.Errorf("setup failed: %s", errMsg)
+		}
+		return fmt.Errorf("setup failed with status %d", resp.StatusCode)
+	}
+
+	fmt.Printf("Added repo %s\n", repoPath)
+	fmt.Println("Webhook created automatically!")
+	if tokenType, ok := result["token_type"].(string); ok {
+		switch tokenType {
+		case "pat":
+			fmt.Println("Bot token created for status updates (bot identity).")
+		case "oauth":
+			fmt.Println("Using your GitLab session for status updates (your identity).")
+		}
+	}
+
+	return nil
+}
+
+func runManualRepoAdd(serverCfg cli.ServerConfig, repoPath, forgeType, forgeURL, forgeToken, owner, name string) error {
 	// Build clone URL based on forge
 	var cloneURL string
 	var baseURL string
@@ -974,6 +1107,79 @@ all platform binaries to ~/.cinch/bin/.`,
 			return shCmd.Run()
 		},
 	}
+}
+
+func gitlabCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "gitlab",
+		Short: "GitLab integration commands",
+	}
+	cmd.AddCommand(gitlabConnectCmd())
+	return cmd
+}
+
+func gitlabConnectCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "connect",
+		Short: "Connect your GitLab account to Cinch",
+		Long: `Connect your GitLab account to Cinch via OAuth.
+
+This opens your browser to authenticate with GitLab. Once authorized,
+you can add GitLab repositories to Cinch without manual token setup.
+
+Example:
+  cinch gitlab connect`,
+		RunE: runGitLabConnect,
+	}
+}
+
+func runGitLabConnect(cmd *cobra.Command, args []string) error {
+	// Load credentials to get server URL
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	serverCfg, ok := cfg.Servers["default"]
+	if !ok || serverCfg.Token == "" {
+		return fmt.Errorf("not logged in - run 'cinch login' first")
+	}
+
+	serverURL := serverCfg.URL
+
+	// Check if GitLab OAuth is configured on server
+	resp, err := http.Get(serverURL + "/api/gitlab/status")
+	if err != nil {
+		return fmt.Errorf("check GitLab status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var status struct {
+		Configured bool   `json:"configured"`
+		BaseURL    string `json:"base_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	if !status.Configured {
+		return fmt.Errorf("GitLab OAuth not configured on server")
+	}
+
+	// Open browser to GitLab OAuth flow
+	authURL := serverURL + "/auth/gitlab"
+	fmt.Printf("Opening browser to connect GitLab...\n")
+	fmt.Printf("If browser doesn't open, visit: %s\n", authURL)
+
+	openBrowser(authURL)
+
+	fmt.Println()
+	fmt.Println("After authorizing, you can add GitLab repos:")
+	fmt.Println("  cinch repo add owner/name --forge gitlab")
+	fmt.Println()
+	fmt.Println("Or visit the web UI to select projects to onboard.")
+
+	return nil
 }
 
 // openBrowser tries to open a URL in the default browser.

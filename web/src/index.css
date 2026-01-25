@@ -1341,6 +1341,74 @@ tr.clickable {
   color: var(--failure);
 }
 
+/* Larger modal for multi-select */
+.modal.modal-large {
+  max-width: 600px;
+}
+
+.modal-subtitle {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+/* Project multi-select actions */
+.project-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.btn-small {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.btn-small:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.selection-count {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* Checkbox-style project items */
+.project-item.checkbox {
+  gap: 0.75rem;
+  justify-content: flex-start;
+}
+
+.project-item.checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.project-item.checkbox .project-name {
+  flex: 1;
+}
+
+/* Setup progress */
+.setup-progress {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 /* Mobile landing */
 @media (max-width: 768px) {
   .hero {

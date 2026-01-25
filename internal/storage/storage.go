@@ -45,6 +45,11 @@ type Storage interface {
 	AppendLog(ctx context.Context, jobID, stream, data string) error
 	GetLogs(ctx context.Context, jobID string) ([]*LogEntry, error)
 
+	// Users
+	GetOrCreateUser(ctx context.Context, name string) (*User, error)
+	GetUserByName(ctx context.Context, name string) (*User, error)
+	UpdateUserGitLabCredentials(ctx context.Context, userID, credentials string) error
+
 	// Lifecycle
 	Close() error
 }
@@ -115,6 +120,15 @@ const (
 	ForgeTypeForgejo ForgeType = "forgejo"
 	ForgeTypeGitea   ForgeType = "gitea"
 )
+
+// User represents a Cinch user with connected forge credentials.
+type User struct {
+	ID                   string
+	Name                 string    // Username (from primary auth provider)
+	GitLabCredentials    string    // JSON-encoded OAuth credentials (access_token, refresh_token, expires_at, base_url)
+	GitLabCredentialsAt  time.Time // When GitLab was connected
+	CreatedAt            time.Time
+}
 
 // Repo represents a configured repository.
 type Repo struct {
