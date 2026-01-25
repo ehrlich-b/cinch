@@ -110,27 +110,32 @@ Note: `cinch release` works on GitHub, GitLab, Gitea - move forges, keep your Ma
 
 ---
 
-## Then: MVP 1.4 - Forge Expansion (Tier 1)
+## Then: MVP 1.4 - Forge Expansion
 
-**Goal:** Cover the major forges. These represent 95%+ of the market.
+**Goal:** Cover the major forges beyond GitHub.
+
+See `design/forge/` for detailed integration plans per forge.
 
 | Forge | Users | Priority | Notes |
 |-------|-------|----------|-------|
 | GitHub | 65M+ | ✅ Done | Full integration (App + Checks API) |
-| GitLab | 30M | **High** | Self-hosted king. Their CI complexity is our opportunity. |
-| Bitbucket | 10M+ | **High** | Atlassian/enterprise. Pipelines are frustrating. |
+| GitLab | 30M | **High** | Project Access Token trick enables near-grug experience |
+| Forgejo/Gitea | ? | ✅ Done (manual) | Hybrid flow planned (OAuth webhook + manual PAT) |
+| Bitbucket | 10M+ | **Not Planned** | Platform limitations make grug UX impossible |
 
 GitLab positioning: We're not replacing GitLab as a forge—we're replacing `.gitlab-ci.yml` with something simpler. "Keep GitLab for code, use Cinch for CI."
 
-- [ ] GitLab integration
-  - Webhook parsing (push, tag, MR events)
-  - Status API (commit status or pipeline status)
-  - Clone token (deploy tokens or job tokens)
-  - Self-hosted instance support (custom base URL)
-- [ ] Bitbucket integration
-  - Webhook parsing
-  - Build status API
-  - App passwords / OAuth for cloning
+- [ ] GitLab integration (see `design/forge/gitlab.md`)
+  - OAuth app registration
+  - Project Access Token creation via API (throw away OAuth after)
+  - Webhook creation via API
+  - Commit status posting
+  - Self-hosted instance support
+- [ ] Forgejo/Gitea hybrid flow (see `design/forge/forgejo-gitea.md`)
+  - Register OAuth app on Codeberg
+  - Use OAuth to create webhook (automated)
+  - Prompt for manual PAT (status posting)
+  - Fall back to full manual for self-hosted
 
 ---
 
@@ -146,9 +151,38 @@ Currently push-only. PRs are table stakes for real adoption.
 
 ---
 
-## Then: MVP 1.6 - Forge Expansion (Tier 2)
+## Then: MVP 1.6 - Stripe Integration (Deferred)
 
-Enterprise and ecosystem-specific forges.
+**Goal:** Validate the business model with paying customers.
+
+**Status:** Deferred - not working on this for at least a week. Focus on UX/forge work first.
+
+**Pricing model:**
+- Public repos: Free forever (marketing)
+- Private repos: $5/seat/month (the business)
+- Self-hosted: Free forever (MIT escape hatch)
+
+**Why charge now:**
+1. $5 validates the business - If people won't pay $5/seat, the thesis is broken
+2. Paying customers are better customers - Real bugs, useful feedback, stick around
+3. "Free now, paid later" is a trap - Keeps getting pushed, then users are mad
+4. $5 is an impulse buy - Below "ask my manager" threshold
+5. Fits the longevity story - "$5 in 2026, $5 in 2036"
+6. Stripe is already set up - No technical barrier
+
+**First paying customer > 1000 free users** for validating this works.
+
+- [ ] Stripe checkout integration
+- [ ] Seat counting logic
+- [ ] Public vs private repo detection
+- [ ] Billing page in web UI
+- [ ] Grace period for failed payments
+
+---
+
+## Backlog: Forge Expansion (Tier 2)
+
+Enterprise and ecosystem-specific forges. Low priority - demand-driven.
 
 | Forge | Users | Notes |
 |-------|-------|-------|
