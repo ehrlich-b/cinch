@@ -1,5 +1,7 @@
 # cinch
 
+[![CI](https://cinch.sh/badge/github.com/ehrlich-b/cinch.svg)](https://cinch.sh/jobs)
+
 CI that's a cinch.
 
 ```yaml
