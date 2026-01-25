@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="26">
+  <defs>
+    <linearGradient id="cinchBrand" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="120" height="26" rx="5" fill="#18181b"/>
+  <!-- Cinch icon - abstract "C" that looks like a clamp/cinch -->
+  <g transform="translate(8, 5)">
+    <path d="M8 0 C2 0 0 4 0 8 C0 12 2 16 8 16 L8 13 C4 13 3 11 3 8 C3 5 4 3 8 3 Z" fill="url(#cinchBrand)"/>
+    <circle cx="11" cy="3" r="2" fill="url(#cinchBrand)"/>
+    <circle cx="11" cy="13" r="2" fill="url(#cinchBrand)"/>
+  </g>
+  <!-- Divider -->
+  <rect x="28" y="5" width="1" height="16" fill="#27272a"/>
+  <!-- Text -->
+  <text x="36" y="17" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="11" font-weight="600" fill="#71717a">cinch</text>
+  <text x="74" y="17" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="11" font-weight="600" fill="#4ade80">passing</text>
+  <!-- Status dot -->
+  <circle cx="110" cy="13" r="4" fill="#22c55e"/>
+</svg>

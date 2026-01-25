@@ -12,10 +12,11 @@ import (
 
 // Dispatcher manages job queue and worker assignment.
 type Dispatcher struct {
-	hub     *Hub
-	storage storage.Storage
-	ws      *WSHandler
-	log     *slog.Logger
+	hub       *Hub
+	storage   storage.Storage
+	ws        *WSHandler
+	log       *slog.Logger
+	githubApp *GitHubAppHandler
 
 	// Job queue
 	mu       sync.Mutex
@@ -29,6 +30,11 @@ type Dispatcher struct {
 	wg     sync.WaitGroup
 }
 
+// SetGitHubApp sets the GitHub App handler for token regeneration on recovery.
+func (d *Dispatcher) SetGitHubApp(app *GitHubAppHandler) {
+	d.githubApp = app
+}
+
 // QueuedJob represents a job waiting for a worker.
 type QueuedJob struct {
 	Job            *storage.Job
@@ -40,7 +46,7 @@ type QueuedJob struct {
 	Branch         string             // Branch to checkout (empty for tags)
 	Tag            string             // Tag name (empty for branches)
 	CloneToken     string             // Token for cloning private repos
-	Forge          interface{}        // Forge implementation (for status posting)
+	Forge          any                // Forge implementation (for status posting)
 	InstallationID int64              // GitHub App installation ID
 	QueuedAt       time.Time
 	Attempts       int
@@ -68,9 +74,111 @@ func NewDispatcher(hub *Hub, store storage.Storage, ws *WSHandler, log *slog.Log
 
 // Start begins the dispatch loop.
 func (d *Dispatcher) Start() {
+	// Recover orphaned jobs from previous server run
+	d.recoverOrphanedJobs()
+
 	d.wg.Add(2)
 	go d.dispatchLoop()
 	go d.timeoutLoop()
+}
+
+// recoverOrphanedJobs re-queues jobs that were running/queued when server stopped.
+// For GitHub App jobs, fresh tokens are regenerated. For other forges, repo.ForgeToken is used.
+func (d *Dispatcher) recoverOrphanedJobs() {
+	ctx := context.Background()
+
+	// Find orphaned jobs (queued or running from before restart)
+	filter := storage.JobFilter{Limit: 1000}
+	jobs, err := d.storage.ListJobs(ctx, filter)
+	if err != nil {
+		d.log.Error("failed to list jobs for recovery", "error", err)
+		return
+	}
+
+	var recovered, failed int
+	for _, job := range jobs {
+		if job.Status != storage.JobStatusQueued && job.Status != storage.JobStatusRunning {
+			continue
+		}
+
+		// Get repo for this job
+		repo, err := d.storage.GetRepo(ctx, job.RepoID)
+		if err != nil {
+			d.log.Error("failed to get repo for orphaned job", "job_id", job.ID, "error", err)
+			d.markJobError(ctx, job.ID)
+			failed++
+			continue
+		}
+
+		// Determine clone token
+		var cloneToken string
+		var installationID int64
+
+		if job.InstallationID != nil && d.githubApp != nil && d.githubApp.IsConfigured() {
+			// GitHub App job - regenerate token
+			installationID = *job.InstallationID
+			token, err := d.githubApp.GetInstallationToken(installationID)
+			if err != nil {
+				d.log.Error("failed to get installation token for recovery", "job_id", job.ID, "error", err)
+				d.markJobError(ctx, job.ID)
+				failed++
+				continue
+			}
+			cloneToken = token
+		} else {
+			// Non-GitHub App - use stored forge token
+			cloneToken = repo.ForgeToken
+		}
+
+		// Reconstruct ref from branch or tag
+		var ref string
+		if job.Branch != "" {
+			ref = "refs/heads/" + job.Branch
+		} else if job.Tag != "" {
+			ref = "refs/tags/" + job.Tag
+		} else {
+			// No branch or tag - can't reconstruct ref
+			d.log.Warn("cannot recover job without branch or tag", "job_id", job.ID)
+			d.markJobError(ctx, job.ID)
+			failed++
+			continue
+		}
+
+		// Reset job status to pending (we're re-queuing it)
+		if err := d.storage.UpdateJobStatus(ctx, job.ID, storage.JobStatusPending, nil); err != nil {
+			d.log.Error("failed to reset job status", "job_id", job.ID, "error", err)
+			failed++
+			continue
+		}
+
+		// Re-queue the job
+		queuedJob := &QueuedJob{
+			Job:            job,
+			Repo:           repo,
+			CloneURL:       repo.CloneURL,
+			Ref:            ref,
+			Branch:         job.Branch,
+			Tag:            job.Tag,
+			CloneToken:     cloneToken,
+			InstallationID: installationID,
+			// Note: Config is empty - worker reads .cinch.yaml after clone
+		}
+
+		d.Enqueue(queuedJob)
+		recovered++
+		d.log.Info("re-queued orphaned job", "job_id", job.ID, "prev_status", job.Status)
+	}
+
+	if recovered > 0 || failed > 0 {
+		d.log.Info("orphan job recovery complete", "recovered", recovered, "failed", failed)
+	}
+}
+
+// markJobError marks a job as error status.
+func (d *Dispatcher) markJobError(ctx context.Context, jobID string) {
+	if err := d.storage.UpdateJobStatus(ctx, jobID, storage.JobStatusError, nil); err != nil {
+		d.log.Error("failed to mark job as error", "job_id", jobID, "error", err)
+	}
 }
 
 // Stop stops the dispatcher and waits for goroutines.

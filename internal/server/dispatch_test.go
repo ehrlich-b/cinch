@@ -100,7 +100,7 @@ func TestDispatcherAssignment(t *testing.T) {
 	hub.Register(&WorkerConn{
 		ID:           "w_1",
 		Labels:       []string{"linux"},
-		Capabilities: Capabilities{Concurrency: 2},
+		Capabilities: Capabilities{},
 		Send:         workerSend,
 	})
 
@@ -180,7 +180,7 @@ func TestDispatcherNoMatchingWorker(t *testing.T) {
 	hub.Register(&WorkerConn{
 		ID:           "w_1",
 		Labels:       []string{"linux"},
-		Capabilities: Capabilities{Concurrency: 1},
+		Capabilities: Capabilities{},
 		Send:         make(chan []byte, 10),
 	})
 

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="28">
+  <defs>
+    <linearGradient id="holo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff00ff" stop-opacity="0.2"/>
+      <stop offset="25%" stop-color="#00ffff" stop-opacity="0.2"/>
+      <stop offset="50%" stop-color="#ffff00" stop-opacity="0.2"/>
+      <stop offset="75%" stop-color="#00ff00" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#ff00ff" stop-opacity="0.2"/>
+    </linearGradient>
+    <linearGradient id="holoBorder" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff00ff"/>
+      <stop offset="33%" stop-color="#00ffff"/>
+      <stop offset="66%" stop-color="#ffff00"/>
+      <stop offset="100%" stop-color="#ff00ff"/>
+    </linearGradient>
+  </defs>
+  <!-- Dark base -->
+  <rect width="120" height="28" rx="6" fill="#0a0a0a"/>
+  <!-- Holographic overlay -->
+  <rect x="1" y="1" width="118" height="26" rx="5" fill="url(#holo)"/>
+  <!-- Iridescent border -->
+  <rect x="1" y="1" width="118" height="26" rx="5" fill="none" stroke="url(#holoBorder)" stroke-width="1"/>
+  <!-- Content -->
+  <text x="16" y="18" font-family="Inter,-apple-system,sans-serif" font-size="11" font-weight="700" fill="#888">cinch</text>
+  <text x="60" y="18" font-family="Inter,-apple-system,sans-serif" font-size="11" font-weight="600" fill="#4ade80">passing</text>
+  <circle cx="106" cy="14" r="4" fill="#22c55e"/>
+</svg>

@@ -27,7 +27,7 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 			msgType: TypeRegister,
 			payload: Register{
 				Labels:       []string{"linux", "amd64"},
-				Capabilities: Capabilities{Docker: true, Concurrency: 2},
+				Capabilities: Capabilities{Docker: true},
 				Version:      "0.1.0",
 				Hostname:     "build-1",
 			},

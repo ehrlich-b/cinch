@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="24">
+  <defs>
+    <linearGradient id="richBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#27272a"/>
+      <stop offset="100%" stop-color="#18181b"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="160" height="24" rx="4" fill="url(#richBg)"/>
+  <!-- Brand -->
+  <text x="10" y="16" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="10" font-weight="600" fill="#71717a">cinch</text>
+  <!-- Divider -->
+  <rect x="44" y="5" width="1" height="14" fill="#3f3f46"/>
+  <!-- Status -->
+  <circle cx="54" cy="12" r="4" fill="#22c55e"/>
+  <text x="64" y="16" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="10" font-weight="500" fill="#a1a1aa">passing</text>
+  <!-- Divider -->
+  <rect x="108" y="5" width="1" height="14" fill="#3f3f46"/>
+  <!-- Duration -->
+  <text x="116" y="16" font-family="SF Mono,monospace" font-size="10" fill="#71717a">1m 23s</text>
+</svg>

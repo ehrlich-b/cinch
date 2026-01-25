@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="112" height="24">
+  <!-- Pixel art style -->
+  <rect width="112" height="24" fill="#1a1a2e"/>
+  <!-- Pixel border -->
+  <rect x="0" y="0" width="112" height="2" fill="#4ade80"/>
+  <rect x="0" y="22" width="112" height="2" fill="#4ade80"/>
+  <rect x="0" y="0" width="2" height="24" fill="#4ade80"/>
+  <rect x="110" y="0" width="2" height="24" fill="#4ade80"/>
+  <!-- Pixel text simulation -->
+  <text x="12" y="16" font-family="Monaco,Consolas,monospace" font-size="10" fill="#eee" letter-spacing="1">CINCH</text>
+  <text x="58" y="16" font-family="Monaco,Consolas,monospace" font-size="10" fill="#4ade80" letter-spacing="1">PASS</text>
+  <!-- Pixel checkmark -->
+  <rect x="94" y="12" width="3" height="3" fill="#4ade80"/>
+  <rect x="97" y="9" width="3" height="3" fill="#4ade80"/>
+  <rect x="100" y="6" width="3" height="3" fill="#4ade80"/>
+</svg>

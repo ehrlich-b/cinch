@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="130" height="32">
+  <defs>
+    <filter id="yellowGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="neonYellow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffcc00"/>
+      <stop offset="100%" stop-color="#ffdd44"/>
+    </linearGradient>
+  </defs>
+  <style>
+    @keyframes glowPulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+    .pulse-border { animation: glowPulse 1.5s ease-in-out infinite; }
+  </style>
+  <rect width="130" height="32" rx="6" fill="#0a0a0a"/>
+  <rect class="pulse-border" x="1" y="1" width="128" height="30" rx="5" fill="none" stroke="url(#neonYellow)" stroke-width="1.5" filter="url(#yellowGlow)"/>
+  <text x="14" y="21" font-family="JetBrains Mono,SF Mono,monospace" font-size="13" font-weight="700" fill="#888">cinch</text>
+  <line x1="60" y1="8" x2="60" y2="24" stroke="#333" stroke-width="1"/>
+  <text x="70" y="21" font-family="JetBrains Mono,SF Mono,monospace" font-size="13" font-weight="600" fill="url(#neonYellow)" filter="url(#yellowGlow)">running</text>
+</svg>

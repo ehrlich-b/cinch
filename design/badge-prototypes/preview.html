@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cinch Badge Design Exploration</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      padding: 40px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+
+    .subtitle {
+      color: #8b949e;
+      margin-bottom: 40px;
+      font-size: 1.1rem;
+    }
+
+    .section {
+      margin-bottom: 60px;
+    }
+
+    .section h2 {
+      font-size: 1.3rem;
+      color: #58a6ff;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #21262d;
+    }
+
+    .badge-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 30px;
+    }
+
+    .badge-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 24px;
+      transition: border-color 0.2s;
+    }
+
+    .badge-card:hover {
+      border-color: #58a6ff;
+    }
+
+    .badge-name {
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: #e6edf3;
+    }
+
+    .badge-preview {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 60px;
+      margin-bottom: 16px;
+    }
+
+    .badge-preview.dark-bg {
+      background: #0d1117;
+      border-radius: 6px;
+      padding: 20px;
+    }
+
+    .badge-preview.light-bg {
+      background: #f6f8fa;
+      border-radius: 6px;
+      padding: 20px;
+    }
+
+    .badge-notes {
+      font-size: 0.85rem;
+      color: #8b949e;
+      line-height: 1.5;
+    }
+
+    .bg-toggle {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .bg-toggle button {
+      padding: 4px 12px;
+      border-radius: 4px;
+      border: 1px solid #30363d;
+      background: transparent;
+      color: #8b949e;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+
+    .bg-toggle button.active {
+      background: #21262d;
+      color: #c9d1d9;
+      border-color: #58a6ff;
+    }
+
+    .favorites {
+      background: linear-gradient(135deg, #161b22 0%, #1a1f26 100%);
+      border: 2px solid #238636;
+    }
+
+    .favorites .badge-name::before {
+      content: "⭐ ";
+    }
+
+    .state-variants {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .state-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .state-label {
+      font-size: 0.75rem;
+      color: #6e7681;
+      width: 60px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Cinch Badge Design Exploration</h1>
+  <p class="subtitle">20 badge concepts exploring shape, style, and brand expression. Click cards for details.</p>
+
+  <div class="section">
+    <h2>Top Candidates (Recommended)</h2>
+    <div class="badge-grid">
+      <div class="badge-card favorites">
+        <div class="badge-name">03 - Neon Glow</div>
+        <div class="state-variants">
+          <div class="state-row">
+            <span class="state-label">Pass</span>
+            <img src="03-neon-glow.svg" alt="Neon glow passing">
+          </div>
+          <div class="state-row">
+            <span class="state-label">Fail</span>
+            <img src="03-neon-failing.svg" alt="Neon glow failing">
+          </div>
+          <div class="state-row">
+            <span class="state-label">Running</span>
+            <img src="03-neon-running.svg" alt="Neon glow running">
+          </div>
+        </div>
+        <p class="badge-notes">High-energy cyberpunk aesthetic. Memorable and distinctive. The glow creates excitement.</p>
+      </div>
+
+      <div class="badge-card favorites">
+        <div class="badge-name">11 - Electric Wide</div>
+        <div class="state-variants">
+          <div class="state-row">
+            <span class="state-label">Pass</span>
+            <img src="11-electric-wide.svg" alt="Electric wide passing">
+          </div>
+          <div class="state-row">
+            <span class="state-label">Fail</span>
+            <img src="11-electric-failing.svg" alt="Electric wide failing">
+          </div>
+        </div>
+        <p class="badge-notes">Bold, uppercase, premium feel. The subtle glow adds energy without being overwhelming.</p>
+      </div>
+
+      <div class="badge-card favorites">
+        <div class="badge-name">06 - Terminal</div>
+        <div class="badge-preview dark-bg">
+          <img src="06-terminal.svg" alt="Terminal style">
+        </div>
+        <p class="badge-notes">Developer-native aesthetic. The cursor blink and prompt feel authentic. Speaks to the CLI-first philosophy.</p>
+      </div>
+
+      <div class="badge-card favorites">
+        <div class="badge-name">19 - Shimmer Animated</div>
+        <div class="badge-preview dark-bg">
+          <img src="19-shimmer-animated.svg" alt="Shimmer animated">
+        </div>
+        <p class="badge-notes">Subtle animation catches the eye. The left status bar is distinctive. Premium feel without being flashy.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>All Variations</h2>
+    <div class="badge-grid">
+      <div class="badge-card">
+        <div class="badge-name">01 - Classic Flat</div>
+        <div class="badge-preview dark-bg">
+          <img src="01-classic-flat.svg" alt="Classic flat">
+        </div>
+        <p class="badge-notes">shields.io baseline. Familiar but undifferentiated.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">02 - Gradient Pill</div>
+        <div class="badge-preview dark-bg">
+          <img src="02-gradient-pill.svg" alt="Gradient pill">
+        </div>
+        <p class="badge-notes">Modern SaaS aesthetic. Clean, professional, subtle depth.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">04 - Dark Modern</div>
+        <div class="badge-preview dark-bg">
+          <img src="04-dark-modern.svg" alt="Dark modern">
+        </div>
+        <p class="badge-notes">Brand color on left establishes identity. Status dot is minimal.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">05 - Logo Bolt</div>
+        <div class="badge-preview dark-bg">
+          <img src="05-logo-bolt.svg" alt="Logo bolt">
+        </div>
+        <p class="badge-notes">Lightning bolt suggests speed. Checkmark reinforces success.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">07 - Glassmorphism</div>
+        <div class="badge-preview dark-bg">
+          <img src="07-glassmorphism.svg" alt="Glassmorphism">
+        </div>
+        <p class="badge-notes">Trendy frosted glass effect. May not render well everywhere.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">08 - Animated Pulse</div>
+        <div class="badge-preview dark-bg">
+          <img src="08-animated-pulse.svg" alt="Animated pulse">
+        </div>
+        <p class="badge-notes">Running state with pulsing indicator. Live feedback.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">09 - Split Accent</div>
+        <div class="badge-preview dark-bg">
+          <img src="09-split-accent.svg" alt="Split accent">
+        </div>
+        <p class="badge-notes">Diagonal split creates unique shape. Brand blue + status green.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">10 - Minimal Status</div>
+        <div class="badge-preview dark-bg">
+          <img src="10-minimal-status.svg" alt="Minimal status">
+        </div>
+        <p class="badge-notes">Ultra-minimal. Status IS the badge. Requires brand recognition.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">12 - Cinch Icon</div>
+        <div class="badge-preview dark-bg">
+          <img src="12-cinch-icon.svg" alt="Cinch icon">
+        </div>
+        <p class="badge-notes">Custom "C" icon that looks like a clamp. Brand-forward.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">13 - Outlined Ghost</div>
+        <div class="badge-preview dark-bg">
+          <img src="13-outlined-ghost.svg" alt="Outlined ghost">
+        </div>
+        <p class="badge-notes">Border only, transparent fill. Works on any background.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">13 - Outlined (Light BG)</div>
+        <div class="badge-preview light-bg">
+          <img src="13-outlined-ghost.svg" alt="Outlined ghost on light">
+        </div>
+        <p class="badge-notes">Same badge on light background. Adapts well.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">14 - Rich Info</div>
+        <div class="badge-preview dark-bg">
+          <img src="14-rich-info.svg" alt="Rich info">
+        </div>
+        <p class="badge-notes">Shows status + duration. More information density.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">15 - Speed Streak</div>
+        <div class="badge-preview dark-bg">
+          <img src="15-speed-streak.svg" alt="Speed streak">
+        </div>
+        <p class="badge-notes">Motion lines suggest speed/efficiency. Arrow points forward.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">16 - Holographic</div>
+        <div class="badge-preview dark-bg">
+          <img src="16-holographic.svg" alt="Holographic">
+        </div>
+        <p class="badge-notes">Iridescent border effect. Premium, futuristic.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">17 - Brutalist</div>
+        <div class="badge-preview dark-bg">
+          <img src="17-brutalist.svg" alt="Brutalist">
+        </div>
+        <p class="badge-notes">Bold, stark, no-nonsense. Impact font. Polarizing.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">18 - Retro Pixel</div>
+        <div class="badge-preview dark-bg">
+          <img src="18-retro-pixel.svg" alt="Retro pixel">
+        </div>
+        <p class="badge-notes">8-bit aesthetic. Nostalgic, playful, retro gaming vibe.</p>
+      </div>
+
+      <div class="badge-card">
+        <div class="badge-name">20 - Status Bar</div>
+        <div class="badge-preview dark-bg">
+          <img src="20-status-bar.svg" alt="Status bar">
+        </div>
+        <p class="badge-notes">Progress bar aesthetic. Shows build number. Data-rich.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Decision Framework</h2>
+    <div style="background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; max-width: 800px;">
+      <p style="margin-bottom: 16px; color: #e6edf3;"><strong>For maximum dopamine:</strong></p>
+      <ul style="margin-left: 20px; line-height: 1.8; color: #8b949e;">
+        <li><strong style="color: #c9d1d9;">Neon Glow (03)</strong> - Highest energy, most memorable, stands out in any README</li>
+        <li><strong style="color: #c9d1d9;">Electric Wide (11)</strong> - Confident, bold, professional yet exciting</li>
+        <li><strong style="color: #c9d1d9;">Terminal (06)</strong> - Authentic to CLI-first brand, developer-native</li>
+        <li><strong style="color: #c9d1d9;">Shimmer (19)</strong> - Subtle animation, premium feel, distinctive</li>
+      </ul>
+      <p style="margin-top: 20px; color: #6e7681; font-size: 0.9rem;">
+        Recommendation: Start with <strong style="color: #58a6ff;">Neon Glow</strong> as the default,
+        offer <strong style="color: #58a6ff;">Terminal</strong> as an alternative for developers who prefer
+        understated aesthetics.
+      </p>
+    </div>
+  </div>
+
+</body>
+</html>

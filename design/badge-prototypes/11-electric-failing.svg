@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="140" height="28">
+  <defs>
+    <linearGradient id="electricBgF" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0c0c0c"/>
+      <stop offset="50%" stop-color="#111111"/>
+      <stop offset="100%" stop-color="#0c0c0c"/>
+    </linearGradient>
+    <linearGradient id="electricRed" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff3366"/>
+      <stop offset="100%" stop-color="#ff5588"/>
+    </linearGradient>
+    <filter id="redElectricGlow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="140" height="28" rx="4" fill="url(#electricBgF)"/>
+  <rect x="0" y="0" width="140" height="1" fill="url(#electricRed)" opacity="0.3"/>
+  <text x="16" y="18" font-family="Inter,-apple-system,sans-serif" font-size="12" font-weight="800" fill="#666" letter-spacing="1">CINCH</text>
+  <rect x="68" y="6" width="1" height="16" fill="#333"/>
+  <text x="80" y="18" font-family="Inter,-apple-system,sans-serif" font-size="12" font-weight="600" fill="url(#electricRed)" filter="url(#redElectricGlow)">FAILING</text>
+</svg>

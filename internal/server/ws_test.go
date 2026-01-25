@@ -137,7 +137,7 @@ func TestWSFullConnection(t *testing.T) {
 	// Send REGISTER
 	regMsg, _ := protocol.Encode(protocol.TypeRegister, protocol.Register{
 		Labels:       []string{"linux", "docker"},
-		Capabilities: protocol.Capabilities{Docker: true, Concurrency: 2},
+		Capabilities: protocol.Capabilities{Docker: true},
 		Version:      "0.1.0",
 		Hostname:     "test-host",
 	})
@@ -169,9 +169,6 @@ func TestWSFullConnection(t *testing.T) {
 
 	if len(worker.Labels) != 2 {
 		t.Errorf("labels = %v, want [linux docker]", worker.Labels)
-	}
-	if worker.Capabilities.Concurrency != 2 {
-		t.Errorf("concurrency = %d, want 2", worker.Capabilities.Concurrency)
 	}
 }
 
