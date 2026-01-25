@@ -597,7 +597,7 @@ func (h *GitLabOAuthHandler) createProjectAccessToken(token *gitlabOAuthToken, p
 	data := map[string]any{
 		"name":         "cinch-ci",
 		"scopes":       []string{"api"},
-		"access_level": 30,                                               // Developer level
+		"access_level": 40,                                               // Maintainer level (required for commit status)
 		"expires_at":   time.Now().AddDate(1, 0, 0).Format("2006-01-02"), // 1 year
 	}
 	body, _ := json.Marshal(data)
