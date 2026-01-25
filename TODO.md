@@ -1,6 +1,6 @@
 # Cinch TODO
 
-**Last Updated:** 2026-01-24
+**Last Updated:** 2026-01-25
 
 ---
 
@@ -267,7 +267,81 @@ Currently repos are created lazily on first push. The GitHub App already knows w
 
 ## Then: MVP 1.5 - Worker Ergonomics
 
-**Goal:** More intuitive worker setup with sensible defaults for different use cases.
+**Goal:** Worker setup so simple that "I don't want to run my own runners" stops being a complaint.
+
+### `cinch daemon` - Dead Simple Background Worker
+
+The dream:
+```bash
+cinch login
+cinch daemon install   # creates user-level service, no sudo
+cinch daemon start     # starts it
+# Done. Your Mac/Linux box is now a CI runner.
+```
+
+**Daemonology in 2026:**
+
+| Platform | User-level daemon | Location | No sudo? |
+|----------|------------------|----------|----------|
+| macOS | launchd agent | `~/Library/LaunchAgents/` | ✅ |
+| Linux | systemd user service | `~/.config/systemd/user/` | ✅ |
+
+Both platforms support user-level daemons without sudo. This is the path.
+
+**Commands:**
+```bash
+cinch daemon install    # Write service file, enable on boot
+cinch daemon start      # Start the worker daemon
+cinch daemon stop       # Stop the worker daemon
+cinch daemon status     # Is it running? Last job?
+cinch daemon uninstall  # Remove service file
+cinch daemon logs       # Tail the daemon logs
+```
+
+**macOS implementation:**
+```xml
+<!-- ~/Library/LaunchAgents/sh.cinch.worker.plist -->
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>sh.cinch.worker</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/you/.cinch/bin/cinch</string>
+        <string>worker</string>
+        <string>--all</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>/Users/you/.cinch/logs/worker.log</string>
+    <key>StandardErrorPath</key><string>/Users/you/.cinch/logs/worker.err</string>
+</dict>
+</plist>
+```
+
+**Linux implementation:**
+```ini
+# ~/.config/systemd/user/cinch-worker.service
+[Unit]
+Description=Cinch CI Worker
+After=network.target
+
+[Service]
+ExecStart=%h/.cinch/bin/cinch worker --all
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+```
+
+**Open questions:**
+- [ ] What about Windows? (Probably just "run in terminal" for now)
+- [ ] Docker-in-Docker on Mac? (Docker Desktop socket passthrough)
+- [ ] Should `cinch daemon install` also run `cinch login` if not logged in?
+
+---
+
+**Current goal (before daemon):** More intuitive worker setup with sensible defaults for different use cases.
 
 **Problem:** Two use cases in tension:
 - **Local machine:** Only build MY stuff on shared repos (don't build other people's PRs)
@@ -356,6 +430,60 @@ Currently push-only. PRs are table stakes for real adoption.
 - [ ] Public vs private repo detection
 - [ ] Billing page in web UI
 - [ ] Grace period for failed payments
+
+---
+
+## Future: Parallel Commands + Event Abstraction
+
+**The insight:** `.cinch.yaml` is just a thin wrapper around webhook event types.
+
+```yaml
+build: make check      # ← what to run on commit push
+release: make release  # ← what to run on tag push
+```
+
+That's it. `build` and `release` are opinionated aliases for:
+- `commit:` - any commit pushed to any branch
+- `tag:` - any tag pushed
+
+**The abstraction:**
+```
+webhook event → cinch config key → your command(s)
+```
+
+We're just a webhook router. You tell us what to run when we get each event type. Your Makefile does the actual work.
+
+**Parallel execution (future):**
+```yaml
+# String = one command
+build: make check
+
+# Array = parallel jobs (no DAG, no dependencies)
+build:
+  - make build
+  - make test
+  - make docs
+```
+
+Array items fan out as independent parallel jobs. Need sequencing? Put it in your Makefile. Need conditionals? Use `CINCH_BRANCH` in your Makefile. No workflow DSL.
+
+**Future extensibility:**
+- Support `commit:`/`tag:` as aliases for `build:`/`release:`
+- Potentially expose raw webhook types: `pull_request:`, `issue_comment:`, etc.
+- Forge-specific events: `gitlab_merge_request:`, `github_check_suite:`
+- But start minimal - `build` and `release` cover 95% of use cases
+
+**Why NO DAG:**
+- If you need A→B→C, write `make a && make b && make c`
+- Dependency management belongs in build tools, not CI config
+- DAGs are where CI complexity explodes
+
+**Implementation:**
+- [ ] Config: `build` and `release` accept string OR string array
+- [ ] Array items dispatch as parallel jobs (fan-out)
+- [ ] Each job reports status independently
+- [ ] Combined status: all pass = green, any fail = red
+- [ ] Aliases: accept `commit:`/`tag:` as synonyms (maybe v2)
 
 ---
 

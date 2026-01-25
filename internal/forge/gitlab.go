@@ -85,10 +85,20 @@ func (g *GitLab) ParsePush(r *http.Request, secret string) (*PushEvent, error) {
 	// Build clone URL from project URL
 	cloneURL := payload.Project.GitHTTPURL
 
+	// Extract owner from path_with_namespace (e.g., "ehrlich-b/cinch" -> "ehrlich-b")
+	// This is more reliable than Namespace which can be a display name
+	owner := payload.Project.Namespace // fallback
+	if payload.Project.PathWithNamespace != "" {
+		parts := strings.SplitN(payload.Project.PathWithNamespace, "/", 2)
+		if len(parts) > 0 {
+			owner = parts[0]
+		}
+	}
+
 	return &PushEvent{
 		Repo: &Repo{
 			ForgeType: "gitlab",
-			Owner:     payload.Project.Namespace,
+			Owner:     owner,
 			Name:      payload.Project.Name,
 			CloneURL:  cloneURL,
 			HTMLURL:   payload.Project.WebURL,
@@ -215,12 +225,13 @@ type gitlabPushPayload struct {
 	After        string `json:"after"`
 	UserUsername string `json:"user_username"`
 	Project      struct {
-		ID              int    `json:"id"`
-		Name            string `json:"name"`
-		Namespace       string `json:"namespace"`
-		WebURL          string `json:"web_url"`
-		GitHTTPURL      string `json:"git_http_url"`
-		VisibilityLevel int    `json:"visibility_level"` // 0=private, 10=internal, 20=public
+		ID                int    `json:"id"`
+		Name              string `json:"name"`
+		Namespace         string `json:"namespace"`
+		PathWithNamespace string `json:"path_with_namespace"` // "owner/repo" format
+		WebURL            string `json:"web_url"`
+		GitHTTPURL        string `json:"git_http_url"`
+		VisibilityLevel   int    `json:"visibility_level"` // 0=private, 10=internal, 20=public
 	} `json:"project"`
 }
 
