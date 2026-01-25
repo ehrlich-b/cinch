@@ -48,7 +48,7 @@ type gitlabOAuthToken struct {
 // GitLabOAuthCredentials is stored in repo.ForgeToken when using OAuth fallback.
 // The forge code checks if ForgeToken is JSON with Type="oauth" to know it needs refresh handling.
 type GitLabOAuthCredentials struct {
-	Type         string    `json:"type"`          // Always "oauth"
+	Type         string    `json:"type"` // Always "oauth"
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
@@ -509,7 +509,7 @@ func (h *GitLabOAuthHandler) createProjectAccessToken(token *gitlabOAuthToken, p
 	data := map[string]any{
 		"name":         "cinch-ci",
 		"scopes":       []string{"api"},
-		"access_level": 30, // Developer level
+		"access_level": 30,                                               // Developer level
 		"expires_at":   time.Now().AddDate(1, 0, 0).Format("2006-01-02"), // 1 year
 	}
 	body, _ := json.Marshal(data)
