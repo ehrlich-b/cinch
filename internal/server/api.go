@@ -306,13 +306,17 @@ func (h *APIHandler) listRepos(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]repoResponse, len(repos))
 	for i, repo := range repos {
+		htmlURL := repo.HTMLURL
+		if htmlURL == "" {
+			htmlURL = computeHTMLURL(repo.ForgeType, repo.Owner, repo.Name)
+		}
 		resp[i] = repoResponse{
 			ID:        repo.ID,
 			ForgeType: string(repo.ForgeType),
 			Owner:     repo.Owner,
 			Name:      repo.Name,
 			CloneURL:  repo.CloneURL,
-			HTMLURL:   repo.HTMLURL,
+			HTMLURL:   htmlURL,
 			Build:     repo.Build,
 			Release:   repo.Release,
 			CreatedAt: repo.CreatedAt,
@@ -557,4 +561,20 @@ func generateSecret(length int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(bytes), nil
+}
+
+// computeHTMLURL constructs a web URL for a repo if not stored in DB
+func computeHTMLURL(forgeType storage.ForgeType, owner, name string) string {
+	switch forgeType {
+	case storage.ForgeTypeGitHub:
+		return fmt.Sprintf("https://github.com/%s/%s", owner, name)
+	case storage.ForgeTypeGitLab:
+		return fmt.Sprintf("https://gitlab.com/%s/%s", owner, name)
+	case storage.ForgeTypeGitea:
+		return fmt.Sprintf("https://gitea.com/%s/%s", owner, name)
+	case storage.ForgeTypeForgejo:
+		return fmt.Sprintf("https://codeberg.org/%s/%s", owner, name)
+	default:
+		return ""
+	}
 }
