@@ -141,7 +141,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	webhookHandler := server.NewWebhookHandler(store, dispatcher, baseURL, log)
 	apiHandler := server.NewAPIHandler(store, hub, log)
 	logStreamHandler := server.NewLogStreamHandler(store, log)
-	badgeHandler := server.NewBadgeHandler(store, log)
+	badgeHandler := server.NewBadgeHandler(store, log, baseURL)
 
 	// Create GitHub App handler
 	githubAppConfig := server.GitHubAppConfig{
@@ -198,8 +198,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Install script for curl | sh
 	mux.HandleFunc("/install.sh", server.InstallScriptHandler)
 
-	// Badge endpoint - public, CDN-friendly
+	// Badge endpoints - public, CDN-friendly
 	mux.Handle("/badge/", badgeHandler)
+	mux.Handle("/api/badge/", badgeHandler)
 
 	// Serve embedded web assets
 	webFS, err := fs.Sub(web.Assets, "dist")
