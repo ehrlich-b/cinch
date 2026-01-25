@@ -454,6 +454,43 @@ func (h *ForgejoOAuthHandler) fetchRepos(token *forgejoOAuthToken) ([]forgejoRep
 }
 
 func (h *ForgejoOAuthHandler) createWebhook(token *forgejoOAuthToken, owner, name, webhookURL, secret string) error {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	// First, delete any existing webhooks pointing to our URL (for idempotent re-onboarding)
+	listReq, err := http.NewRequest("GET",
+		fmt.Sprintf("%s/api/v1/repos/%s/%s/hooks", token.ForgejoURL, owner, name),
+		nil)
+	if err == nil {
+		listReq.Header.Set("Authorization", "token "+token.AccessToken)
+		listResp, err := client.Do(listReq)
+		if err == nil && listResp.StatusCode == http.StatusOK {
+			var hooks []struct {
+				ID     int64 `json:"id"`
+				Config struct {
+					URL string `json:"url"`
+				} `json:"config"`
+			}
+			if json.NewDecoder(listResp.Body).Decode(&hooks) == nil {
+				for _, hook := range hooks {
+					if hook.Config.URL == webhookURL {
+						// Delete this webhook
+						delReq, _ := http.NewRequest("DELETE",
+							fmt.Sprintf("%s/api/v1/repos/%s/%s/hooks/%d", token.ForgejoURL, owner, name, hook.ID),
+							nil)
+						delReq.Header.Set("Authorization", "token "+token.AccessToken)
+						delResp, _ := client.Do(delReq)
+						if delResp != nil {
+							delResp.Body.Close()
+						}
+						h.log.Info("deleted existing webhook", "repo", owner+"/"+name, "hook_id", hook.ID)
+					}
+				}
+			}
+			listResp.Body.Close()
+		}
+	}
+
+	// Now create the new webhook
 	payload := map[string]any{
 		"type":   "forgejo",
 		"active": true,
@@ -475,7 +512,6 @@ func (h *ForgejoOAuthHandler) createWebhook(token *forgejoOAuthToken, owner, nam
 	req.Header.Set("Authorization", "token "+token.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("webhook request failed: %w", err)
