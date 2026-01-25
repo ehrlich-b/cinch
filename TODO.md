@@ -43,6 +43,45 @@ img.shields.io/endpoint?url=https://cinch.sh/api/badge/github.com/owner/repo.jso
 
 ---
 
+## Current: Unified Onboarding Flow
+
+**Insight:** Login IS onboarding. No email auth - an account with zero integrations is inert.
+
+**The flow:**
+```
+cinch.sh (landing)
+    ↓
+"Get Started" → Select your forge [GitHub] [GitLab] [Forgejo]
+    ↓
+OAuth with forge → You're logged in AND connected
+    ↓
+Select repos to onboard (GitHub: already selected, GitLab: multi-select modal)
+    ↓
+Success! Now show:
+    ┌─────────────────────────────────────────────┐
+    │  curl -sSL https://cinch.sh/install.sh | sh │
+    │  cinch login      # quick bounce, you're in │
+    │  cinch worker --all                         │
+    └─────────────────────────────────────────────┘
+    ↓
+Dashboard with your repos
+```
+
+**Why this works:**
+- No "login then setup later" - you're productive immediately
+- `cinch login` is a 1-second bounce (already authed via OAuth)
+- `cinch worker --all` is the right default for new users
+- Zero friction from "interested" to "first build running"
+
+**Implementation:**
+- [ ] Remove separate login button, replace with "Get Started"
+- [ ] Forge selector as first screen (not login screen)
+- [ ] After OAuth callback → repo selector → success page with CLI instructions
+- [ ] `cinch login` detects existing session, skips device code flow
+- [ ] Success page emphasizes `--all` flag for first-time setup
+
+---
+
 ## Current: Web UI Redesign
 
 **Goal:** A polished, cohesive web experience with proper UX at every touchpoint.
