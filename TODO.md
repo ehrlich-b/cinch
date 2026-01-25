@@ -244,21 +244,24 @@ Currently repos are created lazily on first push. The GitHub App already knows w
 - [ ] Allow GitHub repo onboarding through web UI (not just GitHub App)
 - [ ] "Connect GitHub" button similar to GitLab flow
 
-### Forgejo/Gitea Hybrid Flow
+### Forgejo/Gitea Hybrid Flow ✅
 
-- [ ] Register OAuth app on Codeberg
-- [ ] Use OAuth to create webhook (automated)
-- [ ] Prompt for manual PAT (status posting)
-- [ ] Fall back to full manual for self-hosted
+- [x] Register OAuth app on Codeberg
+- [x] Use OAuth to create webhook (automated)
+- [x] Prompt for manual PAT (status posting)
+- [x] `cinch connect codeberg` CLI command
+- [ ] Self-hosted support: `cinch connect gitlab --host gitlab.mycompany.com`
+- [ ] Self-hosted support: `cinch connect forgejo --host git.mycompany.com`
+- [ ] Differentiate "codeberg" vs "forgejo" in CLI/UI (codeberg = forgejo at codeberg.org)
 
-### Multi-Forge Setup for Cinch
+### Multi-Forge Setup for Cinch ✅
 
-- [ ] Create GitLab repo (gitlab.com/ehrlich-b/cinch)
-- [ ] Create Codeberg repo (codeberg.org/ehrlich/cinch)
-- [ ] Add all three as remotes locally
-- [ ] Register all three repos with cinch.sh
-- [ ] `make push` target to push to all forges
-- [ ] Verify releases land on all three simultaneously
+- [x] Create GitLab repo (gitlab.com/ehrlich-b/cinch)
+- [x] Create Codeberg repo (codeberg.org/ehrlich/cinch)
+- [x] Add all three as remotes locally
+- [x] Register all three repos with cinch.sh
+- [x] `make push` target to push to all forges
+- [x] Verify releases land on all three simultaneously
 
 ---
 
