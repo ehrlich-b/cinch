@@ -18,9 +18,10 @@ type Dispatcher struct {
 	log     *slog.Logger
 
 	// Job queue
-	mu      sync.Mutex
-	queue   []*QueuedJob
-	queueCh chan struct{} // signals new jobs in queue
+	mu       sync.Mutex
+	queue    []*QueuedJob
+	inflight map[string]*QueuedJob // jobs dispatched but not completed
+	queueCh  chan struct{}         // signals new jobs in queue
 
 	// Control
 	ctx    context.Context
@@ -53,14 +54,15 @@ func NewDispatcher(hub *Hub, store storage.Storage, ws *WSHandler, log *slog.Log
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Dispatcher{
-		hub:     hub,
-		storage: store,
-		ws:      ws,
-		log:     log,
-		queue:   make([]*QueuedJob, 0),
-		queueCh: make(chan struct{}, 1),
-		ctx:     ctx,
-		cancel:  cancel,
+		hub:      hub,
+		storage:  store,
+		ws:       ws,
+		log:      log,
+		queue:    make([]*QueuedJob, 0),
+		inflight: make(map[string]*QueuedJob),
+		queueCh:  make(chan struct{}, 1),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 }
 
@@ -172,6 +174,9 @@ func (d *Dispatcher) tryAssign(qj *QueuedJob) bool {
 		return false
 	}
 
+	// Track in-flight job for potential re-queue
+	d.inflight[qj.Job.ID] = qj
+
 	d.log.Info("job assigned", "job_id", qj.Job.ID, "worker_id", worker.ID)
 	return true
 }
@@ -264,4 +269,53 @@ func (d *Dispatcher) PendingJobs() []*QueuedJob {
 	result := make([]*QueuedJob, len(d.queue))
 	copy(result, d.queue)
 	return result
+}
+
+// Requeue puts a rejected/failed job back in the queue.
+func (d *Dispatcher) Requeue(jobID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	qj, ok := d.inflight[jobID]
+	if !ok {
+		d.log.Warn("cannot requeue: job not found in inflight", "job_id", jobID)
+		return
+	}
+
+	delete(d.inflight, jobID)
+	qj.Attempts++
+
+	// Check max retries
+	if qj.MaxRetries > 0 && qj.Attempts >= qj.MaxRetries {
+		d.log.Warn("job exceeded max retries", "job_id", jobID, "attempts", qj.Attempts)
+		ctx := context.Background()
+		if err := d.storage.UpdateJobStatus(ctx, jobID, storage.JobStatusError, nil); err != nil {
+			d.log.Error("failed to update job status", "job_id", jobID, "error", err)
+		}
+		return
+	}
+
+	// Put back at front of queue for immediate retry
+	d.queue = append([]*QueuedJob{qj}, d.queue...)
+
+	// Update status back to queued
+	ctx := context.Background()
+	if err := d.storage.UpdateJobStatus(ctx, jobID, storage.JobStatusQueued, nil); err != nil {
+		d.log.Error("failed to update job status to queued", "job_id", jobID, "error", err)
+	}
+
+	d.log.Info("job requeued", "job_id", jobID, "attempt", qj.Attempts)
+
+	// Signal dispatch loop
+	select {
+	case d.queueCh <- struct{}{}:
+	default:
+	}
+}
+
+// CompleteJob removes a job from inflight tracking.
+func (d *Dispatcher) CompleteJob(jobID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.inflight, jobID)
 }

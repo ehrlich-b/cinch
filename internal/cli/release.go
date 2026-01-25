@@ -15,12 +15,12 @@ import (
 
 // ReleaseOptions configures the release command.
 type ReleaseOptions struct {
-	Forge   string   // Override forge detection
-	Tag     string   // Override tag
-	Repo    string   // Override repository (owner/name)
-	Token   string   // Override token
-	Files   []string // Files to upload
-	Draft   bool
+	Forge      string   // Override forge detection
+	Tag        string   // Override tag
+	Repo       string   // Override repository (owner/name)
+	Token      string   // Override token
+	Files      []string // Files to upload
+	Draft      bool
 	Prerelease bool
 }
 
@@ -123,8 +123,8 @@ func parseRepoFromURL(cloneURL string) string {
 // --- GitHub ---
 
 type githubRelease struct {
-	ID      int64  `json:"id"`
-	TagName string `json:"tag_name"`
+	ID        int64  `json:"id"`
+	TagName   string `json:"tag_name"`
 	UploadURL string `json:"upload_url"`
 }
 

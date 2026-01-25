@@ -123,7 +123,7 @@ Already done: Gitea, Forgejo (same codebase). These cover the self-hosted commun
 - [ ] Create releases from cinch.sh UI (push tag to user's repo via forge API)
 
 ### Known Issues
-- [ ] **Rejected jobs not re-queued** - When a worker rejects a job (at max concurrency), the job is not put back in the queue. See `ws.go:403` TODO.
+- [x] **Rejected jobs not re-queued** - When a worker rejects a job (at max concurrency), the job is not put back in the queue. Fixed: jobs now re-queue automatically.
 - [ ] **Worker should check dependencies on startup** - Probe for docker/podman before accepting jobs. Fail fast with "no container runtime found" instead of failing on first job.
 
 ---

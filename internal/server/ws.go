@@ -58,6 +58,8 @@ type JWTValidator interface {
 // WorkerAvailableNotifier is called when a worker becomes available.
 type WorkerAvailableNotifier interface {
 	NotifyWorkerAvailable()
+	Requeue(jobID string)
+	CompleteJob(jobID string)
 }
 
 // WSHandler handles WebSocket connections from workers.
@@ -400,7 +402,11 @@ func (h *WSHandler) handleJobReject(worker *WorkerConn, payload []byte) {
 	}
 
 	h.log.Warn("job rejected", "worker_id", worker.ID, "job_id", reject.JobID, "reason", reject.Reason)
-	// TODO: Re-queue job for another worker
+
+	// Re-queue for another worker
+	if h.workerNotifier != nil {
+		h.workerNotifier.Requeue(reject.JobID)
+	}
 }
 
 // handleJobStarted processes job start notification.
@@ -477,6 +483,9 @@ func (h *WSHandler) handleJobComplete(worker *WorkerConn, payload []byte) {
 	}
 
 	h.hub.RemoveActiveJob(worker.ID, complete.JobID)
+	if h.workerNotifier != nil {
+		h.workerNotifier.CompleteJob(complete.JobID)
+	}
 	h.log.Info("job completed",
 		"worker_id", worker.ID,
 		"job_id", complete.JobID,
@@ -533,6 +542,9 @@ func (h *WSHandler) handleJobError(worker *WorkerConn, payload []byte) {
 	}
 
 	h.hub.RemoveActiveJob(worker.ID, jobErr.JobID)
+	if h.workerNotifier != nil {
+		h.workerNotifier.CompleteJob(jobErr.JobID)
+	}
 	h.log.Error("job error",
 		"worker_id", worker.ID,
 		"job_id", jobErr.JobID,
