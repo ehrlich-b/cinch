@@ -173,7 +173,7 @@ func (h *GitLabOAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Reque
 	h.log.Info("GitLab OAuth successful", "user", username)
 
 	// Redirect to project selector
-	http.Redirect(w, r, "/?gitlab=select-project", http.StatusFound)
+	http.Redirect(w, r, "/gitlab/onboard", http.StatusFound)
 }
 
 // HandleProjects lists user's GitLab projects.
