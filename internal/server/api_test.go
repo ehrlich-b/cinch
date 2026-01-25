@@ -38,7 +38,7 @@ func TestAPIListJobs(t *testing.T) {
 		_ = store.CreateJob(t.Context(), job)
 	}
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/jobs", nil)
 	w := httptest.NewRecorder()
@@ -91,7 +91,7 @@ func TestAPIListJobsWithFilters(t *testing.T) {
 	_ = store.CreateJob(t.Context(), job1)
 	_ = store.CreateJob(t.Context(), job2)
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	// Filter by status
 	req := httptest.NewRequest("GET", "/api/jobs?status=success", nil)
@@ -135,7 +135,7 @@ func TestAPIGetJob(t *testing.T) {
 	}
 	_ = store.CreateJob(t.Context(), job)
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/jobs/j_test", nil)
 	w := httptest.NewRecorder()
@@ -163,7 +163,7 @@ func TestAPIGetJobNotFound(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:")
 	defer store.Close()
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/jobs/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -196,7 +196,7 @@ func TestAPIGetJobLogs(t *testing.T) {
 	_ = store.AppendLog(t.Context(), "j_1", "stdout", "Hello world\n")
 	_ = store.AppendLog(t.Context(), "j_1", "stderr", "Warning\n")
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/jobs/j_1/logs", nil)
 	w := httptest.NewRecorder()
@@ -232,7 +232,7 @@ func TestAPIListWorkers(t *testing.T) {
 	})
 
 	hub := NewHub()
-	api := NewAPIHandler(store, hub, nil)
+	api := NewAPIHandler(store, hub, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/workers", nil)
 	w := httptest.NewRecorder()
@@ -259,7 +259,7 @@ func TestAPICreateRepo(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:")
 	defer store.Close()
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	body := `{
 		"forge_type": "github",
@@ -301,7 +301,7 @@ func TestAPICreateRepoMissingFields(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:")
 	defer store.Close()
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	body := `{"forge_type": "github"}`
 
@@ -337,7 +337,7 @@ func TestAPIListRepos(t *testing.T) {
 		CreatedAt: time.Now(),
 	})
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/repos", nil)
 	w := httptest.NewRecorder()
@@ -369,7 +369,7 @@ func TestAPIGetRepo(t *testing.T) {
 		CreatedAt:     time.Now(),
 	})
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/repos/r_1", nil)
 	w := httptest.NewRecorder()
@@ -402,7 +402,7 @@ func TestAPIDeleteRepo(t *testing.T) {
 		CreatedAt: time.Now(),
 	})
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("DELETE", "/api/repos/r_1", nil)
 	w := httptest.NewRecorder()
@@ -423,7 +423,7 @@ func TestAPICreateToken(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:")
 	defer store.Close()
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	body := `{"name": "my-worker-token"}`
 
@@ -461,7 +461,7 @@ func TestAPIListTokens(t *testing.T) {
 		CreatedAt: time.Now(),
 	})
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/tokens", nil)
 	w := httptest.NewRecorder()
@@ -493,7 +493,7 @@ func TestAPIRevokeToken(t *testing.T) {
 		CreatedAt: time.Now(),
 	})
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("DELETE", "/api/tokens/t_1", nil)
 	w := httptest.NewRecorder()
@@ -516,7 +516,7 @@ func TestAPINotFound(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:")
 	defer store.Close()
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/unknown", nil)
 	w := httptest.NewRecorder()
@@ -531,7 +531,7 @@ func TestAPIMethodNotAllowed(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:")
 	defer store.Close()
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("PUT", "/api/jobs", nil)
 	w := httptest.NewRecorder()
@@ -566,7 +566,7 @@ func TestAPIInvalidJSON(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:")
 	defer store.Close()
 
-	api := NewAPIHandler(store, nil, nil)
+	api := NewAPIHandler(store, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/api/repos", bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
