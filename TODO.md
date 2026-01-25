@@ -33,19 +33,80 @@ img.shields.io/endpoint?url=https://cinch.sh/api/badge/github.com/owner/repo.jso
 - [x] `.svg` endpoint redirects to shields.io with our JSON URL
 - [x] Cache headers on JSON endpoint
 - [x] Removed badge rendering code (12 styles) - using shields.io
-- [x] Updated `/badges` page to show shields.io badge with CI logo
-
-### Website Polish
-- [x] Landing page with hero, features, quick start, pricing
-- [x] Quick start guide (install worker, add GitHub App, push code)
-- [x] Pricing page (free during beta, "Give me Pro" button)
-- [x] Green color scheme (your build is always green)
+- [ ] Fix badge showing "CI CI" (logo + label both say CI) - should just show status
 
 ### Queue Reliability ✅
 - [x] Jobs re-queue on worker disconnect
 - [x] Jobs re-queue on server restart (fresh tokens regenerated)
 - [x] Tags stored in job record for recovery
 - [x] Simplified: one worker = one job (no concurrency config)
+
+---
+
+## Current: Web UI Redesign
+
+**Goal:** A polished, cohesive web experience with proper UX at every touchpoint.
+
+See `design/11-web-ui.md` for full spec.
+
+### Competitor Analysis
+
+| Tool | Value Prop | Config Complexity | Our Angle |
+|------|-----------|-------------------|-----------|
+| GitHub Actions | "Automate everything" | Complex YAML, marketplace | We're simpler |
+| GitLab CI | "DevOps platform" | Complex YAML, many features | We're forge-agnostic |
+| CircleCI | "Fast, reliable CI" | YAML + orbs | We're self-hosted friendly |
+| Buildkite | "Your infra, our dashboard" | YAML pipelines | We're even simpler |
+| Dagger | "CI that runs anywhere" | SDK in Go/Python/TS | We use your Makefile |
+| Earthly | "Makefile + Dockerfile" | Earthfile syntax | We use your ACTUAL Makefile |
+| Gitea Runner | "Built-in CI for Gitea" | GH Actions YAML | We work with ANY forge |
+
+**Key insight:** Dagger/Earthly nail "local = CI" but require new syntax. We use your EXISTING Makefile.
+
+### Core Value Proposition
+
+**"The exact `make build` you run locally. That's your CI."**
+
+Not: "We simplified CI config" (implies we invented new config)
+But: "Your Makefile already works. We just run it on push."
+
+Hero should show BOTH files side by side:
+
+```
+.cinch.yaml            Makefile
+───────────            ────────
+build: make build      build:
+release: make release      go build -o bin/app ./cmd/app
+
+                       release:
+                           cinch release dist/*
+```
+
+Note: `cinch release` works on GitHub, GitLab, Gitea - move forges, keep your Makefile.
+
+### Critical Bugs
+
+- [x] **Back button broken** - Added URL routing with history API
+- [x] **Badge shows "CI CI"** - Fixed, now just shows "build: passing"
+- [x] **Settings page empty** - Removed (non-functional)
+- [x] **No onboarding** - Added empty states with setup instructions
+
+### UX Issues
+
+- [x] **Hero unclear** - Now shows .cinch.yaml + Makefile side by side
+- [x] **Empty states useless** - Now show setup steps with correct commands
+- [ ] **No error handling** - API failures show nothing
+- [ ] **No relative timestamps** - Shows nothing or absolute times
+
+### Remaining Polish (Backlog)
+
+- [ ] Error handling with retry buttons
+- [ ] Loading skeletons
+- [ ] Relative timestamps ("2 minutes ago")
+- [ ] Real Settings page (tokens, repos)
+- [ ] Job filtering by repo/status/branch
+- [ ] Re-run failed builds
+- [ ] Badge repo selector
 
 ---
 

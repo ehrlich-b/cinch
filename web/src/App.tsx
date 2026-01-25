@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 
-type Page = 'home' | 'jobs' | 'workers' | 'settings' | 'badges'
+type Page = 'home' | 'jobs' | 'workers' | 'badges'
 
 interface AuthState {
   authenticated: boolean
@@ -9,10 +9,47 @@ interface AuthState {
   loading: boolean
 }
 
+// Simple URL routing
+function getPageFromPath(): { page: Page; jobId: string | null } {
+  const path = window.location.pathname
+  if (path.startsWith('/jobs/')) {
+    return { page: 'jobs', jobId: path.slice(6) }
+  }
+  if (path === '/jobs') return { page: 'jobs', jobId: null }
+  if (path === '/workers') return { page: 'workers', jobId: null }
+  if (path === '/badges') return { page: 'badges', jobId: null }
+  return { page: 'home', jobId: null }
+}
+
 export function App() {
-  const [page, setPage] = useState<Page>('home')
-  const [selectedJob, setSelectedJob] = useState<string | null>(null)
+  const initial = getPageFromPath()
+  const [page, setPage] = useState<Page>(initial.page)
+  const [selectedJob, setSelectedJob] = useState<string | null>(initial.jobId)
   const [auth, setAuth] = useState<AuthState>({ authenticated: false, loading: true })
+
+  // Handle browser back/forward
+  useEffect(() => {
+    const handlePopState = () => {
+      const { page, jobId } = getPageFromPath()
+      setPage(page)
+      setSelectedJob(jobId)
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  // Navigate with history
+  const navigate = (newPage: Page, jobId: string | null = null) => {
+    let path = '/'
+    if (newPage === 'jobs' && jobId) path = `/jobs/${jobId}`
+    else if (newPage === 'jobs') path = '/jobs'
+    else if (newPage === 'workers') path = '/workers'
+    else if (newPage === 'badges') path = '/badges'
+
+    history.pushState({}, '', path)
+    setPage(newPage)
+    setSelectedJob(jobId)
+  }
 
   // Check auth status on load
   useEffect(() => {
@@ -24,35 +61,29 @@ export function App() {
 
   // Show landing page for unauthenticated users or when on home
   if (!auth.loading && (!auth.authenticated || page === 'home')) {
-    return <LandingPage auth={auth} setAuth={setAuth} onNavigate={setPage} />
+    return <LandingPage auth={auth} setAuth={setAuth} onNavigate={(p) => navigate(p)} />
   }
 
   return (
     <div className="app">
       <header>
-        <h1>Cinch</h1>
+        <h1 onClick={() => navigate('home')} style={{ cursor: 'pointer' }}>Cinch</h1>
         <nav>
           <button
             className={page === 'jobs' ? 'active' : ''}
-            onClick={() => { setPage('jobs'); setSelectedJob(null) }}
+            onClick={() => navigate('jobs')}
           >
             Jobs
           </button>
           <button
             className={page === 'workers' ? 'active' : ''}
-            onClick={() => setPage('workers')}
+            onClick={() => navigate('workers')}
           >
             Workers
           </button>
           <button
-            className={page === 'settings' ? 'active' : ''}
-            onClick={() => setPage('settings')}
-          >
-            Settings
-          </button>
-          <button
             className={page === 'badges' ? 'active' : ''}
-            onClick={() => setPage('badges')}
+            onClick={() => navigate('badges')}
           >
             Badges
           </button>
@@ -60,7 +91,7 @@ export function App() {
         <div className="auth">
           {auth.loading ? null : auth.authenticated ? (
             <>
-              <span className="user">{auth.user} {auth.isPro && '(Pro)'}</span>
+              <span className="user">{auth.user}</span>
               <a href="/auth/logout" className="logout">Logout</a>
             </>
           ) : (
@@ -69,12 +100,11 @@ export function App() {
         </div>
       </header>
       <main>
-        {page === 'jobs' && !selectedJob && <JobsPage onSelectJob={setSelectedJob} />}
+        {page === 'jobs' && !selectedJob && <JobsPage onSelectJob={(id) => navigate('jobs', id)} />}
         {page === 'jobs' && selectedJob && (
-          <JobDetailPage jobId={selectedJob} onBack={() => setSelectedJob(null)} />
+          <JobDetailPage jobId={selectedJob} onBack={() => navigate('jobs')} />
         )}
         {page === 'workers' && <WorkersPage />}
-        {page === 'settings' && <SettingsPage />}
         {page === 'badges' && <BadgesPage />}
       </main>
     </div>
@@ -123,15 +153,20 @@ function LandingPage({ auth, setAuth, onNavigate }: {
       <div className="container">
         <section className="hero">
           <h1>CI that's a <span>Cinch</span></h1>
-          <p className="tagline">One config. Every forge. Your hardware. Always green.</p>
+          <p className="tagline">The exact <code>make build</code> you run locally. That's your CI.</p>
 
-          <div className="command-showcase">
-<pre><span className="prompt">$</span> cinch worker --token=xxx
-<span className="output">Connected to cinch.sh</span>
-<span className="output">Waiting for jobs...</span>
-<span className="output">Running: github.com/you/repo @ main</span>
-<span className="output">Build passed in 12s</span></pre>
+          <div className="config-showcase">
+            <div className="config-file">
+              <div className="config-filename">.cinch.yaml</div>
+              <pre className="config-content">build: make build{'\n'}release: make release</pre>
+            </div>
+            <div className="config-file">
+              <div className="config-filename">Makefile</div>
+              <pre className="config-content">build:{'\n'}    go build -o bin/app{'\n'}{'\n'}release:{'\n'}    cinch release dist/*</pre>
+            </div>
           </div>
+
+          <p className="hero-subtext">Your Makefile already works. We just run it on push.</p>
 
           <div className="install-row">
             <div className="install-box">
@@ -172,18 +207,18 @@ function LandingPage({ auth, setAuth, onNavigate }: {
           <div className="steps">
             <div className="step">
               <div className="step-number">1</div>
-              <h3>Install the worker</h3>
-              <p>Download the binary and run <code>cinch worker</code> on any machine you control.</p>
+              <h3>Install & login</h3>
+              <p><code>curl -sSL https://cinch.sh/install.sh | sh</code> then <code>cinch login</code></p>
             </div>
             <div className="step">
               <div className="step-number">2</div>
-              <h3>Add the GitHub App</h3>
-              <p>Install the Cinch GitHub App on your repos. We handle webhooks and status checks.</p>
+              <h3>Start a worker</h3>
+              <p><code>cinch worker</code> — runs on your Mac, Linux box, or Raspberry Pi.</p>
             </div>
             <div className="step">
               <div className="step-number">3</div>
               <h3>Push code</h3>
-              <p>Add <code>.cinch.yaml</code> with your build command. Push to trigger your first build.</p>
+              <p>Add <code>.cinch.yaml</code> with <code>build: make build</code> and push.</p>
             </div>
           </div>
         </section>
@@ -204,11 +239,12 @@ function LandingPage({ auth, setAuth, onNavigate }: {
                 <li>All forges supported</li>
                 <li>Community support</li>
               </ul>
+              <div className="plan-cta"></div>
             </div>
             <div className="plan-card featured">
               <div className="plan-name">Pro</div>
-              <div className="plan-price">$5<span className="period">/seat/mo</span></div>
-              <div className="plan-note">For private repos</div>
+              <div className="plan-price"><s className="old-price">$5</s> $0<span className="period">/seat/mo</span></div>
+              <div className="plan-note">Free during beta</div>
               <ul className="plan-features-list">
                 <li>Everything in Free</li>
                 <li>Private repositories</li>
@@ -230,15 +266,16 @@ function LandingPage({ auth, setAuth, onNavigate }: {
               </div>
             </div>
             <div className="plan-card">
-              <div className="plan-name">Self-Hosted</div>
+              <div className="plan-name">Enterprise</div>
               <div className="plan-price">$0</div>
-              <div className="plan-note">MIT Licensed</div>
+              <div className="plan-note">Self-hosted, MIT Licensed</div>
               <ul className="plan-features-list">
                 <li>Run your own server</li>
                 <li>Full control</li>
                 <li>No limits</li>
-                <li>Community support</li>
+                <li>Priority support available</li>
               </ul>
+              <div className="plan-cta"></div>
             </div>
           </div>
         </div>
@@ -276,7 +313,25 @@ function JobsPage({ onSelectJob }: { onSelectJob: (id: string) => void }) {
   }, [])
 
   if (loading) return <div className="loading">Loading...</div>
-  if (jobs.length === 0) return <div className="empty">No jobs yet</div>
+  if (jobs.length === 0) return (
+    <div className="empty-state">
+      <h2>No builds yet</h2>
+      <p>Push to a connected repo to trigger your first build.</p>
+      <div className="empty-steps">
+        <div className="empty-step">
+          <strong>1. Start a worker</strong>
+          <code>cinch login && cinch worker</code>
+        </div>
+        <div className="empty-step">
+          <strong>2. Add .cinch.yaml to your repo</strong>
+          <code>build: make build</code>
+        </div>
+        <div className="empty-step">
+          <strong>3. Push!</strong>
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div className="jobs">
@@ -392,7 +447,22 @@ function WorkersPage() {
   }, [])
 
   if (loading) return <div className="loading">Loading...</div>
-  if (workers.length === 0) return <div className="empty">No workers connected</div>
+  if (workers.length === 0) return (
+    <div className="empty-state">
+      <h2>No workers connected</h2>
+      <p>Workers run your builds on your hardware.</p>
+      <div className="empty-steps">
+        <div className="empty-step">
+          <strong>Install</strong>
+          <code>curl -sSL https://cinch.sh/install.sh | sh</code>
+        </div>
+        <div className="empty-step">
+          <strong>Login & Run</strong>
+          <code>cinch login && cinch worker</code>
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div className="workers">
@@ -420,21 +490,12 @@ function WorkersPage() {
   )
 }
 
-function SettingsPage() {
-  return (
-    <div className="settings">
-      <h2>Settings</h2>
-      <p>Settings page coming soon...</p>
-    </div>
-  )
-}
-
-// Badge style definitions
+// Badge page
 function BadgesPage() {
   const [copied, setCopied] = useState(false)
 
   const badgeUrl = 'https://cinch.sh/badge/github.com/owner/repo.svg'
-  const markdownSnippet = `[![CI](${badgeUrl})](https://cinch.sh/jobs)`
+  const markdownSnippet = `[![build](${badgeUrl})](https://cinch.sh)`
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(markdownSnippet)
@@ -452,8 +513,8 @@ function BadgesPage() {
       <div className="badges-preview-section">
         <div className="badge-preview-large">
           <img
-            src="https://img.shields.io/badge/CI-passing-brightgreen?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIxNCIgdmlld0JveD0iMCAwIDIwIDE0Ij48dGV4dCB4PSIwIiB5PSIxMSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxTRk1vbm8tUmVndWxhcixNZW5sbyxNb25hY28sQ29uc29sYXMsbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjZmZmIj5DSTwvdGV4dD48L3N2Zz4="
-            alt="CI passing"
+            src="https://img.shields.io/badge/build-passing-brightgreen"
+            alt="build passing"
           />
         </div>
       </div>
@@ -468,10 +529,6 @@ function BadgesPage() {
         </div>
         <p className="usage-note">
           Replace <code>github.com/owner/repo</code> with your repository.
-          Use <code>?branch=main</code> for a specific branch.
-        </p>
-        <p className="usage-note" style={{ marginTop: '0.5rem', opacity: 0.7 }}>
-          Powered by <a href="https://shields.io" target="_blank" rel="noopener noreferrer">shields.io</a>
         </p>
       </div>
     </div>

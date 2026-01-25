@@ -9,70 +9,178 @@ Cinch is a radically simple CI system:
 - Workers run on your hardware, execute ONE command, stream logs back
 - Multi-forge: GitHub, GitLab, Forgejo, Gitea, Bitbucket
 
-**Philosophy:** Your Makefile is the pipeline. We just invoke it.
+**Philosophy:** Your Makefile is the pipeline. The exact `make build` you run locally—that's your CI.
+
+## User Flow (IMPORTANT - memorize this)
+
+```bash
+# 1. Install cinch
+curl -sSL https://cinch.sh/install.sh | sh
+
+# 2. Login (opens browser, saves credentials to ~/.cinch/config)
+cinch login
+
+# 3. Start a worker (uses saved credentials - NO TOKEN FLAG NEEDED)
+cinch worker
+
+# That's it. Push to a connected repo and builds run.
+```
+
+**NEVER tell users to use `--token=xxx`** - the normal flow is `cinch login` then `cinch worker` with no flags.
+
+## Config File (.cinch.yaml)
+
+```yaml
+# Minimal - just specify what to run on push
+build: make build
+
+# With releases (runs on tag push)
+build: make build
+release: make release
+
+# With timeout
+build: make check
+timeout: 15m
+
+# Container options
+image: node:20              # Use specific image
+dockerfile: ./Dockerfile    # Build from Dockerfile
+devcontainer: true          # Use .devcontainer/
+container: none             # Bare metal (no container)
+```
+
+**Key insight:** `build:` runs `make build` - the SAME command you run locally. No new syntax to learn.
+
+## CLI Commands
+
+```bash
+# Authentication
+cinch login                 # Auth via browser, saves to ~/.cinch/config
+cinch logout                # Remove credentials
+cinch whoami                # Show current auth status
+
+# Worker
+cinch worker                # Start worker (uses saved credentials)
+cinch worker --labels linux-amd64,docker  # With labels for routing
+
+# Local development
+cinch run                   # Run build locally (uses .cinch.yaml)
+cinch run "make test"       # Run specific command
+cinch run --bare-metal      # Skip container
+
+# Status
+cinch status                # Show build status for current repo
+cinch logs JOB_ID           # Stream logs from a job
+
+# Releases (used in CI, not manually)
+cinch release dist/*        # Upload release assets to forge
+
+# Repository management
+cinch repo add              # Add repo to Cinch
+cinch repo list             # List connected repos
+
+# Token management (for advanced use cases)
+cinch token create          # Create worker token
+cinch token list            # List tokens
+cinch token revoke TOKEN    # Revoke a token
+```
+
+## Environment Variables in Jobs
+
+Every CI job gets these environment variables:
+
+```bash
+# Git context
+CINCH_REF=refs/heads/main       # Full ref (or refs/tags/v1.0.0)
+CINCH_BRANCH=main               # Branch name (empty for tags)
+CINCH_TAG=                      # Tag name (empty for branches)
+CINCH_COMMIT=abc1234567890      # Full commit SHA
+
+# Job context
+CINCH_JOB_ID=j_abc123
+CINCH_REPO=https://github.com/owner/repo.git
+CINCH_FORGE=github              # github, gitlab, forgejo, gitea
+
+# Forge API token (for releases, comments, etc.)
+GITHUB_TOKEN=ghs_xxx            # GitHub
+GITLAB_TOKEN=glpat-xxx          # GitLab
+GITEA_TOKEN=xxx                 # Forgejo/Gitea
+CINCH_FORGE_TOKEN=xxx           # Always set (same as forge-specific)
+```
+
+## Cinch's Own CI (.cinch.yaml)
+
+```yaml
+build: make check
+release: make release
+timeout: 15m
+```
+
+The Makefile has `build`, `check`, `release` targets. Cinch just invokes them.
 
 ## Key Decisions
 
-- **Pricing:** $5/seat/month for private repos, free for public, free self-hosted (MIT)
-- **Tech stack:** Go, single binary, WebSocket + JSON protocol, SQLite/Postgres
-- **Config formats:** YAML, TOML, JSON (all supported, user's choice)
-- **Containers:** Default (Docker), opt-out with `--bare-metal` or `container: none`
+- **Pricing:** Free during beta. Later: $5/seat/month for private repos, free for public, free self-hosted (MIT)
+- **Tech stack:** Go, single binary, WebSocket + JSON protocol, SQLite
+- **Config formats:** YAML, TOML, JSON (all supported)
+- **Containers:** Default (Docker/Podman), opt-out with `--bare-metal` or `container: none`
 - **No:** multi-step pipelines, DAGs, matrix builds, plugins, marketplace
-- **Yes:** services (docker containers), worker labels, fan-out to multiple workers, scheduled/manual triggers
+- **Yes:** services (docker containers), worker labels, fan-out to multiple workers
 
 ## Architecture
 
 ```
-Worker (your machine)              Control Plane (cinch.sh or self-hosted)
-├── Connects via WebSocket  ◄────► ├── Receives forge webhooks
-├── Registers labels + concurrency ├── Routes jobs to workers
-├── Runs ONE command in container  ├── Posts status checks back
-├── Streams logs                   └── Streams logs to web UI
-└── Local cache (filesystem)
+Worker (your machine)              Control Plane (cinch.sh)
+├── cinch login (once)             ├── Receives forge webhooks
+├── cinch worker (runs forever)    ├── Dispatches jobs to workers
+├── Runs ONE command per job       ├── Posts status checks to forge
+├── Streams logs back              └── Web UI for monitoring
+└── Uses Docker/Podman
 ```
 
 ## Repository Structure
 
 ```
-cmd/cinch/        # CLI entry point
+cmd/cinch/        # CLI entry point (main.go)
 internal/
-  cli/            # CLI commands (run, etc.)
-  config/         # Config parsing (YAML/TOML/JSON)
-  worker/         # Executor, container runtime
-  server/         # HTTP server, webhooks, dispatch (TODO)
-  storage/        # Database layer (TODO)
-  protocol/       # WebSocket message types (TODO)
-  forge/          # GitHub/GitLab/Forgejo clients (TODO)
-web/              # React frontend (Vite)
+  cli/            # CLI commands
+  config/         # Config parsing (.cinch.yaml)
+  worker/         # Job execution, container runtime
+  server/         # HTTP server, webhooks, job dispatch
+  storage/        # SQLite database
+  forge/          # GitHub, GitLab, Forgejo, Gitea clients
+web/              # React frontend (Vite + TypeScript)
 design/           # Technical design docs
 ```
 
 ## Build Commands
 
 ```bash
-make build-go     # Build Go binary (fast, for iteration)
+make build-go     # Build Go binary only (fast iteration)
 make build        # Build everything (Go + web assets)
 make test         # Run tests
-make fmt          # Format code
-make check        # fmt + test + lint
-
-make run CMD="echo hello"      # Run command in container
-make run-bare CMD="echo hello" # Run command bare metal
-make ci                        # Run using .cinch.yaml config
-make validate                  # Validate config file
+make check        # fmt + test + lint (what CI runs)
+make release      # Cross-compile + upload (CI only, needs CINCH_TAG)
 ```
 
 ## Design Docs
 
-Read these before implementing:
 - `design/00-overview.md` - Architecture overview
-- `design/08-config-format.md` - The config file spec (.cinch.yaml/.toml/.json)
-- `design/02-protocol.md` - WebSocket protocol between worker and server
-- `design/09-containerization.md` - Container execution, caching, devcontainer support
-- `design/10-services.md` - Service containers (postgres, redis, etc.)
+- `design/08-config-format.md` - Config file spec
+- `design/09-containerization.md` - Container execution
+- `design/11-web-ui.md` - Web UI design
 
 ## Style
 
 - Go code, standard formatting (gofmt)
-- Single binary that does everything: `cinch server`, `cinch worker`, `cinch run`
-- Aggressively simple - reject features that add complexity without clear value
+- Single binary: `cinch server`, `cinch worker`, `cinch run`, etc.
+- Aggressively simple - reject complexity without clear value
+- The web UI uses React + TypeScript + Vite, dark theme, green accent color
+
+## Common Mistakes to Avoid
+
+1. **DON'T** tell users to use `cinch worker --token=xxx` - the flow is `cinch login` then `cinch worker`
+2. **DON'T** use `run: make ci` in examples - use `build: make build` (the actual config key)
+3. **DON'T** show complex YAML - Cinch's whole point is ONE command
+4. **DO** emphasize "same command locally and in CI"
+5. **DO** mention `cinch release` works across forges (GitHub → GitLab migration keeps working)
