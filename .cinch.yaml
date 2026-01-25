@@ -1,3 +1,2 @@
 build: make check
 release: make release
-timeout: 15m
