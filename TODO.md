@@ -81,13 +81,14 @@ Dashboard with your repos
 - Default to primary, but allow selection (work vs personal)
 
 **Implementation:**
-- [ ] Remove separate login button, replace with "Get Started"
-- [ ] Forge selector as first screen (not login screen)
+- [x] Remove separate login button, replace with "Get Started"
+- [x] Forge selector as first screen (not login screen)
 - [ ] After OAuth callback → email selector (if multiple) → repo selector → success page
 - [ ] Fetch user emails from forge API (GitHub: `user:email` scope, GitLab: `read_user`)
 - [ ] Store selected email in user record (not verified, just preference)
 - [ ] `cinch login` detects existing session, skips device code flow
-- [ ] Success page emphasizes `--all` flag for first-time setup
+- [x] Success page emphasizes `--all` flag for first-time setup
+- [x] Device code page auto-fills token from URL (`/device?code=XXX`)
 
 **Identity model:**
 - No forge is "primary" - all connected forges are equal identity providers
@@ -96,10 +97,10 @@ Dashboard with your repos
 - Account = union of all connected forge identities
 
 **Account settings (per-forge):**
-- [ ] Account page with "Connect [Forge]" buttons for each unconnected forge
-- [ ] Disconnect forge (removes repos, keeps account if other forges connected)
-- [ ] Delete account option (requires disconnecting all forges first)
-- [ ] Warning when disconnecting last forge: "This will permanently delete your account"
+- [x] Account page with "Connect [Forge]" buttons for each unconnected forge
+- [x] Disconnect forge (removes repos, keeps account if other forges connected)
+- [x] Delete account option (requires disconnecting all forges first)
+- [x] Warning when disconnecting last forge: "This will permanently delete your account"
 
 ---
 

@@ -1843,3 +1843,155 @@ img.forge-icon.github {
   color: var(--text-muted);
   font-size: 0.85rem;
 }
+
+/* Success page */
+.success-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--bg);
+}
+
+.success-container {
+  max-width: 600px;
+  width: 100%;
+}
+
+.success-header {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.success-icon {
+  width: 64px;
+  height: 64px;
+  background: var(--accent);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: white;
+  margin: 0 auto 1.5rem;
+}
+
+.success-header h1 {
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+
+.success-header p {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+}
+
+.setup-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-bottom: 2.5rem;
+}
+
+.setup-step {
+  display: flex;
+  gap: 1rem;
+  background: var(--bg-lighter);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+}
+
+.step-number {
+  width: 32px;
+  height: 32px;
+  background: var(--accent);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: white;
+  flex-shrink: 0;
+}
+
+.step-content {
+  flex: 1;
+}
+
+.step-content h3 {
+  color: var(--text);
+  margin-bottom: 0.75rem;
+  font-size: 1rem;
+}
+
+.step-content .code-block {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.step-content .code-block code {
+  flex: 1;
+  font-family: 'SF Mono', Monaco, 'Consolas', monospace;
+  font-size: 0.875rem;
+  color: var(--text);
+}
+
+.step-content .yaml-block {
+  background: var(--bg);
+}
+
+.copy-btn {
+  background: var(--accent);
+  border: none;
+  color: white;
+  padding: 0.35rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.copy-btn:hover {
+  opacity: 0.9;
+}
+
+.step-note {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+}
+
+.step-note code {
+  background: var(--bg);
+  padding: 0.15rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+
+.success-actions {
+  text-align: center;
+}
+
+.success-actions .btn-primary {
+  background: var(--accent);
+  border: none;
+  color: white;
+  padding: 0.875rem 2rem;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.success-actions .btn-primary:hover {
+  opacity: 0.9;
+}
