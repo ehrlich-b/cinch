@@ -11,6 +11,7 @@ CI that's a cinch. One config. Every forge. Your hardware.
 ```yaml
 # .cinch.yaml
 build: make check
+release: make release
 ```
 
 Push code, get a green checkmark. Your Makefile is the pipeline.
