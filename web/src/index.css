@@ -530,6 +530,7 @@ tr.clickable {
   font-weight: 800;
   color: var(--accent);
   letter-spacing: -0.02em;
+  margin-right: 32px;
 }
 
 .landing-nav {
