@@ -60,6 +60,7 @@ type WorkerAvailableNotifier interface {
 	NotifyWorkerAvailable()
 	Requeue(jobID string)
 	CompleteJob(jobID string)
+	RequeueWorkerJobs(jobIDs []string) // re-queue all jobs when worker disconnects
 }
 
 // WSHandler handles WebSocket connections from workers.
@@ -205,6 +206,10 @@ func TokensEqual(a, b string) bool {
 // readPump pumps messages from the WebSocket to the hub.
 func (h *WSHandler) readPump(conn *websocket.Conn, worker *WorkerConn) {
 	defer func() {
+		// Re-queue any active jobs before unregistering
+		if h.workerNotifier != nil && len(worker.ActiveJobs) > 0 {
+			h.workerNotifier.RequeueWorkerJobs(worker.ActiveJobs)
+		}
 		h.hub.Unregister(worker.ID)
 		conn.Close()
 		h.log.Info("worker disconnected", "worker_id", worker.ID)
@@ -389,8 +394,8 @@ func (h *WSHandler) handleJobAck(worker *WorkerConn, payload []byte) {
 		return
 	}
 
+	// Job already tracked in ActiveJobs when dispatched - ACK is just confirmation
 	h.log.Debug("job acknowledged", "worker_id", worker.ID, "job_id", ack.JobID)
-	h.hub.AddActiveJob(worker.ID, ack.JobID)
 }
 
 // handleJobReject processes job rejection.
