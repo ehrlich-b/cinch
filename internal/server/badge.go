@@ -79,7 +79,7 @@ func (h *BadgeHandler) serveJSON(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "public, max-age=60, s-maxage=60")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // redirectToShields redirects .svg requests to shields.io.
