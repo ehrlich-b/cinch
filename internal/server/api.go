@@ -92,6 +92,10 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 
+	// Give me pro (free during beta)
+	case path == "/give-me-pro" && r.Method == http.MethodPost:
+		h.giveMePro(w, r)
+
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
@@ -531,9 +535,16 @@ func (h *APIHandler) revokeToken(w http.ResponseWriter, r *http.Request, tokenID
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// --- Give Me Pro (Beta) ---
+
+func (h *APIHandler) giveMePro(w http.ResponseWriter, r *http.Request) {
+	// Free during beta - just return success
+	h.writeJSON(w, map[string]any{"ok": true, "message": "Pro activated! Free during beta."})
+}
+
 // --- Helpers ---
 
-func (h *APIHandler) writeJSON(w http.ResponseWriter, v interface{}) {
+func (h *APIHandler) writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		h.log.Error("failed to encode response", "error", err)

@@ -42,4 +42,4 @@ web/node_modules/
 tmp/
 .tmp/
 .badge-renders
-dist/
+/dist/

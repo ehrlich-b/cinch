@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 
-type Page = 'jobs' | 'workers' | 'settings' | 'badges'
+type Page = 'home' | 'jobs' | 'workers' | 'settings' | 'badges'
 
 interface AuthState {
   authenticated: boolean
   user?: string
+  isPro?: boolean
   loading: boolean
 }
 
 export function App() {
-  const [page, setPage] = useState<Page>('jobs')
+  const [page, setPage] = useState<Page>('home')
   const [selectedJob, setSelectedJob] = useState<string | null>(null)
   const [auth, setAuth] = useState<AuthState>({ authenticated: false, loading: true })
 
@@ -20,6 +21,11 @@ export function App() {
       .then(data => setAuth({ ...data, loading: false }))
       .catch(() => setAuth({ authenticated: false, loading: false }))
   }, [])
+
+  // Show landing page for unauthenticated users or when on home
+  if (!auth.loading && (!auth.authenticated || page === 'home')) {
+    return <LandingPage auth={auth} setAuth={setAuth} onNavigate={setPage} />
+  }
 
   return (
     <div className="app">
@@ -54,7 +60,7 @@ export function App() {
         <div className="auth">
           {auth.loading ? null : auth.authenticated ? (
             <>
-              <span className="user">{auth.user}</span>
+              <span className="user">{auth.user} {auth.isPro && '(Pro)'}</span>
               <a href="/auth/logout" className="logout">Logout</a>
             </>
           ) : (
@@ -71,6 +77,186 @@ export function App() {
         {page === 'settings' && <SettingsPage />}
         {page === 'badges' && <BadgesPage />}
       </main>
+    </div>
+  )
+}
+
+function LandingPage({ auth, setAuth, onNavigate }: {
+  auth: AuthState,
+  setAuth: (auth: AuthState) => void,
+  onNavigate: (page: Page) => void
+}) {
+  const [givingPro, setGivingPro] = useState(false)
+
+  const handleGivePro = async () => {
+    setGivingPro(true)
+    try {
+      const res = await fetch('/api/give-me-pro', { method: 'POST' })
+      if (res.ok) {
+        setAuth({ ...auth, isPro: true })
+      }
+    } catch (e) {
+      console.error('Failed to give pro:', e)
+    }
+    setGivingPro(false)
+  }
+
+  return (
+    <div className="landing">
+      <header className="landing-header">
+        <div className="landing-header-inner">
+          <span className="landing-logo">Cinch</span>
+          <nav className="landing-nav">
+            <a href="#features">Features</a>
+            <a href="#quickstart">Quick Start</a>
+            <a href="#pricing">Pricing</a>
+            <a href="https://github.com/ehrlich-b/cinch">Code</a>
+            {auth.authenticated ? (
+              <button className="landing-btn" onClick={() => onNavigate('jobs')}>Dashboard</button>
+            ) : (
+              <a href="/auth/login" className="landing-btn">Login</a>
+            )}
+          </nav>
+        </div>
+      </header>
+
+      <div className="container">
+        <section className="hero">
+          <h1>CI that's a <span>Cinch</span></h1>
+          <p className="tagline">One config. Every forge. Your hardware. Always green.</p>
+
+          <div className="command-showcase">
+<pre><span className="prompt">$</span> cinch worker --token=xxx
+<span className="output">Connected to cinch.sh</span>
+<span className="output">Waiting for jobs...</span>
+<span className="output">Running: github.com/you/repo @ main</span>
+<span className="output">Build passed in 12s</span></pre>
+          </div>
+
+          <div className="install-row">
+            <div className="install-box">
+              <code className="install-cmd">curl -sSL https://cinch.sh/install.sh | sh</code>
+              <button className="copy-btn" onClick={() => navigator.clipboard.writeText('curl -sSL https://cinch.sh/install.sh | sh')}>
+                Copy
+              </button>
+            </div>
+          </div>
+          <p className="install-note">macOS and Linux. Windows via WSL.</p>
+        </section>
+      </div>
+
+      <section className="features-section" id="features">
+        <div className="container">
+          <h2>Why Cinch?</h2>
+          <p className="section-subtitle">Your Makefile is the pipeline. We just invoke it.</p>
+          <div className="features-grid-landing">
+            <div className="feature-card">
+              <h3>Multi-Forge</h3>
+              <p>GitHub, GitLab, Forgejo, Gitea, Bitbucket. One worker, any forge. Stop learning vendor-specific YAML.</p>
+            </div>
+            <div className="feature-card">
+              <h3>Your Hardware</h3>
+              <p>Run builds on your Mac, your VM, your Raspberry Pi. No per-minute charges. No waiting in shared queues.</p>
+            </div>
+            <div className="feature-card">
+              <h3>Dead Simple</h3>
+              <p>One command in .cinch.yaml. No multi-step pipelines, no DAGs, no plugins. Just make ci.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="container">
+        <section className="quickstart" id="quickstart">
+          <h2>Quick Start</h2>
+          <div className="steps">
+            <div className="step">
+              <div className="step-number">1</div>
+              <h3>Install the worker</h3>
+              <p>Download the binary and run <code>cinch worker</code> on any machine you control.</p>
+            </div>
+            <div className="step">
+              <div className="step-number">2</div>
+              <h3>Add the GitHub App</h3>
+              <p>Install the Cinch GitHub App on your repos. We handle webhooks and status checks.</p>
+            </div>
+            <div className="step">
+              <div className="step-number">3</div>
+              <h3>Push code</h3>
+              <p>Add <code>.cinch.yaml</code> with your build command. Push to trigger your first build.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section className="pricing-section" id="pricing">
+        <div className="container">
+          <h2>Pricing</h2>
+          <p className="pricing-subtitle">Free while in beta. Self-hosting always free.</p>
+          <div className="pricing-grid-landing">
+            <div className="plan-card">
+              <div className="plan-name">Public Repos</div>
+              <div className="plan-price">$0</div>
+              <div className="plan-note">Free forever</div>
+              <ul className="plan-features-list">
+                <li>Unlimited builds</li>
+                <li>Unlimited workers</li>
+                <li>All forges supported</li>
+                <li>Community support</li>
+              </ul>
+            </div>
+            <div className="plan-card featured">
+              <div className="plan-name">Pro</div>
+              <div className="plan-price">$5<span className="period">/seat/mo</span></div>
+              <div className="plan-note">For private repos</div>
+              <ul className="plan-features-list">
+                <li>Everything in Free</li>
+                <li>Private repositories</li>
+                <li>Priority support</li>
+                <li>Badge customization</li>
+              </ul>
+              <div className="plan-cta">
+                {auth.isPro ? (
+                  <div className="pro-status">You have Pro</div>
+                ) : auth.authenticated ? (
+                  <button className="btn-pro" onClick={handleGivePro} disabled={givingPro}>
+                    {givingPro ? 'Activating...' : 'Give me Pro'}
+                  </button>
+                ) : (
+                  <a href="/auth/login" className="btn-pro" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>
+                    Login to get Pro
+                  </a>
+                )}
+              </div>
+            </div>
+            <div className="plan-card">
+              <div className="plan-name">Self-Hosted</div>
+              <div className="plan-price">$0</div>
+              <div className="plan-note">MIT Licensed</div>
+              <ul className="plan-features-list">
+                <li>Run your own server</li>
+                <li>Full control</li>
+                <li>No limits</li>
+                <li>Community support</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer className="landing-footer">
+        <div className="footer-inner">
+          <div className="footer-brand">Cinch</div>
+          <div className="footer-links">
+            <a href="https://github.com/ehrlich-b/cinch">GitHub</a>
+            <a href="https://github.com/ehrlich-b/cinch/issues">Issues</a>
+            <a href="mailto:bryan@ehrlich.dev">Contact</a>
+          </div>
+        </div>
+        <div className="footer-copy">
+          Open source under MIT license. Built by <a href="mailto:bryan@ehrlich.dev" style={{ color: 'inherit' }}>Bryan Ehrlich</a>.
+        </div>
+      </footer>
     </div>
   )
 }

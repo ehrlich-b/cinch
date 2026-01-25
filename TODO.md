@@ -36,9 +36,16 @@ img.shields.io/endpoint?url=https://cinch.sh/api/badge/github.com/owner/repo.jso
 - [x] Updated `/badges` page to show shields.io badge with CI logo
 
 ### Website Polish
-- [ ] Landing page that doesn't look like dog shit
-- [ ] Quick start guide
-- [ ] Pricing page ($5/seat/month private, free public, free self-hosted)
+- [x] Landing page with hero, features, quick start, pricing
+- [x] Quick start guide (install worker, add GitHub App, push code)
+- [x] Pricing page (free during beta, "Give me Pro" button)
+- [x] Green color scheme (your build is always green)
+
+### Queue Reliability ✅
+- [x] Jobs re-queue on worker disconnect
+- [x] Jobs re-queue on server restart (fresh tokens regenerated)
+- [x] Tags stored in job record for recovery
+- [x] Simplified: one worker = one job (no concurrency config)
 
 ---
 
@@ -123,7 +130,9 @@ Already done: Gitea, Forgejo (same codebase). These cover the self-hosted commun
 - [ ] Create releases from cinch.sh UI (push tag to user's repo via forge API)
 
 ### Known Issues
-- [x] **Rejected jobs not re-queued** - When a worker rejects a job (at max concurrency), the job is not put back in the queue. Fixed: jobs now re-queue automatically.
+- [x] **Rejected jobs not re-queued** - Fixed: jobs re-queue automatically on worker disconnect.
+- [x] **Jobs lost on server restart** - Fixed: orphaned jobs re-queue with fresh tokens (GitHub App regenerates, other forges use stored token).
+- [x] **One worker = one job** - Removed concurrency config. Want parallelism? Run more workers.
 - [ ] **Worker should check dependencies on startup** - Probe for docker/podman before accepting jobs. Fail fast with "no container runtime found" instead of failing on first job.
 
 ---

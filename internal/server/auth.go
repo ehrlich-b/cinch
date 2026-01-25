@@ -278,6 +278,7 @@ func (h *AuthHandler) handleMe(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"authenticated": true,
 		"user":          user,
+		"isPro":         true, // Free during beta
 	})
 }
 
