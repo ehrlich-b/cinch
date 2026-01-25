@@ -267,8 +267,8 @@ function LandingPage({ auth, setAuth, onNavigate }: {
             </div>
             <div className="plan-card">
               <div className="plan-name">Enterprise</div>
-              <div className="plan-price">$0</div>
-              <div className="plan-note">Self-hosted, MIT Licensed</div>
+              <div className="plan-price">Custom</div>
+              <div className="plan-note">Self-hosted or managed</div>
               <ul className="plan-features-list">
                 <li>Run your own server</li>
                 <li>Full control</li>
