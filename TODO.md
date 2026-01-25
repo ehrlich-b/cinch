@@ -171,6 +171,7 @@ Note: `cinch release` works on GitHub, GitLab, Gitea - move forges, keep your Ma
 - [ ] Job filtering by repo/status/branch
 - [ ] Re-run failed builds
 - [ ] Badge repo selector
+- [ ] Badge links should go to repo job page (e.g., `cinch.sh/jobs/github.com/owner/repo`)
 
 ---
 
@@ -432,6 +433,8 @@ Currently push-only. PRs are table stakes for real adoption.
 - [ ] Stripe checkout integration
 - [ ] Seat counting logic
 - [ ] Public vs private repo detection
+- [ ] **Payment prompt during onboarding** - When user selects a private repo, prompt for payment before completing setup
+- [ ] Test payment flow with a real private repo (dogfood the pro tier)
 - [ ] Billing page in web UI
 - [ ] Grace period for failed payments
 
