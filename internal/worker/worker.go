@@ -36,6 +36,7 @@ type WorkerConfig struct {
 	Labels    []string
 	Docker    bool
 	Hostname  string
+	Verbose   bool // Show job output in terminal (default: only banners)
 }
 
 // Worker connects to the server and executes jobs.
@@ -483,8 +484,17 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	var exitCode int
 	var runErr error
 	var execMode string
-	stdout := io.MultiWriter(streamer.Stdout(), os.Stdout)
-	stderr := io.MultiWriter(streamer.Stderr(), os.Stderr)
+
+	// In verbose mode, output goes to terminal AND server
+	// In quiet mode, output only goes to server (for log streaming)
+	var stdout, stderr io.Writer
+	if w.config.Verbose {
+		stdout = io.MultiWriter(streamer.Stdout(), os.Stdout)
+		stderr = io.MultiWriter(streamer.Stderr(), os.Stderr)
+	} else {
+		stdout = streamer.Stdout()
+		stderr = streamer.Stderr()
+	}
 
 	if w.config.Docker && !effectiveCfg.IsBareMetalContainer() {
 		// Container mode
