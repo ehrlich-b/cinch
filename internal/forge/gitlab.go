@@ -105,14 +105,17 @@ func (g *GitLab) ParsePush(r *http.Request, secret string) (*PushEvent, error) {
 // PostStatus posts a commit status to GitLab.
 // Uses the project ID for the API call.
 func (g *GitLab) PostStatus(ctx context.Context, repo *Repo, commit string, status *Status) error {
-	baseURL := g.BaseURL
-	if baseURL == "" {
-		// Try to extract from repo HTMLURL
-		if u, err := url.Parse(repo.HTMLURL); err == nil {
-			baseURL = u.Scheme + "://" + u.Host
-		} else {
-			return errors.New("base URL not configured")
-		}
+	// Extract just scheme://host from BaseURL or HTMLURL
+	// (BaseURL might be the full project URL like https://gitlab.com/owner/repo)
+	var baseURL string
+	urlToParse := g.BaseURL
+	if urlToParse == "" {
+		urlToParse = repo.HTMLURL
+	}
+	if u, err := url.Parse(urlToParse); err == nil {
+		baseURL = u.Scheme + "://" + u.Host
+	} else {
+		return errors.New("base URL not configured")
 	}
 
 	// GitLab status API uses project ID or URL-encoded path
