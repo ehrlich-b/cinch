@@ -67,7 +67,7 @@ export function App() {
   return (
     <div className="app">
       <header>
-        <h1 onClick={() => navigate('home')} style={{ cursor: 'pointer' }}>Cinch</h1>
+        <h1 onClick={() => navigate('home')} style={{ cursor: 'pointer' }}>cinch</h1>
         <nav>
           <button
             className={page === 'jobs' ? 'active' : ''}
@@ -135,7 +135,7 @@ function LandingPage({ auth, setAuth, onNavigate }: {
     <div className="landing">
       <header className="landing-header">
         <div className="landing-header-inner">
-          <span className="landing-logo">Cinch</span>
+          <span className="landing-logo">cinch</span>
           <nav className="landing-nav">
             <a href="#features">Features</a>
             <a href="#quickstart">Quick Start</a>
@@ -152,7 +152,7 @@ function LandingPage({ auth, setAuth, onNavigate }: {
 
       <div className="container">
         <section className="hero">
-          <h1>CI that's a <span>Cinch</span></h1>
+          <h1>CI that's a <span>cinch</span></h1>
           <p className="tagline">The exact <code>make build</code> you run locally. That's your CI.</p>
 
           <div className="config-showcase">
@@ -182,7 +182,7 @@ function LandingPage({ auth, setAuth, onNavigate }: {
 
       <section className="features-section" id="features">
         <div className="container">
-          <h2>Why Cinch?</h2>
+          <h2>Why cinch?</h2>
           <p className="section-subtitle">Your Makefile is the pipeline. We just invoke it.</p>
           <div className="features-grid-landing">
             <div className="feature-card">
@@ -283,7 +283,7 @@ function LandingPage({ auth, setAuth, onNavigate }: {
 
       <footer className="landing-footer">
         <div className="footer-inner">
-          <div className="footer-brand">Cinch</div>
+          <div className="footer-brand">cinch</div>
           <div className="footer-links">
             <a href="https://github.com/ehrlich-b/cinch">GitHub</a>
             <a href="https://github.com/ehrlich-b/cinch/issues">Issues</a>
