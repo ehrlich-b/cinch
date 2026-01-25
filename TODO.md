@@ -100,9 +100,7 @@ Note: `cinch release` works on GitHub, GitLab, Gitea - move forges, keep your Ma
 
 ### Remaining Polish (Backlog)
 
-- [ ] Error handling with retry buttons
 - [ ] Loading skeletons
-- [ ] Relative timestamps ("2 minutes ago")
 - [ ] Real Settings page (tokens, repos)
 - [ ] Job filtering by repo/status/branch
 - [ ] Re-run failed builds
@@ -110,32 +108,59 @@ Note: `cinch release` works on GitHub, GitLab, Gitea - move forges, keep your Ma
 
 ---
 
-## Then: MVP 1.4 - Forge Expansion
+## Then: MVP 1.4 - Forge Expansion + Multi-Forge Presence
 
-**Goal:** Cover the major forges beyond GitHub.
+**Goal:** Cover the major forges beyond GitHub AND dogfood multi-forge by hosting Cinch itself on all supported platforms.
 
 See `design/forge/` for detailed integration plans per forge.
+See `design/12-multi-forge-presence.md` for Cinch's own multi-forge hosting strategy.
 
 | Forge | Users | Priority | Notes |
 |-------|-------|----------|-------|
 | GitHub | 65M+ | ✅ Done | Full integration (App + Checks API) |
-| GitLab | 30M | **High** | Project Access Token trick enables near-grug experience |
+| GitLab | 30M | ✅ Done | Core implementation complete, OAuth flow pending |
 | Forgejo/Gitea | ? | ✅ Done (manual) | Hybrid flow planned (OAuth webhook + manual PAT) |
 | Bitbucket | 10M+ | **Not Planned** | Platform limitations make grug UX impossible |
 
 GitLab positioning: We're not replacing GitLab as a forge—we're replacing `.gitlab-ci.yml` with something simpler. "Keep GitLab for code, use Cinch for CI."
 
-- [ ] GitLab integration (see `design/forge/gitlab.md`)
-  - OAuth app registration
-  - Project Access Token creation via API (throw away OAuth after)
-  - Webhook creation via API
-  - Commit status posting
-  - Self-hosted instance support
-- [ ] Forgejo/Gitea hybrid flow (see `design/forge/forgejo-gitea.md`)
-  - Register OAuth app on Codeberg
-  - Use OAuth to create webhook (automated)
-  - Prompt for manual PAT (status posting)
-  - Fall back to full manual for self-hosted
+### Cinch Multi-Forge Presence (Dogfooding)
+
+**Strategy:** True multi-primary. Cinch source lives on GitHub, GitLab, AND Codeberg simultaneously.
+
+- All three are "real" upstreams (accept PRs from any)
+- Releases land on ALL forges simultaneously via Cinch
+- One Makefile, three webhooks, three release targets
+- Proves "one config, every forge" isn't just marketing
+
+See `design/12-multi-forge-presence.md` for mechanical details.
+
+### GitLab Integration
+
+- [x] Core forge implementation (`internal/forge/gitlab.go`)
+- [x] Webhook parsing (X-Gitlab-Token verification)
+- [x] Status API (commit statuses)
+- [x] CLI support (`cinch repo add --forge gitlab`)
+- [x] Release support (`cinch release` for GitLab)
+- [ ] OAuth app registration (for automated setup)
+- [ ] Project Access Token creation via API
+- [ ] Self-hosted instance documentation
+
+### Forgejo/Gitea Hybrid Flow
+
+- [ ] Register OAuth app on Codeberg
+- [ ] Use OAuth to create webhook (automated)
+- [ ] Prompt for manual PAT (status posting)
+- [ ] Fall back to full manual for self-hosted
+
+### Multi-Forge Setup for Cinch
+
+- [ ] Create GitLab repo (gitlab.com/ehrlich-b/cinch)
+- [ ] Create Codeberg repo (codeberg.org/ehrlich/cinch)
+- [ ] Add all three as remotes locally
+- [ ] Register all three repos with cinch.sh
+- [ ] `make push` target to push to all forges
+- [ ] Verify releases land on all three simultaneously
 
 ---
 

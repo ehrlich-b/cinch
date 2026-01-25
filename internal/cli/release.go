@@ -98,7 +98,7 @@ func Release(opts ReleaseOptions) error {
 	case "github":
 		return releaseGitHub(repo, tag, token, files, opts.Draft, opts.Prerelease)
 	case "gitlab":
-		return fmt.Errorf("GitLab releases not yet implemented")
+		return releaseGitLab(repo, tag, token, files, opts.Draft, opts.Prerelease)
 	case "gitea", "forgejo":
 		return releaseGitea(repo, tag, token, files, opts.Draft, opts.Prerelease)
 	default:
@@ -215,6 +215,174 @@ func uploadGitHubAsset(uploadBase, token, filePath string) error {
 	}
 
 	fmt.Printf("  Uploaded: %s\n", name)
+	return nil
+}
+
+// --- GitLab ---
+
+func releaseGitLab(repo, tag, token string, files []string, draft, prerelease bool) error {
+	// GitLab needs the base URL - try to get from CINCH_REPO
+	baseURL := "https://gitlab.com" // Default
+	if cloneURL := os.Getenv("CINCH_REPO"); cloneURL != "" {
+		if u, err := url.Parse(cloneURL); err == nil {
+			baseURL = fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+		}
+	}
+
+	// URL-encode the project path for API calls
+	projectPath := url.PathEscape(repo)
+
+	// GitLab release workflow:
+	// 1. Upload files to Generic Package Registry
+	// 2. Create release with links to uploaded files
+
+	fmt.Printf("Uploading %d files to GitLab package registry...\n", len(files))
+
+	var assetLinks []gitlabAssetLink
+	for _, file := range files {
+		link, err := uploadGitLabPackage(baseURL, projectPath, tag, token, file)
+		if err != nil {
+			return fmt.Errorf("upload %s: %w", file, err)
+		}
+		assetLinks = append(assetLinks, link)
+	}
+
+	// Create the release
+	releasedAt := ""
+	if prerelease {
+		// GitLab doesn't have a prerelease flag, but we can note it in the name
+		releasedAt = "upcoming"
+	}
+
+	payload := map[string]any{
+		"tag_name":    tag,
+		"name":        tag,
+		"description": fmt.Sprintf("Release %s", tag),
+	}
+	if releasedAt != "" {
+		payload["released_at"] = releasedAt
+	}
+
+	// Add asset links
+	if len(assetLinks) > 0 {
+		links := make([]map[string]string, len(assetLinks))
+		for i, link := range assetLinks {
+			links[i] = map[string]string{
+				"name":      link.Name,
+				"url":       link.URL,
+				"link_type": "package",
+			}
+		}
+		payload["assets"] = map[string]any{
+			"links": links,
+		}
+	}
+
+	body, _ := json.Marshal(payload)
+
+	req, _ := http.NewRequest("POST", fmt.Sprintf("%s/api/v4/projects/%s/releases", baseURL, projectPath), bytes.NewReader(body))
+	req.Header.Set("PRIVATE-TOKEN", token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("create release: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(resp.Body)
+		// If release already exists (409), try to update it
+		if resp.StatusCode == http.StatusConflict {
+			return updateGitLabRelease(baseURL, projectPath, tag, token, assetLinks)
+		}
+		return fmt.Errorf("create release failed: %s - %s", resp.Status, string(respBody))
+	}
+
+	fmt.Printf("Created release: %s\n", tag)
+	fmt.Printf("Release %s complete!\n", tag)
+	return nil
+}
+
+type gitlabAssetLink struct {
+	Name string
+	URL  string
+}
+
+func uploadGitLabPackage(baseURL, projectPath, version, token, filePath string) (gitlabAssetLink, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return gitlabAssetLink{}, err
+	}
+	defer f.Close()
+
+	name := filepath.Base(filePath)
+
+	// Upload to generic package registry
+	// PUT /api/v4/projects/:id/packages/generic/:package_name/:package_version/:file_name
+	packageName := "release-assets" // Use a fixed package name for releases
+	uploadURL := fmt.Sprintf("%s/api/v4/projects/%s/packages/generic/%s/%s/%s",
+		baseURL, projectPath, packageName, version, url.PathEscape(name))
+
+	// Detect content type
+	contentType := mime.TypeByExtension(filepath.Ext(filePath))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	req, _ := http.NewRequest("PUT", uploadURL, f)
+	req.Header.Set("PRIVATE-TOKEN", token)
+	req.Header.Set("Content-Type", contentType)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return gitlabAssetLink{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(resp.Body)
+		return gitlabAssetLink{}, fmt.Errorf("%s - %s", resp.Status, string(respBody))
+	}
+
+	// Build the download URL for the asset link
+	downloadURL := fmt.Sprintf("%s/api/v4/projects/%s/packages/generic/%s/%s/%s",
+		baseURL, projectPath, packageName, version, url.PathEscape(name))
+
+	fmt.Printf("  Uploaded: %s\n", name)
+	return gitlabAssetLink{Name: name, URL: downloadURL}, nil
+}
+
+func updateGitLabRelease(baseURL, projectPath, tag, token string, assetLinks []gitlabAssetLink) error {
+	// Add asset links to existing release
+	for _, link := range assetLinks {
+		linkPayload := map[string]string{
+			"name":      link.Name,
+			"url":       link.URL,
+			"link_type": "package",
+		}
+		body, _ := json.Marshal(linkPayload)
+
+		req, _ := http.NewRequest("POST",
+			fmt.Sprintf("%s/api/v4/projects/%s/releases/%s/assets/links", baseURL, projectPath, tag),
+			bytes.NewReader(body))
+		req.Header.Set("PRIVATE-TOKEN", token)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("add asset link %s: %w", link.Name, err)
+		}
+		resp.Body.Close()
+
+		// Ignore 409 Conflict (link already exists)
+		if resp.StatusCode >= 400 && resp.StatusCode != http.StatusConflict {
+			return fmt.Errorf("add asset link %s: %s", link.Name, resp.Status)
+		}
+	}
+
+	fmt.Printf("Updated release: %s\n", tag)
+	fmt.Printf("Release %s complete!\n", tag)
 	return nil
 }
 
