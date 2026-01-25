@@ -133,14 +133,17 @@ func (f *Forgejo) verifySignature(body []byte, signature, secret string) error {
 
 // PostStatus posts a commit status to Forgejo/Gitea.
 func (f *Forgejo) PostStatus(ctx context.Context, repo *Repo, commit string, status *Status) error {
-	baseURL := f.BaseURL
-	if baseURL == "" {
-		// Try to extract from repo HTMLURL
-		if u, err := url.Parse(repo.HTMLURL); err == nil {
-			baseURL = u.Scheme + "://" + u.Host
-		} else {
-			return errors.New("base URL not configured")
-		}
+	// Extract just scheme://host from BaseURL or HTMLURL
+	// (BaseURL might be the full project URL like https://codeberg.org/owner/repo)
+	var baseURL string
+	urlToParse := f.BaseURL
+	if urlToParse == "" {
+		urlToParse = repo.HTMLURL
+	}
+	if u, err := url.Parse(urlToParse); err == nil {
+		baseURL = u.Scheme + "://" + u.Host
+	} else {
+		return errors.New("base URL not configured")
 	}
 
 	apiURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/statuses/%s",
