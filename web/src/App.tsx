@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 
-type Page = 'home' | 'jobs' | 'workers' | 'badges'
+type Page = 'home' | 'jobs' | 'workers' | 'repos' | 'badges'
 
 interface AuthState {
   authenticated: boolean
@@ -10,15 +10,19 @@ interface AuthState {
 }
 
 // Simple URL routing
-function getPageFromPath(): { page: Page; jobId: string | null } {
+function getPageFromPath(): { page: Page; jobId: string | null; gitlabFlow: string | null } {
   const path = window.location.pathname
+  const params = new URLSearchParams(window.location.search)
+  const gitlabFlow = params.get('gitlab')
+
   if (path.startsWith('/jobs/')) {
-    return { page: 'jobs', jobId: path.slice(6) }
+    return { page: 'jobs', jobId: path.slice(6), gitlabFlow }
   }
-  if (path === '/jobs') return { page: 'jobs', jobId: null }
-  if (path === '/workers') return { page: 'workers', jobId: null }
-  if (path === '/badges') return { page: 'badges', jobId: null }
-  return { page: 'home', jobId: null }
+  if (path === '/jobs') return { page: 'jobs', jobId: null, gitlabFlow }
+  if (path === '/workers') return { page: 'workers', jobId: null, gitlabFlow }
+  if (path === '/repos') return { page: 'repos', jobId: null, gitlabFlow }
+  if (path === '/badges') return { page: 'badges', jobId: null, gitlabFlow }
+  return { page: 'home', jobId: null, gitlabFlow }
 }
 
 export function App() {
@@ -26,6 +30,9 @@ export function App() {
   const [page, setPage] = useState<Page>(initial.page)
   const [selectedJob, setSelectedJob] = useState<string | null>(initial.jobId)
   const [auth, setAuth] = useState<AuthState>({ authenticated: false, loading: true })
+  const [gitlabModal, setGitlabModal] = useState<'select-project' | 'token-choice' | null>(
+    initial.gitlabFlow === 'select-project' ? 'select-project' : null
+  )
 
   // Handle browser back/forward
   useEffect(() => {
@@ -82,6 +89,12 @@ export function App() {
             Workers
           </button>
           <button
+            className={page === 'repos' ? 'active' : ''}
+            onClick={() => navigate('repos')}
+          >
+            Repos
+          </button>
+          <button
             className={page === 'badges' ? 'active' : ''}
             onClick={() => navigate('badges')}
           >
@@ -105,8 +118,25 @@ export function App() {
           <JobDetailPage jobId={selectedJob} onBack={() => navigate('jobs')} />
         )}
         {page === 'workers' && <WorkersPage />}
+        {page === 'repos' && <ReposPage onAddGitLab={() => window.location.href = '/auth/gitlab'} />}
         {page === 'badges' && <BadgesPage />}
       </main>
+      {gitlabModal && (
+        <GitLabSetupModal
+          mode={gitlabModal}
+          onClose={() => {
+            setGitlabModal(null)
+            // Clear URL params
+            history.replaceState({}, '', window.location.pathname)
+          }}
+          onComplete={() => {
+            setGitlabModal(null)
+            history.replaceState({}, '', '/repos')
+            setPage('repos')
+          }}
+          onNeedToken={() => setGitlabModal('token-choice')}
+        />
+      )}
     </div>
   )
 }
@@ -648,6 +678,299 @@ function renderAnsi(text: string): string {
   // Strip ANSI codes for now - basic implementation
   // eslint-disable-next-line no-control-regex
   return text.replace(/\x1b\[[0-9;]*m/g, '')
+}
+
+// Repos page
+function ReposPage({ onAddGitLab }: { onAddGitLab: () => void }) {
+  const [repos, setRepos] = useState<Repo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchRepos = () => {
+    setLoading(true)
+    setError(null)
+    fetch('/api/repos')
+      .then(r => {
+        if (!r.ok) throw new Error(`Failed to load repos (${r.status})`)
+        return r.json()
+      })
+      .then(data => {
+        setRepos(data || [])
+        setLoading(false)
+      })
+      .catch(e => {
+        setError(e.message || 'Failed to load repos')
+        setLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    fetchRepos()
+  }, [])
+
+  if (loading) return <div className="loading">Loading...</div>
+  if (error) return <ErrorState message={error} onRetry={fetchRepos} />
+
+  return (
+    <div className="repos-page">
+      <div className="repos-header">
+        <h2>Connected Repositories</h2>
+        <div className="add-repo-buttons">
+          <button className="btn-add-repo gitlab" onClick={onAddGitLab}>
+            Add GitLab Repo
+          </button>
+        </div>
+      </div>
+      {repos.length === 0 ? (
+        <div className="empty-state">
+          <h3>No repositories connected</h3>
+          <p>Connect a repository to start building.</p>
+        </div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Forge</th>
+              <th>Repository</th>
+              <th>Build Command</th>
+              <th>Added</th>
+            </tr>
+          </thead>
+          <tbody>
+            {repos.map(repo => (
+              <tr key={repo.id}>
+                <td className="forge-badge">{repo.forge_type}</td>
+                <td>
+                  <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
+                    {repo.owner}/{repo.name}
+                  </a>
+                </td>
+                <td className="mono">{repo.build || '-'}</td>
+                <td className="text-muted">{relativeTime(repo.created_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+// GitLab project from API
+interface GitLabProject {
+  id: number
+  name: string
+  path_with_namespace: string
+  web_url: string
+  visibility: string
+}
+
+// GitLab setup modal
+function GitLabSetupModal({
+  mode,
+  onClose,
+  onComplete,
+  onNeedToken,
+}: {
+  mode: 'select-project' | 'token-choice'
+  onClose: () => void
+  onComplete: () => void
+  onNeedToken: () => void
+}) {
+  const [projects, setProjects] = useState<GitLabProject[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedProject, setSelectedProject] = useState<GitLabProject | null>(null)
+  const [setting, setSetting] = useState(false)
+  const [tokenInput, setTokenInput] = useState('')
+  const [tokenChoice, setTokenChoice] = useState<'manual' | 'oauth' | null>(null)
+  const [setupOptions, setSetupOptions] = useState<{ id: string; label: string }[]>([])
+
+  // Fetch projects when in select-project mode
+  useEffect(() => {
+    if (mode !== 'select-project') return
+
+    fetch('/api/gitlab/projects')
+      .then(r => {
+        if (!r.ok) throw new Error(`Failed to load projects (${r.status})`)
+        return r.json()
+      })
+      .then(data => {
+        setProjects(data.projects || [])
+        setLoading(false)
+      })
+      .catch(e => {
+        setError(e.message || 'Failed to load projects')
+        setLoading(false)
+      })
+  }, [mode])
+
+  const handleSetup = async (useOAuth = false, manualToken = '') => {
+    if (!selectedProject) return
+    setSetting(true)
+    setError(null)
+
+    try {
+      const body: Record<string, unknown> = {
+        project_id: selectedProject.id,
+        project_path: selectedProject.path_with_namespace,
+      }
+      if (useOAuth) body.use_oauth = true
+      if (manualToken) body.manual_token = manualToken
+
+      const res = await fetch('/api/gitlab/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+
+      const data = await res.json()
+
+      if (data.status === 'success') {
+        onComplete()
+      } else if (data.status === 'needs_token') {
+        // PAT creation failed (free tier), show options
+        setSetupOptions(data.options || [])
+        onNeedToken()
+      } else if (data.error) {
+        setError(data.error)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Setup failed')
+    } finally {
+      setSetting(false)
+    }
+  }
+
+  const handleTokenSubmit = () => {
+    if (tokenChoice === 'oauth') {
+      handleSetup(true)
+    } else if (tokenChoice === 'manual' && tokenInput.trim()) {
+      handleSetup(false, tokenInput.trim())
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>x</button>
+
+        {mode === 'select-project' && (
+          <>
+            <h2>Select GitLab Project</h2>
+            {loading && <div className="loading">Loading projects...</div>}
+            {error && <div className="error-msg">{error}</div>}
+            {!loading && !error && (
+              <>
+                <div className="project-list">
+                  {projects.map(p => (
+                    <div
+                      key={p.id}
+                      className={`project-item ${selectedProject?.id === p.id ? 'selected' : ''}`}
+                      onClick={() => setSelectedProject(p)}
+                    >
+                      <span className="project-name">{p.path_with_namespace}</span>
+                      <span className="project-visibility">{p.visibility}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="modal-actions">
+                  <button onClick={onClose}>Cancel</button>
+                  <button
+                    className="primary"
+                    disabled={!selectedProject || setting}
+                    onClick={() => handleSetup()}
+                  >
+                    {setting ? 'Setting up...' : 'Connect Repository'}
+                  </button>
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {mode === 'token-choice' && (
+          <>
+            <h2>One More Step</h2>
+            <p className="modal-desc">
+              GitLab free tier doesn't allow automated token creation.
+              Choose how to authenticate for status updates:
+            </p>
+
+            <div className="token-options">
+              {setupOptions.map(opt => (
+                <label key={opt.id} className="token-option">
+                  <input
+                    type="radio"
+                    name="token-choice"
+                    checked={tokenChoice === opt.id}
+                    onChange={() => setTokenChoice(opt.id as 'manual' | 'oauth')}
+                  />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
+            </div>
+
+            {tokenChoice === 'manual' && selectedProject && (
+              <div className="manual-token-input">
+                <p>
+                  Create a Project Access Token at:{' '}
+                  <a
+                    href={`${selectedProject.web_url}/-/settings/access_tokens`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {selectedProject.path_with_namespace} settings
+                  </a>
+                </p>
+                <p className="token-instructions">
+                  Required scope: <code>api</code> (for status updates)
+                </p>
+                <input
+                  type="password"
+                  placeholder="glpat-xxxxxxxxxxxx"
+                  value={tokenInput}
+                  onChange={e => setTokenInput(e.target.value)}
+                />
+              </div>
+            )}
+
+            {tokenChoice === 'oauth' && (
+              <p className="oauth-warning">
+                Using your session means status updates will appear as coming from you,
+                and the token will expire periodically.
+              </p>
+            )}
+
+            {error && <div className="error-msg">{error}</div>}
+
+            <div className="modal-actions">
+              <button onClick={onClose}>Cancel</button>
+              <button
+                className="primary"
+                disabled={!tokenChoice || (tokenChoice === 'manual' && !tokenInput.trim()) || setting}
+                onClick={handleTokenSubmit}
+              >
+                {setting ? 'Finishing setup...' : 'Finish Setup'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface Repo {
+  id: string
+  forge_type: string
+  owner: string
+  name: string
+  clone_url: string
+  html_url: string
+  build: string
+  release: string
+  created_at: string
 }
 
 interface Job {

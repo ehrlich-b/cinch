@@ -1044,6 +1044,303 @@ tr.clickable {
   margin-right: auto;
 }
 
+/* Repos Page */
+.repos-page {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.repos-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.repos-header h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.add-repo-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-add-repo {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-add-repo:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent);
+}
+
+.btn-add-repo.gitlab {
+  border-color: #fc6d26;
+}
+
+.btn-add-repo.gitlab:hover {
+  border-color: #fc6d26;
+  background: rgba(252, 109, 38, 0.1);
+}
+
+.forge-badge {
+  text-transform: capitalize;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 90%;
+  max-width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.modal-close:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.modal h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.modal-desc {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.modal-actions button {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.modal-actions button:not(.primary) {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.modal-actions button:not(.primary):hover {
+  background: var(--bg);
+}
+
+.modal-actions button.primary {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+}
+
+.modal-actions button.primary:hover {
+  background: var(--accent-hover);
+}
+
+.modal-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Project list */
+.project-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.project-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+
+.project-item:last-child {
+  border-bottom: none;
+}
+
+.project-item:hover {
+  background: var(--bg);
+}
+
+.project-item.selected {
+  background: var(--accent-light);
+  border-color: var(--accent);
+}
+
+.project-name {
+  font-weight: 500;
+}
+
+.project-visibility {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+/* Token options */
+.token-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.token-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.token-option:hover {
+  border-color: var(--accent);
+}
+
+.token-option input[type="radio"] {
+  margin-top: 2px;
+}
+
+.token-option span {
+  line-height: 1.4;
+}
+
+.manual-token-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.manual-token-input p {
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.manual-token-input a {
+  color: var(--accent);
+}
+
+.token-instructions {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.token-instructions code {
+  background: var(--bg-secondary);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+}
+
+.manual-token-input input {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  color: var(--text);
+  font-family: ui-monospace, 'SF Mono', Monaco, monospace;
+  font-size: 0.875rem;
+}
+
+.manual-token-input input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.oauth-warning {
+  background: rgba(210, 153, 34, 0.1);
+  border: 1px solid var(--warning);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+  font-size: 0.875rem;
+  color: var(--warning);
+}
+
+.error-msg {
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid var(--failure);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  font-size: 0.875rem;
+  color: var(--failure);
+}
+
 /* Mobile landing */
 @media (max-width: 768px) {
   .hero {
