@@ -1,0 +1,131 @@
+package worker
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestParseRepoShort(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"https://github.com/owner/repo.git", "owner/repo"},
+		{"https://github.com/owner/repo", "owner/repo"},
+		{"https://gitlab.example.com/org/project.git", "org/project"},
+		{"git@github.com:owner/repo.git", "owner/repo"},
+		{"git@gitlab.example.com:org/project.git", "org/project"},
+		{"simple", "simple"}, // fallback
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := parseRepoShort(tt.input)
+			if result != tt.expected {
+				t.Errorf("parseRepoShort(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		d        time.Duration
+		expected string
+	}{
+		{500 * time.Millisecond, "500ms"},
+		{1 * time.Second, "1.0s"},
+		{12*time.Second + 345*time.Millisecond, "12.3s"},
+		{59 * time.Second, "59.0s"},
+		{60 * time.Second, "1m0s"},
+		{2*time.Minute + 15*time.Second, "2m15s"},
+		{1*time.Hour + 5*time.Minute, "1h5m"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.d.String(), func(t *testing.T) {
+			result := formatDuration(tt.d)
+			if result != tt.expected {
+				t.Errorf("formatDuration(%v) = %q, want %q", tt.d, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestTerminalPrintJobStart(t *testing.T) {
+	var buf bytes.Buffer
+	term := NewTerminal(&buf)
+
+	term.PrintJobStart("https://github.com/owner/repo.git", "main", "", "abc1234567890", "make build", "bare-metal")
+
+	output := buf.String()
+
+	// Check key content is present
+	if !strings.Contains(output, "BUILD STARTED") {
+		t.Error("missing BUILD STARTED")
+	}
+	if !strings.Contains(output, "owner/repo") {
+		t.Error("missing owner/repo")
+	}
+	if !strings.Contains(output, "main") {
+		t.Error("missing branch")
+	}
+	if !strings.Contains(output, "abc12345") {
+		t.Error("missing short commit")
+	}
+	if !strings.Contains(output, "make build") {
+		t.Error("missing command")
+	}
+	if !strings.Contains(output, "bare-metal") {
+		t.Error("missing mode")
+	}
+}
+
+func TestTerminalPrintJobComplete(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		var buf bytes.Buffer
+		term := NewTerminal(&buf)
+		term.PrintJobComplete(0, 12*time.Second)
+
+		output := buf.String()
+		if !strings.Contains(output, "BUILD PASSED") {
+			t.Error("missing BUILD PASSED")
+		}
+		if !strings.Contains(output, "12.0s") {
+			t.Error("missing duration")
+		}
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		var buf bytes.Buffer
+		term := NewTerminal(&buf)
+		term.PrintJobComplete(1, 5*time.Second)
+
+		output := buf.String()
+		if !strings.Contains(output, "BUILD FAILED") {
+			t.Error("missing BUILD FAILED")
+		}
+		if !strings.Contains(output, "exit 1") {
+			t.Error("missing exit code")
+		}
+	})
+}
+
+func TestTerminalPrintJobError(t *testing.T) {
+	var buf bytes.Buffer
+	term := NewTerminal(&buf)
+	term.PrintJobError("clone", "permission denied")
+
+	output := buf.String()
+	if !strings.Contains(output, "BUILD ERROR") {
+		t.Error("missing BUILD ERROR")
+	}
+	if !strings.Contains(output, "clone") {
+		t.Error("missing phase")
+	}
+	if !strings.Contains(output, "permission denied") {
+		t.Error("missing error message")
+	}
+}

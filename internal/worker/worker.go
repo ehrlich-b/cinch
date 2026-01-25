@@ -397,6 +397,7 @@ func (w *Worker) handleJobCancel(payload []byte) {
 func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	jobID := assign.JobID
 	start := time.Now()
+	term := NewTerminal(os.Stdout)
 
 	defer func() {
 		w.jobsLock.Lock()
@@ -415,6 +416,7 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	// Clone repository
 	workDir, err := w.cloneRepo(ctx, assign.Repo)
 	if err != nil {
+		term.PrintJobError(protocol.PhaseClone, err.Error())
 		w.reportError(jobID, protocol.PhaseClone, err.Error())
 		return
 	}
@@ -477,9 +479,10 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 		effectiveCfg = &config.Config{}
 	}
 
-	// Determine execution mode
+	// Determine execution mode and prepare for running
 	var exitCode int
 	var runErr error
+	var execMode string
 	stdout := io.MultiWriter(streamer.Stdout(), os.Stdout)
 	stderr := io.MultiWriter(streamer.Stderr(), os.Stderr)
 
@@ -487,15 +490,24 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 		// Container mode
 		source, err := container.ResolveContainer(effectiveCfg, workDir)
 		if err != nil {
+			term.PrintJobError(protocol.PhaseExecute, fmt.Sprintf("resolve container: %v", err))
 			w.reportError(jobID, protocol.PhaseExecute, fmt.Sprintf("resolve container: %v", err))
 			return
 		}
 
 		if source.Type == "bare-metal" {
 			// Config says bare-metal
+			execMode = "bare-metal"
+			term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode)
 			exitCode, runErr = w.runBareMetal(ctx, command, workDir, env, stdout, stderr)
 		} else {
 			// Run in container
+			execMode = fmt.Sprintf("container: %s", source.Type)
+			if source.Image != "" {
+				execMode = fmt.Sprintf("container: %s", source.Image)
+			}
+			term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode)
+
 			w.log.Info("executing job",
 				"job_id", jobID,
 				"repo", assign.Repo.CloneURL,
@@ -510,6 +522,9 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 		}
 	} else {
 		// Bare-metal mode
+		execMode = "bare-metal"
+		term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode)
+
 		w.log.Info("executing job",
 			"job_id", jobID,
 			"repo", assign.Repo.CloneURL,
@@ -523,6 +538,7 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	}
 	if runErr != nil && ctx.Err() != nil {
 		// Context cancelled
+		term.PrintJobError(protocol.PhaseExecute, "job cancelled")
 		w.reportError(jobID, protocol.PhaseExecute, "job cancelled")
 		return
 	}
@@ -531,6 +547,9 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	streamer.Flush()
 
 	duration := time.Since(start)
+
+	// Print job completion banner
+	term.PrintJobComplete(exitCode, duration)
 
 	// Report completion
 	if err := w.send(protocol.TypeJobComplete, protocol.NewJobComplete(jobID, exitCode, duration)); err != nil {
