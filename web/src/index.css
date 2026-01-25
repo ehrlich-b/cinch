@@ -26,6 +26,14 @@ body {
   line-height: 1.5;
 }
 
+a {
+  color: #58a6ff;
+}
+
+a:hover {
+  color: #79b8ff;
+}
+
 .app {
   min-height: 100vh;
   display: flex;
@@ -1102,6 +1110,28 @@ tr.clickable {
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   background: var(--bg-tertiary);
+}
+
+td.forge-icon {
+  width: 40px;
+  text-align: center;
+}
+
+img.forge-icon {
+  width: 28px;
+  height: 28px;
+  vertical-align: middle;
+}
+
+/* GitHub logo needs to be light on dark background */
+img.forge-icon.github {
+  filter: invert(1);
+}
+
+.forge-text {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 /* Modal */

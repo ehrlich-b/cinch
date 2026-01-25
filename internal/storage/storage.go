@@ -49,6 +49,7 @@ type Storage interface {
 	GetOrCreateUser(ctx context.Context, name string) (*User, error)
 	GetUserByName(ctx context.Context, name string) (*User, error)
 	UpdateUserGitLabCredentials(ctx context.Context, userID, credentials string) error
+	UpdateUserForgejoCredentials(ctx context.Context, userID, credentials string) error
 
 	// Lifecycle
 	Close() error
@@ -123,11 +124,13 @@ const (
 
 // User represents a Cinch user with connected forge credentials.
 type User struct {
-	ID                   string
-	Name                 string    // Username (from primary auth provider)
-	GitLabCredentials    string    // JSON-encoded OAuth credentials (access_token, refresh_token, expires_at, base_url)
-	GitLabCredentialsAt  time.Time // When GitLab was connected
-	CreatedAt            time.Time
+	ID                    string
+	Name                  string    // Username (from primary auth provider)
+	GitLabCredentials     string    // JSON-encoded OAuth credentials (access_token, refresh_token, expires_at, base_url)
+	GitLabCredentialsAt   time.Time // When GitLab was connected
+	ForgejoCredentials    string    // JSON-encoded OAuth credentials for Forgejo/Codeberg
+	ForgejoCredentialsAt  time.Time // When Forgejo was connected
+	CreatedAt             time.Time
 }
 
 // Repo represents a configured repository.

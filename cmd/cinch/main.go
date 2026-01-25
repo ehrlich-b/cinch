@@ -171,6 +171,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 		log.Info("GitLab OAuth configured")
 	}
 
+	// Create Forgejo OAuth handler (Codeberg)
+	forgejoOAuthConfig := server.ForgejoOAuthConfig{
+		ClientID:     os.Getenv("CINCH_FORGEJO_CLIENT_ID"),
+		ClientSecret: os.Getenv("CINCH_FORGEJO_CLIENT_SECRET"),
+		BaseURL:      os.Getenv("CINCH_FORGEJO_URL"), // defaults to https://codeberg.org
+	}
+	forgejoOAuthHandler := server.NewForgejoOAuthHandler(forgejoOAuthConfig, baseURL, jwtSecret, store, log)
+	if forgejoOAuthHandler.IsConfigured() {
+		log.Info("Forgejo OAuth configured", "url", forgejoOAuthConfig.BaseURL)
+	}
+
 	// Wire up dependencies
 	wsHandler.SetStatusPoster(webhookHandler)
 	wsHandler.SetLogBroadcaster(logStreamHandler)
@@ -243,6 +254,53 @@ func runServer(cmd *cobra.Command, args []string) error {
 			return
 		}
 		gitlabOAuthHandler.HandleSetup(w, r, user)
+	})
+
+	// Forgejo OAuth routes
+	mux.HandleFunc("/auth/forgejo", func(w http.ResponseWriter, r *http.Request) {
+		forgejoOAuthHandler.HandleLogin(w, r)
+	})
+	mux.HandleFunc("/auth/forgejo/callback", func(w http.ResponseWriter, r *http.Request) {
+		user := authHandler.GetUser(r)
+		if user == "" {
+			returnURL := r.URL.String()
+			http.Redirect(w, r, "/auth/login?return_to="+returnURL, http.StatusFound)
+			return
+		}
+		forgejoOAuthHandler.HandleCallback(w, r, user)
+	})
+
+	// Forgejo API routes
+	mux.HandleFunc("/api/forgejo/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"configured": forgejoOAuthHandler.IsConfigured(),
+			"base_url":   forgejoOAuthConfig.BaseURL,
+		})
+	})
+	mux.HandleFunc("/api/forgejo/repos", func(w http.ResponseWriter, r *http.Request) {
+		user := authHandler.GetUser(r)
+		if user == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"authentication required"}`))
+			return
+		}
+		forgejoOAuthHandler.HandleProjects(w, r, user)
+	})
+	mux.HandleFunc("/api/forgejo/setup", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		user := authHandler.GetUser(r)
+		if user == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"authentication required"}`))
+			return
+		}
+		forgejoOAuthHandler.HandleSetup(w, r, user)
 	})
 
 	// API routes with auth middleware for mutations

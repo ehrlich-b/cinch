@@ -89,6 +89,18 @@ Dashboard with your repos
 - [ ] `cinch login` detects existing session, skips device code flow
 - [ ] Success page emphasizes `--all` flag for first-time setup
 
+**Identity model:**
+- No forge is "primary" - all connected forges are equal identity providers
+- Onboard with any forge, then connect additional forges from account settings
+- Each forge connection = repos from that forge available for CI
+- Account = union of all connected forge identities
+
+**Account settings (per-forge):**
+- [ ] Account page with "Connect [Forge]" buttons for each unconnected forge
+- [ ] Disconnect forge (removes repos, keeps account if other forges connected)
+- [ ] Delete account option (requires disconnecting all forges first)
+- [ ] Warning when disconnecting last forge: "This will permanently delete your account"
+
 ---
 
 ## Current: Web UI Redesign
@@ -148,6 +160,12 @@ Note: `cinch release` works on GitHub, GitLab, Gitea - move forges, keep your Ma
 
 ### Remaining Polish (Backlog)
 
+- [ ] Light/dark theme toggle
+- [ ] Public repo pages: `cinch.sh/jobs/github.com/owner/repo` shows builds for that repo
+  - Public repos: accessible without login
+  - Private repos: require auth
+  - This is what badges should link to
+- [ ] Repo detail pages (click repo → see all builds for that repo)
 - [ ] Loading skeletons
 - [ ] Real Settings page (tokens, repos)
 - [ ] Job filtering by repo/status/branch
@@ -273,6 +291,27 @@ cinch worker --repos owner/a,team/b    # Specific repos only
 - [ ] What about large shared repos? Only build commits from "your" branches/PRs?
 - [ ] Should workers have a "personal" vs "team" mode?
 - [ ] How to handle org repos where you're a member but not pushing?
+
+**Deeper issue: Teams & Permissions (needs thinking)**
+
+This is "too enterprise" for our primary user, but we need a coherent answer.
+
+Core tension: Our accounts aren't "real" - they're bound to forge identities. So how do teams work?
+
+- Teams should reflect org structure / forge permission model
+- When PATs are onboarded, how do we ensure we only show repos the user should see?
+  - Does this poke a hole in our auth model?
+  - PAT might have access to repos the *user* shouldn't see in Cinch context
+- PR workflows: If I run a worker on my laptop, I only want MY PRs to run
+  - Not a generic worker for the whole org
+  - Need to filter by PR author, not just repo access
+- Org repos where user is member but not actively contributing?
+
+Possible directions:
+- [ ] Mirror forge permissions exactly (simplest, but limits us)
+- [ ] Personal vs org context toggle
+- [ ] Worker claims jobs by author, not just repo
+- [ ] Defer entirely - single-user / small-team focus for now
 
 ---
 
