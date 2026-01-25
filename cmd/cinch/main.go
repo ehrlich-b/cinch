@@ -698,12 +698,12 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	}
 
 	// Show user code and open browser
-	fmt.Printf("\nYour code: %s\n", deviceResp.UserCode)
-	fmt.Printf("Opening browser to: %s\n", deviceResp.VerificationURI)
+	verifyURL := deviceResp.VerificationURI + "?code=" + deviceResp.UserCode
+	fmt.Printf("\nOpen: %s\n", verifyURL)
 	fmt.Println("\nWaiting for authorization...")
 
 	// Try to open browser
-	openBrowser(deviceResp.VerificationURI + "?code=" + deviceResp.UserCode)
+	openBrowser(verifyURL)
 
 	// Poll for token
 	tokenResp, err := cli.PollForToken(serverURL, deviceResp.DeviceCode, deviceResp.Interval)
