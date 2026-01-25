@@ -168,6 +168,12 @@ See `design/12-multi-forge-presence.md` for mechanical details.
 - [x] Same UX via CLI or web (both hit same API)
 - [x] Web UI: Repos page with "Connect GitLab" button → project selector (multi-select)
 
+**GitHub App auto-onboarding (TODO):**
+Currently repos are created lazily on first push. The GitHub App already knows which repos user selected during install.
+- [ ] On `installation` webhook event, auto-create repos for all selected repositories
+- [ ] On `installation_repositories` (added/removed), sync repo list
+- [ ] Show repos in UI immediately after app install, before first push
+
 **GitHub web onboarding (TODO - loop back):**
 - [ ] Allow GitHub repo onboarding through web UI (not just GitHub App)
 - [ ] "Connect GitHub" button similar to GitLab flow
@@ -190,7 +196,39 @@ See `design/12-multi-forge-presence.md` for mechanical details.
 
 ---
 
-## Then: MVP 1.5 - PR/MR Support
+## Then: MVP 1.5 - Worker Ergonomics
+
+**Goal:** More intuitive worker setup with sensible defaults for different use cases.
+
+**Problem:** Two use cases in tension:
+- **Local machine:** Only build MY stuff on shared repos (don't build other people's PRs)
+- **Cloud worker:** Build everything (this is a dedicated CI runner)
+
+**Proposed UX:**
+```bash
+cinch worker                           # Interactive: select repos or "all"
+cinch worker --all                     # Worker for ALL your authed repos
+cinch worker --repos owner/a,team/b    # Specific repos only
+```
+
+**Interactive mode (default):**
+- Show list of connected repos with checkboxes
+- "Select all" option
+- Remember selection for next time (in ~/.cinch/config)
+
+**Smart defaults:**
+- First run: interactive selector
+- Subsequent runs: use saved selection (show "Using saved repos: x, y, z")
+- `--all` overrides to build everything
+
+**Open questions:**
+- [ ] What about large shared repos? Only build commits from "your" branches/PRs?
+- [ ] Should workers have a "personal" vs "team" mode?
+- [ ] How to handle org repos where you're a member but not pushing?
+
+---
+
+## Then: MVP 1.6 - PR/MR Support
 
 Currently push-only. PRs are table stakes for real adoption.
 
@@ -202,7 +240,7 @@ Currently push-only. PRs are table stakes for real adoption.
 
 ---
 
-## Then: MVP 1.6 - Stripe Integration (Deferred)
+## Then: MVP 1.7 - Stripe Integration (Deferred)
 
 **Goal:** Validate the business model with paying customers.
 
