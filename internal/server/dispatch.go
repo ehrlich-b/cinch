@@ -168,14 +168,19 @@ func (d *Dispatcher) tryAssign(qj *QueuedJob) bool {
 		Config: qj.Config,
 	}
 
-	// Send to worker
-	if err := d.ws.SendJob(worker.ID, assign); err != nil {
-		d.log.Error("failed to send job to worker", "job_id", qj.Job.ID, "worker_id", worker.ID, "error", err)
-		return false
-	}
+	// Mark worker as busy BEFORE sending (prevents over-dispatch)
+	d.hub.AddActiveJob(worker.ID, qj.Job.ID)
 
 	// Track in-flight job for potential re-queue
 	d.inflight[qj.Job.ID] = qj
+
+	// Send to worker
+	if err := d.ws.SendJob(worker.ID, assign); err != nil {
+		d.log.Error("failed to send job to worker", "job_id", qj.Job.ID, "worker_id", worker.ID, "error", err)
+		d.hub.RemoveActiveJob(worker.ID, qj.Job.ID)
+		delete(d.inflight, qj.Job.ID)
+		return false
+	}
 
 	d.log.Info("job assigned", "job_id", qj.Job.ID, "worker_id", worker.ID)
 	return true
@@ -318,4 +323,38 @@ func (d *Dispatcher) CompleteJob(jobID string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.inflight, jobID)
+}
+
+// RequeueWorkerJobs re-queues all jobs that were assigned to a disconnected worker.
+func (d *Dispatcher) RequeueWorkerJobs(jobIDs []string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	for _, jobID := range jobIDs {
+		qj, ok := d.inflight[jobID]
+		if !ok {
+			continue
+		}
+
+		delete(d.inflight, jobID)
+
+		// Put back at front of queue
+		d.queue = append([]*QueuedJob{qj}, d.queue...)
+
+		// Update status back to queued
+		ctx := context.Background()
+		if err := d.storage.UpdateJobStatus(ctx, jobID, storage.JobStatusQueued, nil); err != nil {
+			d.log.Error("failed to update job status to queued", "job_id", jobID, "error", err)
+		}
+
+		d.log.Info("job requeued (worker disconnected)", "job_id", jobID)
+	}
+
+	// Signal dispatch loop to try assigning to other workers
+	if len(jobIDs) > 0 {
+		select {
+		case d.queueCh <- struct{}{}:
+		default:
+		}
+	}
 }
