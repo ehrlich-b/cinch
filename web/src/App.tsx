@@ -888,6 +888,8 @@ function GitLabOnboardPage({ onComplete, onCancel }: { onComplete: () => void; o
         if (data.status === 'needs_token' && !pendingProject) {
           setPendingProject(project)
           setNeedsToken(true)
+          setSetting(false)
+          return // Stop here and show token prompt
         }
       } catch (e) {
         console.error(`Failed to setup ${project.path_with_namespace}:`, e)
@@ -895,7 +897,7 @@ function GitLabOnboardPage({ onComplete, onCancel }: { onComplete: () => void; o
     }
 
     setSetting(false)
-    if (!needsToken) onComplete()
+    onComplete()
   }
 
   const handleTokenSubmit = async () => {
@@ -1157,7 +1159,7 @@ function ForgejoOnboardPage({ onComplete, onCancel }: { onComplete: () => void; 
     }
 
     setSetting(false)
-    if (!needsToken) onComplete()
+    onComplete()
   }
 
   const handleTokenSubmit = async () => {
