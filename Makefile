@@ -1,6 +1,6 @@
 # Cinch Makefile
 
-.PHONY: build test fmt lint check release clean web web-deps web-dev dev dev-worker run
+.PHONY: build test fmt lint check release clean web web-deps web-dev dev dev-worker run push push-tags
 
 # -----------------------------------------------------------------------------
 # Development
@@ -90,6 +90,29 @@ release: web
 	done
 	@echo "Creating release $(VERSION)..."
 	cinch release dist/*
+
+# -----------------------------------------------------------------------------
+# Multi-Forge Push (GitHub, GitLab, Codeberg)
+# -----------------------------------------------------------------------------
+
+# Push main branch to all forges
+push:
+	git push github main 2>/dev/null || echo "github: skipped (remote not configured)"
+	git push gitlab main 2>/dev/null || echo "gitlab: skipped (remote not configured)"
+	git push codeberg main 2>/dev/null || echo "codeberg: skipped (remote not configured)"
+
+# Push tags to all forges (triggers releases on all)
+push-tags:
+	git push github --tags 2>/dev/null || echo "github: skipped (remote not configured)"
+	git push gitlab --tags 2>/dev/null || echo "gitlab: skipped (remote not configured)"
+	git push codeberg --tags 2>/dev/null || echo "codeberg: skipped (remote not configured)"
+
+# Tag and push everywhere
+release-tag:
+	@if [ -z "$(V)" ]; then echo "Usage: make release-tag V=v1.0.0"; exit 1; fi
+	git tag $(V)
+	$(MAKE) push
+	$(MAKE) push-tags
 
 # -----------------------------------------------------------------------------
 # Fly.io Deployment (manual)

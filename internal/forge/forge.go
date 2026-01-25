@@ -93,6 +93,8 @@ func New(cfg ForgeConfig) Forge {
 	switch cfg.Type {
 	case TypeGitHub:
 		return &GitHub{Token: cfg.Token}
+	case TypeGitLab:
+		return &GitLab{Token: cfg.Token, BaseURL: cfg.BaseURL}
 	case TypeForgejo:
 		return &Forgejo{Token: cfg.Token, BaseURL: cfg.BaseURL}
 	case TypeGitea:

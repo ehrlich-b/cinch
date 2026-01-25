@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -168,6 +169,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// Register forges (for webhook identification)
 	webhookHandler.RegisterForge(&forge.GitHub{})
+	webhookHandler.RegisterForge(&forge.GitLab{})
 	webhookHandler.RegisterForge(&forge.Forgejo{})
 	webhookHandler.RegisterForge(&forge.Forgejo{IsGitea: true})
 
@@ -649,30 +651,36 @@ func repoCmd() *cobra.Command {
 }
 
 func repoAddCmd() *cobra.Command {
-	var forge string
+	var forgeType string
+	var forgeURL string
+	var forgeToken string
 
 	cmd := &cobra.Command{
 		Use:   "add <owner/name>",
 		Short: "Add a repository to Cinch",
 		Long: `Add a repository to Cinch for CI.
 
-Example:
+Examples:
   cinch repo add ehrlich-b/cinch
+  cinch repo add myorg/myproject --forge gitlab
+  cinch repo add myorg/myproject --forge gitlab --url https://gitlab.mycompany.com --token glpat-xxx
 
-After adding, configure the webhook in GitHub/GitLab:
+After adding, configure the webhook in your forge:
   - URL: shown in output
-  - Secret: shown in output
+  - Secret: shown in output (or token for GitLab)
   - Events: push`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRepoAdd(args[0], forge)
+			return runRepoAdd(args[0], forgeType, forgeURL, forgeToken)
 		},
 	}
-	cmd.Flags().StringVar(&forge, "forge", "github", "Forge type (github, forgejo, gitea)")
+	cmd.Flags().StringVar(&forgeType, "forge", "github", "Forge type (github, gitlab, forgejo, gitea)")
+	cmd.Flags().StringVar(&forgeURL, "url", "", "Base URL for self-hosted instances (e.g., https://gitlab.mycompany.com)")
+	cmd.Flags().StringVar(&forgeToken, "token", "", "API token for status posting (e.g., glpat-xxx for GitLab)")
 	return cmd
 }
 
-func runRepoAdd(repoPath string, forgeType string) error {
+func runRepoAdd(repoPath string, forgeType string, forgeURL string, forgeToken string) error {
 	parts := strings.SplitN(repoPath, "/", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid repo format: use owner/name")
@@ -692,22 +700,44 @@ func runRepoAdd(repoPath string, forgeType string) error {
 
 	// Build clone URL based on forge
 	var cloneURL string
+	var baseURL string
+
 	switch forgeType {
 	case "github":
 		cloneURL = fmt.Sprintf("https://github.com/%s/%s.git", owner, name)
+		baseURL = "https://github.com"
+	case "gitlab":
+		if forgeURL != "" {
+			baseURL = strings.TrimSuffix(forgeURL, "/")
+			cloneURL = fmt.Sprintf("%s/%s/%s.git", baseURL, owner, name)
+		} else {
+			baseURL = "https://gitlab.com"
+			cloneURL = fmt.Sprintf("https://gitlab.com/%s/%s.git", owner, name)
+		}
 	case "forgejo", "gitea":
-		// For self-hosted, user needs to provide URL
-		return fmt.Errorf("forgejo/gitea requires --clone-url flag (not yet implemented)")
+		if forgeURL == "" {
+			return fmt.Errorf("%s requires --url flag for self-hosted instance", forgeType)
+		}
+		baseURL = strings.TrimSuffix(forgeURL, "/")
+		cloneURL = fmt.Sprintf("%s/%s/%s.git", baseURL, owner, name)
 	default:
 		return fmt.Errorf("unknown forge type: %s", forgeType)
 	}
 
-	// Create repo via API
-	reqBody := fmt.Sprintf(`{"forge_type":"%s","owner":"%s","name":"%s","clone_url":"%s"}`,
-		forgeType, owner, name, cloneURL)
+	// Build request body
+	reqData := map[string]string{
+		"forge_type": forgeType,
+		"owner":      owner,
+		"name":       name,
+		"clone_url":  cloneURL,
+	}
+	if forgeToken != "" {
+		reqData["forge_token"] = forgeToken
+	}
+	reqBody, _ := json.Marshal(reqData)
 
 	req, err := http.NewRequest("POST", serverCfg.URL+"/api/repos",
-		strings.NewReader(reqBody))
+		bytes.NewReader(reqBody))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -737,11 +767,33 @@ func runRepoAdd(repoPath string, forgeType string) error {
 
 	fmt.Printf("Added repo %s/%s\n", owner, name)
 	fmt.Println()
-	fmt.Println("Configure webhook in GitHub:")
-	fmt.Printf("  URL: %s\n", webhookURL)
-	fmt.Printf("  Secret: %s\n", result.WebhookSecret)
-	fmt.Println("  Content type: application/json")
-	fmt.Println("  Events: push")
+
+	// Show forge-specific webhook configuration
+	switch forgeType {
+	case "gitlab":
+		fmt.Println("Configure webhook in GitLab:")
+		fmt.Printf("  URL: %s\n", webhookURL)
+		fmt.Printf("  Secret token: %s\n", result.WebhookSecret)
+		fmt.Println("  Trigger: Push events, Tag push events")
+		if forgeToken == "" {
+			fmt.Println()
+			fmt.Println("Note: For status updates, create a Project Access Token with 'api' scope:")
+			fmt.Printf("  %s/%s/%s/-/settings/access_tokens\n", baseURL, owner, name)
+			fmt.Println("  Then run: cinch repo add --forge gitlab --token <token> ...")
+		}
+	case "github":
+		fmt.Println("Configure webhook in GitHub:")
+		fmt.Printf("  URL: %s\n", webhookURL)
+		fmt.Printf("  Secret: %s\n", result.WebhookSecret)
+		fmt.Println("  Content type: application/json")
+		fmt.Println("  Events: push")
+	default:
+		fmt.Printf("Configure webhook in %s:\n", forgeType)
+		fmt.Printf("  URL: %s\n", webhookURL)
+		fmt.Printf("  Secret: %s\n", result.WebhookSecret)
+		fmt.Println("  Content type: application/json")
+		fmt.Println("  Events: push")
+	}
 
 	return nil
 }
