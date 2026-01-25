@@ -1409,6 +1409,82 @@ tr.clickable {
   text-align: center;
 }
 
+/* Full-page onboarding */
+.onboard-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--bg);
+}
+
+.onboard-container {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 600px;
+}
+
+.onboard-container h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.onboard-container > p {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.onboard-list {
+  max-height: 400px;
+}
+
+.onboard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.onboard-actions button {
+  padding: 0.625rem 1.25rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.onboard-actions button:not(.primary) {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.onboard-actions button:not(.primary):hover {
+  background: var(--bg);
+}
+
+.onboard-actions button.primary {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+}
+
+.onboard-actions button.primary:hover {
+  background: var(--accent-hover);
+}
+
+.onboard-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Mobile landing */
 @media (max-width: 768px) {
   .hero {
