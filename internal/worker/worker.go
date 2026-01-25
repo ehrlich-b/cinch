@@ -498,7 +498,7 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 		if source.Type == "bare-metal" {
 			// Config says bare-metal
 			execMode = "bare-metal"
-			term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode)
+			term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode, assign.Repo.ForgeType)
 			exitCode, runErr = w.runBareMetal(ctx, command, workDir, env, stdout, stderr)
 		} else {
 			// Run in container
@@ -506,7 +506,7 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 			if source.Image != "" {
 				execMode = fmt.Sprintf("container: %s", source.Image)
 			}
-			term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode)
+			term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode, assign.Repo.ForgeType)
 
 			w.log.Info("executing job",
 				"job_id", jobID,
@@ -523,7 +523,7 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	} else {
 		// Bare-metal mode
 		execMode = "bare-metal"
-		term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode)
+		term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode, assign.Repo.ForgeType)
 
 		w.log.Info("executing job",
 			"job_id", jobID,

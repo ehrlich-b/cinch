@@ -58,13 +58,13 @@ func TestTerminalPrintJobStart(t *testing.T) {
 	var buf bytes.Buffer
 	term := NewTerminal(&buf)
 
-	term.PrintJobStart("https://github.com/owner/repo.git", "main", "", "abc1234567890", "make build", "bare-metal")
+	term.PrintJobStart("https://github.com/owner/repo.git", "main", "", "abc1234567890", "make build", "bare-metal", "github")
 
 	output := buf.String()
 
 	// Check key content is present
-	if !strings.Contains(output, "BUILD STARTED") {
-		t.Error("missing BUILD STARTED")
+	if !strings.Contains(output, "GITHUB STARTED") {
+		t.Error("missing GITHUB STARTED")
 	}
 	if !strings.Contains(output, "owner/repo") {
 		t.Error("missing owner/repo")
