@@ -53,50 +53,46 @@ func TestHubList(t *testing.T) {
 func TestHubFindAvailable(t *testing.T) {
 	hub := NewHub()
 
-	// Worker with 2 slots, 1 used
+	// Worker busy
 	hub.Register(&WorkerConn{
 		ID:           "w_1",
 		Labels:       []string{"linux", "amd64"},
-		Capabilities: Capabilities{Concurrency: 2},
+		Capabilities: Capabilities{},
 		ActiveJobs:   []string{"j_1"},
 		Send:         make(chan []byte, 1),
 	})
 
-	// Worker with 1 slot, fully busy
+	// Worker busy
 	hub.Register(&WorkerConn{
 		ID:           "w_2",
 		Labels:       []string{"linux"},
-		Capabilities: Capabilities{Concurrency: 1},
+		Capabilities: Capabilities{},
 		ActiveJobs:   []string{"j_2"},
 		Send:         make(chan []byte, 1),
 	})
 
-	// Worker with 3 slots, all free
+	// Worker available
 	hub.Register(&WorkerConn{
 		ID:           "w_3",
 		Labels:       []string{"linux", "arm64"},
-		Capabilities: Capabilities{Concurrency: 3},
+		Capabilities: Capabilities{},
 		ActiveJobs:   []string{},
 		Send:         make(chan []byte, 1),
 	})
 
-	// Find all available linux workers
+	// Find all available linux workers - only w_3 is free
 	available := hub.FindAvailable([]string{"linux"})
-	if len(available) != 2 {
-		t.Fatalf("len(FindAvailable) = %d, want 2", len(available))
-	}
-	// Should be sorted by available slots (w_3 first with 3, then w_1 with 1)
-	if available[0].ID != "w_3" {
-		t.Errorf("First available = %q, want w_3", available[0].ID)
-	}
-
-	// Find available amd64 workers
-	available = hub.FindAvailable([]string{"amd64"})
 	if len(available) != 1 {
 		t.Fatalf("len(FindAvailable) = %d, want 1", len(available))
 	}
-	if available[0].ID != "w_1" {
-		t.Errorf("Available = %q, want w_1", available[0].ID)
+	if available[0].ID != "w_3" {
+		t.Errorf("Available = %q, want w_3", available[0].ID)
+	}
+
+	// Find available amd64 workers - w_1 is busy
+	available = hub.FindAvailable([]string{"amd64"})
+	if len(available) != 0 {
+		t.Fatalf("len(FindAvailable) = %d, want 0", len(available))
 	}
 
 	// Find available arm64 workers
@@ -108,10 +104,10 @@ func TestHubFindAvailable(t *testing.T) {
 		t.Errorf("Available = %q, want w_3", available[0].ID)
 	}
 
-	// Find with no labels - all available
+	// Find with no labels - only w_3 is available
 	available = hub.FindAvailable(nil)
-	if len(available) != 2 {
-		t.Errorf("len(FindAvailable) = %d, want 2", len(available))
+	if len(available) != 1 {
+		t.Errorf("len(FindAvailable) = %d, want 1", len(available))
 	}
 }
 
@@ -121,20 +117,20 @@ func TestHubSelectWorker(t *testing.T) {
 	hub.Register(&WorkerConn{
 		ID:           "w_1",
 		Labels:       []string{"linux"},
-		Capabilities: Capabilities{Concurrency: 2},
-		ActiveJobs:   []string{"j_1"},
+		Capabilities: Capabilities{},
+		ActiveJobs:   []string{"j_1"}, // busy
 		Send:         make(chan []byte, 1),
 	})
 
 	hub.Register(&WorkerConn{
 		ID:           "w_2",
 		Labels:       []string{"linux"},
-		Capabilities: Capabilities{Concurrency: 2},
-		ActiveJobs:   []string{},
+		Capabilities: Capabilities{},
+		ActiveJobs:   []string{}, // available
 		Send:         make(chan []byte, 1),
 	})
 
-	// Should select w_2 (has more available slots)
+	// Should select w_2 (only one available)
 	worker := hub.SelectWorker([]string{"linux"})
 	if worker == nil {
 		t.Fatal("SelectWorker returned nil")
@@ -155,27 +151,28 @@ func TestHubActiveJobs(t *testing.T) {
 
 	hub.Register(&WorkerConn{
 		ID:           "w_1",
-		Capabilities: Capabilities{Concurrency: 2},
+		Capabilities: Capabilities{},
 		Send:         make(chan []byte, 1),
 	})
 
+	// Add a job
 	hub.AddActiveJob("w_1", "j_1")
-	hub.AddActiveJob("w_1", "j_2")
 
 	worker := hub.Get("w_1")
-	if len(worker.ActiveJobs) != 2 {
-		t.Errorf("ActiveJobs = %d, want 2", len(worker.ActiveJobs))
+	if len(worker.ActiveJobs) != 1 {
+		t.Errorf("ActiveJobs = %d, want 1", len(worker.ActiveJobs))
 	}
 	if worker.AvailableSlots() != 0 {
 		t.Errorf("AvailableSlots = %d, want 0", worker.AvailableSlots())
 	}
 
+	// Remove the job
 	hub.RemoveActiveJob("w_1", "j_1")
-	if len(worker.ActiveJobs) != 1 {
-		t.Errorf("ActiveJobs = %d, want 1", len(worker.ActiveJobs))
+	if len(worker.ActiveJobs) != 0 {
+		t.Errorf("ActiveJobs = %d, want 0", len(worker.ActiveJobs))
 	}
-	if worker.ActiveJobs[0] != "j_2" {
-		t.Errorf("ActiveJobs[0] = %q, want j_2", worker.ActiveJobs[0])
+	if worker.AvailableSlots() != 1 {
+		t.Errorf("AvailableSlots = %d, want 1", worker.AvailableSlots())
 	}
 }
 
@@ -243,23 +240,20 @@ func TestWorkerConnHasLabel(t *testing.T) {
 }
 
 func TestWorkerConnAvailableSlots(t *testing.T) {
+	// One worker = one job. Available if no active jobs.
 	tests := []struct {
-		name        string
-		concurrency int
-		activeJobs  int
-		want        int
+		name       string
+		activeJobs int
+		want       int
 	}{
-		{"default concurrency", 0, 0, 1},
-		{"default concurrency with job", 0, 1, 0},
-		{"explicit concurrency", 3, 1, 2},
-		{"fully loaded", 2, 2, 0},
-		{"over capacity", 2, 3, -1},
+		{"available", 0, 1},
+		{"busy", 1, 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := &WorkerConn{
-				Capabilities: Capabilities{Concurrency: tt.concurrency},
+				Capabilities: Capabilities{},
 				ActiveJobs:   make([]string, tt.activeJobs),
 			}
 			if got := w.AvailableSlots(); got != tt.want {

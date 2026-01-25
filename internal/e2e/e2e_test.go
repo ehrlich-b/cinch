@@ -129,11 +129,10 @@ func TestE2EFullPipeline(t *testing.T) {
 
 	// Start worker
 	workerCfg := worker.WorkerConfig{
-		ServerURL:   "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/worker",
-		Token:       token,
-		Labels:      []string{"linux"},
-		Concurrency: 1,
-		Docker:      false,
+		ServerURL: "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/worker",
+		Token:     token,
+		Labels:    []string{"linux"},
+		Docker:    false,
 	}
 
 	w := worker.NewWorker(workerCfg, log)
@@ -414,9 +413,8 @@ func TestE2EWorkerReconnect(t *testing.T) {
 
 	// Start worker
 	workerCfg := worker.WorkerConfig{
-		ServerURL:   "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/worker",
-		Token:       token,
-		Concurrency: 1,
+		ServerURL: "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/worker",
+		Token:     token,
 	}
 
 	w := worker.NewWorker(workerCfg, log)
@@ -505,9 +503,8 @@ func TestE2EJobCancellation(t *testing.T) {
 
 	// Start worker
 	workerCfg := worker.WorkerConfig{
-		ServerURL:   "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/worker",
-		Token:       token,
-		Concurrency: 1,
+		ServerURL: "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/worker",
+		Token:     token,
 	}
 
 	w := worker.NewWorker(workerCfg, log)

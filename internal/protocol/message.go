@@ -146,8 +146,7 @@ type Ack struct {
 
 // Capabilities describes what a worker can do.
 type Capabilities struct {
-	Docker      bool `json:"docker,omitempty"`
-	Concurrency int  `json:"concurrency,omitempty"`
+	Docker bool `json:"docker,omitempty"`
 }
 
 // Register is sent after AUTH_OK to register worker.

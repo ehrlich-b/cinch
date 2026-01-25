@@ -172,6 +172,7 @@ func (h *WebhookHandler) createJob(ctx context.Context, repo *storage.Repo, even
 		RepoID:    repo.ID,
 		Commit:    event.Commit,
 		Branch:    event.Branch,
+		Tag:       event.Tag,
 		Status:    storage.JobStatusPending,
 		CreatedAt: time.Now(),
 	}

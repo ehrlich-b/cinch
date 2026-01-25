@@ -31,12 +31,11 @@ const (
 
 // WorkerConfig holds configuration for a worker.
 type WorkerConfig struct {
-	ServerURL   string
-	Token       string
-	Labels      []string
-	Concurrency int
-	Docker      bool
-	Hostname    string
+	ServerURL string
+	Token     string
+	Labels    []string
+	Docker    bool
+	Hostname  string
 }
 
 // Worker connects to the server and executes jobs.
@@ -71,9 +70,6 @@ func NewWorker(cfg WorkerConfig, log *slog.Logger) *Worker {
 	}
 	if cfg.Hostname == "" {
 		cfg.Hostname, _ = os.Hostname()
-	}
-	if cfg.Concurrency <= 0 {
-		cfg.Concurrency = 1
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -248,8 +244,7 @@ func (w *Worker) sendRegister() error {
 	reg := protocol.Register{
 		Labels: w.config.Labels,
 		Capabilities: protocol.Capabilities{
-			Docker:      w.config.Docker,
-			Concurrency: w.config.Concurrency,
+			Docker: w.config.Docker,
 		},
 		Version:  workerVersion,
 		Hostname: w.config.Hostname,
@@ -350,14 +345,14 @@ func (w *Worker) handleJobAssign(payload []byte) {
 		return
 	}
 
-	// Check capacity
+	// Check capacity - one worker, one job
 	w.jobsLock.Lock()
-	if len(w.activeJobs) >= w.config.Concurrency {
+	if len(w.activeJobs) > 0 {
 		w.jobsLock.Unlock()
-		w.log.Warn("at capacity, rejecting job", "job_id", assign.JobID)
+		w.log.Warn("already running a job, rejecting", "job_id", assign.JobID)
 		if err := w.send(protocol.TypeJobReject, protocol.JobReject{
 			JobID:  assign.JobID,
-			Reason: "worker at max concurrency",
+			Reason: "worker busy",
 		}); err != nil {
 			w.log.Warn("failed to send JOB_REJECT", "job_id", assign.JobID, "error", err)
 		}

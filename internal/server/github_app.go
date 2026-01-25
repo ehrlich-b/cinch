@@ -240,6 +240,7 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 		RepoID:         repo.ID,
 		Commit:         commit,
 		Branch:         branch,
+		Tag:            tag,
 		Status:         storage.JobStatusPending,
 		InstallationID: &installationID,
 		CreatedAt:      time.Now(),

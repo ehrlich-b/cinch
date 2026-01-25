@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="130" height="24">
+  <defs>
+    <linearGradient id="statusBarBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1f2937"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="130" height="24" rx="4" fill="url(#statusBarBg)"/>
+  <!-- Progress-style status bar -->
+  <rect x="4" y="18" width="122" height="3" rx="1.5" fill="#374151"/>
+  <rect x="4" y="18" width="122" height="3" rx="1.5" fill="#22c55e"/>
+  <!-- Content -->
+  <text x="10" y="14" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="10" font-weight="600" fill="#9ca3af">cinch</text>
+  <text x="50" y="14" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="10" font-weight="500" fill="#d1d5db">passing</text>
+  <text x="100" y="14" font-family="SF Mono,monospace" font-size="9" fill="#6b7280">#847</text>
+</svg>

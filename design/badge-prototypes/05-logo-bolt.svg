@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="118" height="24">
+  <defs>
+    <linearGradient id="boltGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="118" height="24" rx="4" fill="#1f2937"/>
+  <!-- Lightning bolt icon -->
+  <path d="M14 6 L10 12 L13 12 L11 18 L17 11 L14 11 L16 6 Z" fill="url(#boltGradient)"/>
+  <!-- Divider -->
+  <rect x="24" y="4" width="1" height="16" fill="#374151"/>
+  <!-- Text -->
+  <text x="32" y="16" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="11" font-weight="600" fill="#9ca3af">cinch</text>
+  <text x="68" y="16" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="11" font-weight="600" fill="#4ade80">passing</text>
+  <!-- Checkmark -->
+  <path d="M104 10 L107 13 L113 7" stroke="#4ade80" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

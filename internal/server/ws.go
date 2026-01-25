@@ -310,8 +310,7 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 
 	worker.Labels = reg.Labels
 	worker.Capabilities = Capabilities{
-		Docker:      reg.Capabilities.Docker,
-		Concurrency: reg.Capabilities.Concurrency,
+		Docker: reg.Capabilities.Docker,
 	}
 	worker.Hostname = reg.Hostname
 	worker.Version = reg.Version
@@ -345,7 +344,6 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 	h.log.Info("worker registered",
 		"worker_id", worker.ID,
 		"labels", worker.Labels,
-		"concurrency", worker.Capabilities.Concurrency,
 		"hostname", worker.Hostname,
 	)
 

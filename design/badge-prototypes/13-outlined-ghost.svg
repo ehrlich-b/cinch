@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="24">
+  <!-- Transparent background with border -->
+  <rect x="1" y="1" width="106" height="22" rx="4" fill="none" stroke="#22c55e" stroke-width="1.5"/>
+  <!-- Divider -->
+  <line x1="50" y1="5" x2="50" y2="19" stroke="#22c55e" stroke-width="1" opacity="0.5"/>
+  <!-- Text -->
+  <text x="25" y="16" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="11" font-weight="600" fill="#22c55e" text-anchor="middle">cinch</text>
+  <text x="78" y="16" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="11" font-weight="500" fill="#22c55e" text-anchor="middle">passing</text>
+</svg>

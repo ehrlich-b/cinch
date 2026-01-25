@@ -24,17 +24,16 @@ type WorkerConn struct {
 
 // Capabilities describes what a worker can do.
 type Capabilities struct {
-	Docker      bool
-	Concurrency int
+	Docker bool
 }
 
 // AvailableSlots returns how many more jobs this worker can accept.
+// One worker = one job. Want more parallelism? Run more workers.
 func (w *WorkerConn) AvailableSlots() int {
-	if w.Capabilities.Concurrency <= 0 {
-		// Default to 1 if not specified
-		return 1 - len(w.ActiveJobs)
+	if len(w.ActiveJobs) > 0 {
+		return 0
 	}
-	return w.Capabilities.Concurrency - len(w.ActiveJobs)
+	return 1
 }
 
 // HasLabel returns true if the worker has the given label.

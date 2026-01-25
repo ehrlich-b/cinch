@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="140" height="28">
+  <defs>
+    <linearGradient id="electricBg" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0c0c0c"/>
+      <stop offset="50%" stop-color="#111111"/>
+      <stop offset="100%" stop-color="#0c0c0c"/>
+    </linearGradient>
+    <linearGradient id="electricGreen" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00ff88"/>
+      <stop offset="100%" stop-color="#00ffaa"/>
+    </linearGradient>
+    <filter id="electricGlow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Background -->
+  <rect width="140" height="28" rx="4" fill="url(#electricBg)"/>
+  <!-- Accent line top -->
+  <rect x="0" y="0" width="140" height="1" fill="url(#electricGreen)" opacity="0.3"/>
+  <!-- Brand section -->
+  <text x="16" y="18" font-family="Inter,-apple-system,sans-serif" font-size="12" font-weight="800" fill="#666" letter-spacing="1">CINCH</text>
+  <!-- Divider -->
+  <rect x="68" y="6" width="1" height="16" fill="#333"/>
+  <!-- Status -->
+  <text x="80" y="18" font-family="Inter,-apple-system,sans-serif" font-size="12" font-weight="600" fill="url(#electricGreen)" filter="url(#electricGlow)">PASSING</text>
+</svg>

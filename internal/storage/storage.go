@@ -67,7 +67,8 @@ type Job struct {
 	ID             string
 	RepoID         string
 	Commit         string
-	Branch         string
+	Branch         string // Branch name (empty for tags)
+	Tag            string // Tag name (empty for branches)
 	Status         JobStatus
 	ExitCode       *int
 	WorkerID       *string

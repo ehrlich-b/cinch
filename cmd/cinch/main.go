@@ -164,6 +164,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	wsHandler.SetGitHubApp(githubAppHandler)
 	wsHandler.SetWorkerNotifier(dispatcher)
 	webhookHandler.SetGitHubApp(githubAppHandler)
+	dispatcher.SetGitHubApp(githubAppHandler)
 
 	// Register forges (for webhook identification)
 	webhookHandler.RegisterForge(&forge.GitHub{})
@@ -294,7 +295,6 @@ Example:
 	cmd.Flags().String("server", "", "Server WebSocket URL (uses saved credentials if not set)")
 	cmd.Flags().String("token", "", "Authentication token (uses saved credentials if not set)")
 	cmd.Flags().StringSlice("labels", nil, "Worker labels (e.g., linux-amd64,docker)")
-	cmd.Flags().Int("concurrency", 1, "Max concurrent jobs")
 	return cmd
 }
 
@@ -302,7 +302,6 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	serverURL, _ := cmd.Flags().GetString("server")
 	token, _ := cmd.Flags().GetString("token")
 	labels, _ := cmd.Flags().GetStringSlice("labels")
-	concurrency, _ := cmd.Flags().GetInt("concurrency")
 
 	log := slog.Default()
 
@@ -333,17 +332,16 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	}
 
 	workerCfg := worker.WorkerConfig{
-		ServerURL:   serverURL,
-		Token:       token,
-		Labels:      labels,
-		Concurrency: concurrency,
-		Docker:      true, // Assume Docker available
+		ServerURL: serverURL,
+		Token:     token,
+		Labels:    labels,
+		Docker:    true, // Assume Docker available
 	}
 
 	w := worker.NewWorker(workerCfg, log)
 
 	// Start worker
-	log.Info("starting worker", "server", serverURL, "labels", labels, "concurrency", concurrency)
+	log.Info("starting worker", "server", serverURL, "labels", labels)
 	if err := w.Start(); err != nil {
 		return fmt.Errorf("start worker: %w", err)
 	}

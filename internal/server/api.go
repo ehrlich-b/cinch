@@ -227,10 +227,9 @@ type workerResponse struct {
 	LastSeen  time.Time `json:"last_seen"`
 	CreatedAt time.Time `json:"created_at"`
 	// Live info from hub
-	Connected   bool     `json:"connected"`
-	ActiveJobs  []string `json:"active_jobs,omitempty"`
-	CurrentJob  *string  `json:"currentJob,omitempty"` // First active job for frontend
-	Concurrency int      `json:"concurrency,omitempty"`
+	Connected  bool     `json:"connected"`
+	ActiveJobs []string `json:"active_jobs,omitempty"`
+	CurrentJob *string  `json:"currentJob,omitempty"` // First active job for frontend
 }
 
 func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
@@ -257,7 +256,6 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 			if conn := h.hub.Get(wk.ID); conn != nil {
 				resp[i].Connected = true
 				resp[i].ActiveJobs = conn.ActiveJobs
-				resp[i].Concurrency = conn.Capabilities.Concurrency
 				if len(conn.ActiveJobs) > 0 {
 					resp[i].CurrentJob = &conn.ActiveJobs[0]
 				}
