@@ -207,6 +207,67 @@ tr.clickable {
   padding: 4rem;
 }
 
+.error-state {
+  text-align: center;
+  padding: 4rem 2rem;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.error-state .error-icon {
+  width: 48px;
+  height: 48px;
+  background: var(--failure);
+  color: #fff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 auto 1rem;
+}
+
+.error-state h3 {
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.error-state p {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.retry-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.retry-btn:hover {
+  background: var(--accent-hover);
+}
+
+.ws-error {
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid var(--failure);
+  color: var(--failure);
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
 .empty-state {
   text-align: center;
   padding: 4rem 2rem;

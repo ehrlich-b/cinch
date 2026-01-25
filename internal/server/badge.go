@@ -72,7 +72,7 @@ func (h *BadgeHandler) serveJSON(w http.ResponseWriter, r *http.Request) {
 	// Build shields.io endpoint response
 	resp := ShieldsEndpoint{
 		SchemaVersion: 1,
-		Label:         "CI",
+		Label:         "build",
 		Message:       status,
 		Color:         statusToColor(status),
 	}
