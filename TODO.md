@@ -73,10 +73,19 @@ Dashboard with your repos
 - `cinch worker --all` is the right default for new users
 - Zero friction from "interested" to "first build running"
 
+**Email handling:**
+- We need email (notifications, billing) but NOT for auth
+- No email verification required (forge OAuth is the trust anchor)
+- GitHub users may have multiple emails - let them pick during onboarding
+- Show: "Which email should we use?" with dropdown of their GitHub emails
+- Default to primary, but allow selection (work vs personal)
+
 **Implementation:**
 - [ ] Remove separate login button, replace with "Get Started"
 - [ ] Forge selector as first screen (not login screen)
-- [ ] After OAuth callback → repo selector → success page with CLI instructions
+- [ ] After OAuth callback → email selector (if multiple) → repo selector → success page
+- [ ] Fetch user emails from forge API (GitHub: `user:email` scope, GitLab: `read_user`)
+- [ ] Store selected email in user record (not verified, just preference)
 - [ ] `cinch login` detects existing session, skips device code flow
 - [ ] Success page emphasizes `--all` flag for first-time setup
 
