@@ -97,15 +97,15 @@ release: web
 
 # Push main branch to all forges
 push:
-	git push github main 2>/dev/null || echo "github: skipped (remote not configured)"
-	git push gitlab main 2>/dev/null || echo "gitlab: skipped (remote not configured)"
-	git push codeberg main 2>/dev/null || echo "codeberg: skipped (remote not configured)"
+	@git push github main 2>/dev/null && echo "github pushed" || echo "github: skipped (remote not configured)"
+	@git push gitlab main 2>/dev/null && echo "gitlab pushed" || echo "gitlab: skipped (remote not configured)"
+	@git push codeberg main 2>/dev/null && echo "codeberg pushed" || echo "codeberg: skipped (remote not configured)"
 
 # Push tags to all forges (triggers releases on all)
 push-tags:
-	git push github --tags 2>/dev/null || echo "github: skipped (remote not configured)"
-	git push gitlab --tags 2>/dev/null || echo "gitlab: skipped (remote not configured)"
-	git push codeberg --tags 2>/dev/null || echo "codeberg: skipped (remote not configured)"
+	@git push github --tags 2>/dev/null && echo "github tags pushed" || echo "github: skipped (remote not configured)"
+	@git push gitlab --tags 2>/dev/null && echo "gitlab tags pushed" || echo "gitlab: skipped (remote not configured)"
+	@git push codeberg --tags 2>/dev/null && echo "codeberg tags pushed" || echo "codeberg: skipped (remote not configured)"
 
 # Tag and push everywhere
 release-tag:
