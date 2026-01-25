@@ -158,6 +158,18 @@ func runServer(cmd *cobra.Command, args []string) error {
 		log.Info("GitHub App configured", "app_id", githubAppConfig.AppID)
 	}
 
+	// Create GitLab OAuth handler
+	gitlabOAuthConfig := server.GitLabOAuthConfig{
+		ClientID:     os.Getenv("CINCH_GITLAB_CLIENT_ID"),
+		ClientSecret: os.Getenv("CINCH_GITLAB_CLIENT_SECRET"),
+		BaseURL:      os.Getenv("CINCH_GITLAB_URL"), // defaults to https://gitlab.com
+	}
+	jwtSecret := []byte(os.Getenv("CINCH_JWT_SECRET"))
+	gitlabOAuthHandler := server.NewGitLabOAuthHandler(gitlabOAuthConfig, baseURL, jwtSecret, store, log)
+	if gitlabOAuthHandler.IsConfigured() {
+		log.Info("GitLab OAuth configured")
+	}
+
 	// Wire up dependencies
 	wsHandler.SetStatusPoster(webhookHandler)
 	wsHandler.SetLogBroadcaster(logStreamHandler)
@@ -182,6 +194,55 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// Auth routes (no caching)
 	mux.Handle("/auth/", noCache(authHandler))
+
+	// GitLab OAuth routes (separate from main auth handler)
+	mux.HandleFunc("/auth/gitlab", func(w http.ResponseWriter, r *http.Request) {
+		gitlabOAuthHandler.HandleLogin(w, r)
+	})
+	mux.HandleFunc("/auth/gitlab/callback", func(w http.ResponseWriter, r *http.Request) {
+		// User must be logged in to Cinch first
+		user := authHandler.GetUser(r)
+		if user == "" {
+			// Redirect to login with return to GitLab callback
+			returnURL := r.URL.String()
+			http.Redirect(w, r, "/auth/login?return_to="+returnURL, http.StatusFound)
+			return
+		}
+		gitlabOAuthHandler.HandleCallback(w, r, user)
+	})
+
+	// GitLab API routes
+	mux.HandleFunc("/api/gitlab/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"configured": gitlabOAuthHandler.IsConfigured(),
+			"base_url":   gitlabOAuthConfig.BaseURL,
+		})
+	})
+	mux.HandleFunc("/api/gitlab/projects", func(w http.ResponseWriter, r *http.Request) {
+		user := authHandler.GetUser(r)
+		if user == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"authentication required"}`))
+			return
+		}
+		gitlabOAuthHandler.HandleProjects(w, r, user)
+	})
+	mux.HandleFunc("/api/gitlab/setup", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		user := authHandler.GetUser(r)
+		if user == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"authentication required"}`))
+			return
+		}
+		gitlabOAuthHandler.HandleSetup(w, r, user)
+	})
 
 	// API routes with auth middleware for mutations
 	// Read-only endpoints are public, mutations require auth

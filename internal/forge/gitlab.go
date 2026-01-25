@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -154,7 +155,18 @@ func (g *GitLab) PostStatus(ctx context.Context, repo *Repo, commit string, stat
 		return err
 	}
 
-	req.Header.Set("PRIVATE-TOKEN", g.Token)
+	// Get effective token (handles OAuth refresh if needed)
+	token, isOAuth, err := g.getEffectiveToken()
+	if err != nil {
+		return fmt.Errorf("get token: %w", err)
+	}
+
+	// Use appropriate auth header
+	if isOAuth {
+		req.Header.Set("Authorization", "Bearer "+token)
+	} else {
+		req.Header.Set("PRIVATE-TOKEN", token)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := g.Client
@@ -181,8 +193,15 @@ func (g *GitLab) CloneToken(ctx context.Context, repo *Repo) (string, time.Time,
 	if !repo.Private {
 		return "", time.Time{}, nil
 	}
-	// GitLab PATs don't expire (unless configured)
-	return g.Token, time.Now().Add(24 * time.Hour), nil
+
+	// Get effective token (handles OAuth refresh if needed)
+	token, _, err := g.getEffectiveToken()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("get token: %w", err)
+	}
+
+	// Token validity - OAuth tokens expire, PATs typically don't
+	return token, time.Now().Add(1 * time.Hour), nil
 }
 
 // GitLab webhook payload types
@@ -207,4 +226,106 @@ type gitlabStatusPayload struct {
 	Context     string `json:"name"` // GitLab uses "name" for status context
 	Description string `json:"description,omitempty"`
 	TargetURL   string `json:"target_url,omitempty"`
+}
+
+// gitlabOAuthCredentials matches the JSON stored in repo.ForgeToken for OAuth fallback.
+type gitlabOAuthCredentials struct {
+	Type         string    `json:"type"`
+	AccessToken  string    `json:"access_token"`
+	RefreshToken string    `json:"refresh_token"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	BaseURL      string    `json:"base_url"`
+}
+
+// getEffectiveToken returns the token to use and whether it's OAuth (needs Bearer auth).
+// If the stored token is OAuth credentials, it handles refresh if needed.
+func (g *GitLab) getEffectiveToken() (token string, isOAuth bool, err error) {
+	// Check if token is OAuth JSON
+	if !strings.HasPrefix(g.Token, "{") {
+		// Plain PAT
+		return g.Token, false, nil
+	}
+
+	var creds gitlabOAuthCredentials
+	if err := json.Unmarshal([]byte(g.Token), &creds); err != nil {
+		// Not valid JSON, treat as plain token
+		return g.Token, false, nil
+	}
+
+	if creds.Type != "oauth" {
+		// Unknown type, treat as plain token
+		return g.Token, false, nil
+	}
+
+	// Check if token is expired (with 5 minute buffer)
+	if time.Now().Add(5 * time.Minute).After(creds.ExpiresAt) {
+		// Need to refresh
+		newCreds, err := g.refreshOAuthToken(creds)
+		if err != nil {
+			return "", true, fmt.Errorf("refresh OAuth token: %w", err)
+		}
+		return newCreds.AccessToken, true, nil
+	}
+
+	return creds.AccessToken, true, nil
+}
+
+// refreshOAuthToken refreshes an expired OAuth token.
+func (g *GitLab) refreshOAuthToken(creds gitlabOAuthCredentials) (*gitlabOAuthCredentials, error) {
+	clientID := os.Getenv("CINCH_GITLAB_CLIENT_ID")
+	clientSecret := os.Getenv("CINCH_GITLAB_CLIENT_SECRET")
+
+	if clientID == "" || clientSecret == "" {
+		return nil, errors.New("CINCH_GITLAB_CLIENT_ID and CINCH_GITLAB_CLIENT_SECRET required for OAuth token refresh")
+	}
+
+	baseURL := creds.BaseURL
+	if baseURL == "" {
+		baseURL = "https://gitlab.com"
+	}
+
+	data := url.Values{}
+	data.Set("client_id", clientID)
+	data.Set("client_secret", clientSecret)
+	data.Set("refresh_token", creds.RefreshToken)
+	data.Set("grant_type", "refresh_token")
+
+	req, err := http.NewRequest("POST", baseURL+"/oauth/token", strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := g.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("refresh request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("refresh failed: %s - %s", resp.Status, string(body))
+	}
+
+	var tokenResp struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, fmt.Errorf("decode refresh response: %w", err)
+	}
+
+	return &gitlabOAuthCredentials{
+		Type:         "oauth",
+		AccessToken:  tokenResp.AccessToken,
+		RefreshToken: tokenResp.RefreshToken,
+		ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
+		BaseURL:      baseURL,
+	}, nil
 }

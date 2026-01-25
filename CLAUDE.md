@@ -177,10 +177,22 @@ make release      # Cross-compile + upload (CI only, needs CINCH_TAG)
 - Aggressively simple - reject complexity without clear value
 - The web UI uses React + TypeScript + Vite, dark theme, green accent color
 
+## Git Workflow (Multi-Forge)
+
+Cinch is hosted on GitHub, GitLab, and Codeberg simultaneously. **Always use `make push` instead of `git push`.**
+
+```bash
+make push        # Push to all forges (github, gitlab, codeberg)
+make push-tags   # Push tags to all forges (triggers releases)
+```
+
+**NEVER use `git push`** - it only pushes to one remote.
+
 ## Common Mistakes to Avoid
 
 1. **DON'T** tell users to use `cinch worker --token=xxx` - the flow is `cinch login` then `cinch worker`
 2. **DON'T** use `run: make ci` in examples - use `build: make build` (the actual config key)
 3. **DON'T** show complex YAML - Cinch's whole point is ONE command
-4. **DO** emphasize "same command locally and in CI"
-5. **DO** mention `cinch release` works across forges (GitHub → GitLab migration keeps working)
+4. **DON'T** use `git push` - use `make push` to push to all forges
+5. **DO** emphasize "same command locally and in CI"
+6. **DO** mention `cinch release` works across forges (GitHub → GitLab migration keeps working)
