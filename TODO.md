@@ -118,7 +118,7 @@ See `design/12-multi-forge-presence.md` for Cinch's own multi-forge hosting stra
 | Forge | Users | Priority | Notes |
 |-------|-------|----------|-------|
 | GitHub | 65M+ | ✅ Done | Full integration (App + Checks API) |
-| GitLab | 30M | ✅ Done | Core implementation complete, OAuth flow pending |
+| GitLab | 30M | **In Progress** | Core forge done, server OAuth flow needed |
 | Forgejo/Gitea | ? | ✅ Done (manual) | Hybrid flow planned (OAuth webhook + manual PAT) |
 | Bitbucket | 10M+ | **Not Planned** | Platform limitations make grug UX impossible |
 
@@ -137,14 +137,22 @@ See `design/12-multi-forge-presence.md` for mechanical details.
 
 ### GitLab Integration
 
+**Client-side (forge interface):**
 - [x] Core forge implementation (`internal/forge/gitlab.go`)
-- [x] Webhook parsing (X-Gitlab-Token verification)
-- [x] Status API (commit statuses)
-- [x] CLI support (`cinch repo add --forge gitlab`)
-- [x] Release support (`cinch release` for GitLab)
-- [ ] OAuth app registration (for automated setup)
-- [ ] Project Access Token creation via API
-- [ ] Self-hosted instance documentation
+- [x] Webhook parsing (X-Gitlab-Token header verification)
+- [x] Status API (commit statuses via project path)
+- [x] Release support (`cinch release` uploads to GitLab package registry)
+- [x] CLI manual fallback (`cinch repo add --forge gitlab --token xxx`)
+
+**Server-side (automated onboarding) - NOT DONE:**
+- [ ] Register GitLab OAuth app (gitlab.com and document for self-hosted)
+- [ ] `GET /auth/gitlab` - Start OAuth flow
+- [ ] `GET /auth/gitlab/callback` - Exchange code, store temp token
+- [ ] Project selector UI after OAuth
+- [ ] Webhook creation via OAuth token
+- [ ] PAT auto-creation attempt via API
+- [ ] Graceful fallback: if PAT creation fails (403 free tier), prompt for manual token
+- [ ] Self-hosted instance support (custom base URL)
 
 ### Forgejo/Gitea Hybrid Flow
 
