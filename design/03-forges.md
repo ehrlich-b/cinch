@@ -1,5 +1,13 @@
 # Forge Integrations
 
+> **Note:** Detailed per-forge design documents are now in `design/forge/`:
+> - `design/forge/github.md` - GitHub App integration (implemented)
+> - `design/forge/forgejo-gitea.md` - Forgejo/Gitea (implemented)
+> - `design/forge/gitlab.md` - GitLab exploration
+> - `design/forge/bitbucket.md` - Bitbucket exploration
+>
+> This file contains the original interface design and general patterns.
+
 ## Implementation Status
 
 | Forge | Status | Notes |
@@ -7,8 +15,8 @@
 | GitHub | **Complete** | Webhooks, Status API, Checks API, GitHub App |
 | Forgejo | **Complete** | Webhooks, Status API |
 | Gitea | **Complete** | Same as Forgejo (shared implementation) |
-| GitLab | Planned | v0.2 |
-| Bitbucket | Planned | v0.3 |
+| GitLab | Planned | See `design/forge/gitlab.md` |
+| Bitbucket | Planned | See `design/forge/bitbucket.md` |
 
 ## Overview
 
