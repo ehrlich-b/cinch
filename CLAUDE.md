@@ -2,6 +2,8 @@
 
 CI that's a cinch. One config. Every forge. Your hardware.
 
+**Public website:** https://cinch.sh (hosted on fly.io as `cinch` app)
+
 ## What This Is
 
 Cinch is a radically simple CI system:
