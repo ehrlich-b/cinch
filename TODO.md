@@ -221,6 +221,9 @@ See `design/12-multi-forge-presence.md` for mechanical details.
 - [x] Graceful fallback with options: manual token OR OAuth session
 - [x] OAuth token refresh in forge (when using OAuth session fallback)
 - [x] Self-hosted instance support (CINCH_GITLAB_URL env var)
+- [x] PAT created with Maintainer access level (required for commit status)
+- [x] Idempotent re-onboarding (delete old webhooks, upsert repo tokens)
+- [x] Fixed webhook owner parsing (use path_with_namespace, not display name)
 
 **Full onboarding flow (DONE):**
 - [x] `cinch gitlab connect` - CLI command to connect GitLab account
@@ -250,6 +253,7 @@ Currently repos are created lazily on first push. The GitHub App already knows w
 - [x] Use OAuth to create webhook (automated)
 - [x] Prompt for manual PAT (status posting)
 - [x] `cinch connect codeberg` CLI command
+- [x] Idempotent re-onboarding (delete old webhooks, upsert repo tokens)
 - [ ] Self-hosted support: `cinch connect gitlab --host gitlab.mycompany.com`
 - [ ] Self-hosted support: `cinch connect forgejo --host git.mycompany.com`
 - [ ] Differentiate "codeberg" vs "forgejo" in CLI/UI (codeberg = forgejo at codeberg.org)
@@ -535,6 +539,8 @@ Already done: Gitea, Forgejo (same codebase). These cover the self-hosted commun
 - [x] **Rejected jobs not re-queued** - Fixed: jobs re-queue automatically on worker disconnect.
 - [x] **Jobs lost on server restart** - Fixed: orphaned jobs re-queue with fresh tokens (GitHub App regenerates, other forges use stored token).
 - [x] **One worker = one job** - Removed concurrency config. Want parallelism? Run more workers.
+- [x] **Worker logs too noisy** - Added `--verbose` flag, quiet mode by default shows only banners.
+- [x] **Banner should show forge** - Now shows "GITHUB STARTED" / "GITLAB STARTED" / "FORGEJO STARTED".
 - [ ] **Worker should check dependencies on startup** - Probe for docker/podman before accepting jobs. Fail fast with "no container runtime found" instead of failing on first job.
 
 ---
