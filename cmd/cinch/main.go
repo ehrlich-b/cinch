@@ -63,7 +63,8 @@ func main() {
 		logoutCmd(),
 		whoamiCmd(),
 		repoCmd(),
-		gitlabCmd(),
+		connectCmd(),
+		gitlabCmd(), // deprecated, kept for backwards compatibility
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -1167,31 +1168,45 @@ all platform binaries to ~/.cinch/bin/.`,
 	}
 }
 
-func gitlabCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "gitlab",
-		Short: "GitLab integration commands",
-	}
-	cmd.AddCommand(gitlabConnectCmd())
-	return cmd
-}
-
-func gitlabConnectCmd() *cobra.Command {
+func connectCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "connect",
-		Short: "Connect your GitLab account to Cinch",
-		Long: `Connect your GitLab account to Cinch via OAuth.
+		Use:   "connect <forge>",
+		Short: "Connect a forge account to Cinch",
+		Long: `Connect a forge account (GitLab, Codeberg, etc.) to Cinch via OAuth.
 
-This opens your browser to authenticate with GitLab. Once authorized,
-you can add GitLab repositories to Cinch without manual token setup.
+This opens your browser to authenticate with the forge. Once authorized,
+you can add repositories from that forge to Cinch.
+
+Supported forges:
+  gitlab    - GitLab.com (or self-hosted GitLab)
+  codeberg  - Codeberg.org (Forgejo)
 
 Example:
-  cinch gitlab connect`,
-		RunE: runGitLabConnect,
+  cinch connect gitlab
+  cinch connect codeberg`,
+		Args: cobra.ExactArgs(1),
+		RunE: runConnect,
 	}
 }
 
-func runGitLabConnect(cmd *cobra.Command, args []string) error {
+func runConnect(cmd *cobra.Command, args []string) error {
+	forge := strings.ToLower(args[0])
+
+	// Map forge names to API paths
+	var apiPath, authPath, forgeName string
+	switch forge {
+	case "gitlab":
+		apiPath = "/api/gitlab/status"
+		authPath = "/auth/gitlab"
+		forgeName = "GitLab"
+	case "codeberg", "forgejo":
+		apiPath = "/api/forgejo/status"
+		authPath = "/auth/forgejo"
+		forgeName = "Codeberg"
+	default:
+		return fmt.Errorf("unknown forge: %s (supported: gitlab, codeberg)", forge)
+	}
+
 	// Load credentials to get server URL
 	cfg, err := cli.LoadConfig()
 	if err != nil {
@@ -1205,10 +1220,10 @@ func runGitLabConnect(cmd *cobra.Command, args []string) error {
 
 	serverURL := serverCfg.URL
 
-	// Check if GitLab OAuth is configured on server
-	resp, err := http.Get(serverURL + "/api/gitlab/status")
+	// Check if OAuth is configured on server
+	resp, err := http.Get(serverURL + apiPath)
 	if err != nil {
-		return fmt.Errorf("check GitLab status: %w", err)
+		return fmt.Errorf("check %s status: %w", forgeName, err)
 	}
 	defer resp.Body.Close()
 
@@ -1221,23 +1236,41 @@ func runGitLabConnect(cmd *cobra.Command, args []string) error {
 	}
 
 	if !status.Configured {
-		return fmt.Errorf("GitLab OAuth not configured on server")
+		return fmt.Errorf("%s OAuth not configured on server", forgeName)
 	}
 
-	// Open browser to GitLab OAuth flow
-	authURL := serverURL + "/auth/gitlab"
-	fmt.Printf("Opening browser to connect GitLab...\n")
+	// Open browser to OAuth flow
+	authURL := serverURL + authPath
+	fmt.Printf("Opening browser to connect %s...\n", forgeName)
 	fmt.Printf("If browser doesn't open, visit: %s\n", authURL)
 
 	openBrowser(authURL)
 
 	fmt.Println()
-	fmt.Println("After authorizing, you can add GitLab repos:")
-	fmt.Println("  cinch repo add owner/name --forge gitlab")
+	fmt.Printf("After authorizing, you can add %s repos:\n", forgeName)
+	fmt.Printf("  cinch repo add owner/name --forge %s\n", forge)
 	fmt.Println()
-	fmt.Println("Or visit the web UI to select projects to onboard.")
+	fmt.Println("Or visit the web UI to select repositories to onboard.")
 
 	return nil
+}
+
+// gitlabCmd is kept for backwards compatibility (cinch gitlab connect)
+func gitlabCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "gitlab",
+		Short:  "GitLab integration commands (deprecated: use 'cinch connect gitlab')",
+		Hidden: true,
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "connect",
+		Short: "Connect GitLab (deprecated: use 'cinch connect gitlab')",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println("Note: 'cinch gitlab connect' is deprecated. Use 'cinch connect gitlab' instead.")
+			return runConnect(cmd, []string{"gitlab"})
+		},
+	})
+	return cmd
 }
 
 // openBrowser tries to open a URL in the default browser.
