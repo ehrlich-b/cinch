@@ -1,6 +1,4 @@
-# cinch
-
-[![CI](https://cinch.sh/badge/github.com/ehrlich-b/cinch.svg)](https://cinch.sh/jobs)
+# cinch [![CI](https://cinch.sh/badge/github.com/ehrlich-b/cinch.svg)](https://cinch.sh/jobs)
 
 CI that's a cinch.
 
@@ -14,7 +12,7 @@ Push code, get a green checkmark. Your Makefile is the pipeline.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ehrlich-b/cinch/main/install.sh | sh
+curl -fsSL https://cinch.sh/install.sh | sh
 ```
 
 Or build from source: `make build`
@@ -63,7 +61,7 @@ Works with GitHub, GitLab, Forgejo, Gitea, Bitbucket. Same config, same checkmar
 
 Cinch is a control plane. You bring the compute.
 
-Your worker runs on your hardware—a $5 VPS, a Fly.io machine, your gaming PC, whatever. It connects outbound to the control plane over WebSocket. When you push, the control plane receives the webhook, dispatches the job, and your worker clones, runs the command in a container, and streams logs back. Status check posted to your forge.
+Your worker runs on your hardware—just the computer you develop on, a $5 VPS, a Fly.io machine, your gaming PC, whatever. It connects outbound to the control plane over WebSocket. When you push, the control plane receives the webhook, dispatches the job, and your worker clones, runs the command in a container, and streams logs back. Status check posted to your forge.
 
 ```
 Worker (your machine)              cinch.sh (or self-hosted)
