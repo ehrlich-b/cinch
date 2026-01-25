@@ -33,7 +33,7 @@ img.shields.io/endpoint?url=https://cinch.sh/api/badge/github.com/owner/repo.jso
 - [x] `.svg` endpoint redirects to shields.io with our JSON URL
 - [x] Cache headers on JSON endpoint
 - [x] Removed badge rendering code (12 styles) - using shields.io
-- [ ] Fix badge showing "CI CI" (logo + label both say CI) - should just show status
+- [x] Badge label changed from "CI" to "build" (shows "build: passing")
 
 ### Queue Reliability ✅
 - [x] Jobs re-queue on worker disconnect
@@ -95,8 +95,8 @@ Note: `cinch release` works on GitHub, GitLab, Gitea - move forges, keep your Ma
 
 - [x] **Hero unclear** - Now shows .cinch.yaml + Makefile side by side
 - [x] **Empty states useless** - Now show setup steps with correct commands
-- [ ] **No error handling** - API failures show nothing
-- [ ] **No relative timestamps** - Shows nothing or absolute times
+- [x] **No error handling** - Added ErrorState component with retry buttons
+- [x] **No relative timestamps** - Added relativeTime() helper, shows "2m ago"
 
 ### Remaining Polish (Backlog)
 

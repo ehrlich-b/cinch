@@ -301,18 +301,32 @@ function LandingPage({ auth, setAuth, onNavigate }: {
 function JobsPage({ onSelectJob }: { onSelectJob: (id: string) => void }) {
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const fetchJobs = () => {
+    setLoading(true)
+    setError(null)
     fetch('/api/jobs')
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`Failed to load jobs (${r.status})`)
+        return r.json()
+      })
       .then(data => {
         setJobs(data.jobs || [])
         setLoading(false)
       })
-      .catch(() => setLoading(false))
+      .catch(e => {
+        setError(e.message || 'Failed to load jobs')
+        setLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    fetchJobs()
   }, [])
 
   if (loading) return <div className="loading">Loading...</div>
+  if (error) return <ErrorState message={error} onRetry={fetchJobs} />
   if (jobs.length === 0) return (
     <div className="empty-state">
       <h2>No builds yet</h2>
@@ -343,6 +357,7 @@ function JobsPage({ onSelectJob }: { onSelectJob: (id: string) => void }) {
             <th>Branch</th>
             <th>Commit</th>
             <th>Duration</th>
+            <th>When</th>
           </tr>
         </thead>
         <tbody>
@@ -353,6 +368,7 @@ function JobsPage({ onSelectJob }: { onSelectJob: (id: string) => void }) {
               <td>{job.branch}</td>
               <td className="mono">{job.commit?.slice(0, 7)}</td>
               <td>{formatDuration(job.duration)}</td>
+              <td className="text-muted">{relativeTime(job.created_at)}</td>
             </tr>
           ))}
         </tbody>
@@ -365,19 +381,30 @@ function JobDetailPage({ jobId, onBack }: { jobId: string; onBack: () => void })
   const [job, setJob] = useState<Job | null>(null)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [status, setStatus] = useState<string>('')
+  const [error, setError] = useState<string | null>(null)
+  const [wsError, setWsError] = useState<string | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
 
+  const fetchJob = () => {
+    setError(null)
+    fetch(`/api/jobs/${jobId}`)
+      .then(r => {
+        if (!r.ok) throw new Error(`Failed to load job (${r.status})`)
+        return r.json()
+      })
+      .then(data => setJob(data))
+      .catch(e => setError(e.message || 'Failed to load job'))
+  }
+
   // Fetch job details
   useEffect(() => {
-    fetch(`/api/jobs/${jobId}`)
-      .then(r => r.json())
-      .then(data => setJob(data))
-      .catch(console.error)
+    fetchJob()
   }, [jobId])
 
   // Connect to log stream
   useEffect(() => {
+    setWsError(null)
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/logs/${jobId}`)
     wsRef.current = ws
@@ -391,8 +418,8 @@ function JobDetailPage({ jobId, onBack }: { jobId: string; onBack: () => void })
       }
     }
 
-    ws.onerror = (e) => console.error('WebSocket error:', e)
-    ws.onclose = () => console.log('WebSocket closed')
+    ws.onerror = () => setWsError('Lost connection to log stream')
+    ws.onclose = () => {}
 
     return () => {
       ws.close()
@@ -403,6 +430,16 @@ function JobDetailPage({ jobId, onBack }: { jobId: string; onBack: () => void })
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
+
+  if (error) return (
+    <div className="job-detail">
+      <div className="job-header">
+        <button onClick={onBack} className="back-btn">← Back</button>
+        <h2>Job {jobId.slice(0, 12)}</h2>
+      </div>
+      <ErrorState message={error} onRetry={fetchJob} />
+    </div>
+  )
 
   return (
     <div className="job-detail">
@@ -415,9 +452,11 @@ function JobDetailPage({ jobId, onBack }: { jobId: string; onBack: () => void })
             <span>{job.repo}</span>
             <span>{job.branch}</span>
             <span className="mono">{job.commit?.slice(0, 7)}</span>
+            <span className="text-muted">{relativeTime(job.created_at)}</span>
           </div>
         )}
       </div>
+      {wsError && <div className="ws-error">{wsError}</div>}
       <div className="log-viewer">
         <pre>
           {logs.map((log, i) => (
@@ -435,18 +474,32 @@ function JobDetailPage({ jobId, onBack }: { jobId: string; onBack: () => void })
 function WorkersPage() {
   const [workers, setWorkers] = useState<Worker[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const fetchWorkers = () => {
+    setLoading(true)
+    setError(null)
     fetch('/api/workers')
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`Failed to load workers (${r.status})`)
+        return r.json()
+      })
       .then(data => {
         setWorkers(data.workers || [])
         setLoading(false)
       })
-      .catch(() => setLoading(false))
+      .catch(e => {
+        setError(e.message || 'Failed to load workers')
+        setLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    fetchWorkers()
   }, [])
 
   if (loading) return <div className="loading">Loading...</div>
+  if (error) return <ErrorState message={error} onRetry={fetchWorkers} />
   if (workers.length === 0) return (
     <div className="empty-state">
       <h2>No workers connected</h2>
@@ -535,6 +588,17 @@ function BadgesPage() {
   )
 }
 
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="error-state">
+      <div className="error-icon">!</div>
+      <h3>Something went wrong</h3>
+      <p>{message}</p>
+      <button onClick={onRetry} className="retry-btn">Try again</button>
+    </div>
+  )
+}
+
 function StatusIcon({ status }: { status: string }) {
   switch (status) {
     case 'success': return <span className="status success">✓</span>
@@ -556,6 +620,29 @@ function formatDuration(ms?: number): string {
   return `${minutes}m ${seconds % 60}s`
 }
 
+function relativeTime(dateStr?: string): string {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffSecs = Math.floor(diffMs / 1000)
+
+  if (diffSecs < 5) return 'just now'
+  if (diffSecs < 60) return `${diffSecs}s ago`
+
+  const diffMins = Math.floor(diffSecs / 60)
+  if (diffMins < 60) return `${diffMins}m ago`
+
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays < 7) return `${diffDays}d ago`
+
+  // Fallback to date
+  return date.toLocaleDateString()
+}
+
 // Basic ANSI escape code renderer
 function renderAnsi(text: string): string {
   // Strip ANSI codes for now - basic implementation
@@ -570,6 +657,9 @@ interface Job {
   commit: string
   status: string
   duration?: number
+  created_at?: string
+  started_at?: string
+  finished_at?: string
 }
 
 interface Worker {
