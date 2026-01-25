@@ -473,6 +473,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		Token:     token,
 		Labels:    labels,
 		Docker:    true, // Assume Docker available
+		Verbose:   verbose,
 	}
 
 	w := worker.NewWorker(workerCfg, log)
