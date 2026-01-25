@@ -118,7 +118,7 @@ See `design/12-multi-forge-presence.md` for Cinch's own multi-forge hosting stra
 | Forge | Users | Priority | Notes |
 |-------|-------|----------|-------|
 | GitHub | 65M+ | ✅ Done | Full integration (App + Checks API) |
-| GitLab | 30M | **In Progress** | Core forge done, server OAuth flow needed |
+| GitLab | 30M | ✅ Done | Full integration (OAuth + auto-webhook + fallback) |
 | Forgejo/Gitea | ? | ✅ Done (manual) | Hybrid flow planned (OAuth webhook + manual PAT) |
 | Bitbucket | 10M+ | **Not Planned** | Platform limitations make grug UX impossible |
 
@@ -145,9 +145,9 @@ See `design/12-multi-forge-presence.md` for mechanical details.
 - [x] CLI manual fallback (`cinch repo add --forge gitlab --token xxx`)
 
 **Server-side (automated onboarding):**
-- [ ] Register GitLab OAuth app (gitlab.com and document for self-hosted)
+- [x] Register GitLab OAuth app (gitlab.com)
 - [x] `GET /auth/gitlab` - Start OAuth flow
-- [x] `GET /auth/gitlab/callback` - Exchange code, store temp token
+- [x] `GET /auth/gitlab/callback` - Exchange code, store token
 - [x] `GET /api/gitlab/projects` - List user's projects
 - [x] `POST /api/gitlab/setup` - Create webhook + attempt PAT creation
 - [x] Webhook creation via OAuth token
@@ -155,8 +155,22 @@ See `design/12-multi-forge-presence.md` for mechanical details.
 - [x] Graceful fallback with options: manual token OR OAuth session
 - [x] OAuth token refresh in forge (when using OAuth session fallback)
 - [x] Self-hosted instance support (CINCH_GITLAB_URL env var)
-- [ ] Project selector UI after OAuth (frontend work needed)
-- [ ] Manual token / OAuth choice UI (for free tier fallback)
+
+**Full onboarding flow (DONE):**
+- [x] `cinch gitlab connect` - CLI command to connect GitLab account
+  - Opens browser for OAuth flow
+  - If Premium: creates PAT and stores it
+  - If free tier: stores OAuth credentials
+  - Either way, credentials persist for future `repo add` calls
+- [x] User table to store GitLab credentials per user (migration + methods)
+- [x] After connect, list ALL repos with checkboxes to select which to onboard
+- [x] `cinch repo add owner/name --forge gitlab` uses stored credentials to auto-create webhook
+- [x] Same UX via CLI or web (both hit same API)
+- [x] Web UI: Repos page with "Connect GitLab" button → project selector (multi-select)
+
+**GitHub web onboarding (TODO - loop back):**
+- [ ] Allow GitHub repo onboarding through web UI (not just GitHub App)
+- [ ] "Connect GitHub" button similar to GitLab flow
 
 ### Forgejo/Gitea Hybrid Flow
 

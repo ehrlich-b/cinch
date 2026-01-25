@@ -119,6 +119,15 @@ func (s *SQLiteStorage) migrate() error {
 	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN build TEXT NOT NULL DEFAULT 'make check'")
 	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN release TEXT NOT NULL DEFAULT ''")
 
+	// Users table for storing forge credentials
+	_, _ = s.db.Exec(`CREATE TABLE IF NOT EXISTS users (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL UNIQUE,
+		gitlab_credentials TEXT NOT NULL DEFAULT '',
+		gitlab_credentials_at DATETIME,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`)
+
 	return nil
 }
 
@@ -415,6 +424,54 @@ func (s *SQLiteStorage) RevokeToken(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE tokens SET revoked_at = ? WHERE id = ?`,
 		time.Now(), id)
+	return err
+}
+
+// --- Users ---
+
+func (s *SQLiteStorage) GetOrCreateUser(ctx context.Context, name string) (*User, error) {
+	user := &User{}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, gitlab_credentials, gitlab_credentials_at, created_at
+		 FROM users WHERE name = ?`, name).Scan(
+		&user.ID, &user.Name, &user.GitLabCredentials, &user.GitLabCredentialsAt, &user.CreatedAt)
+	if err == sql.ErrNoRows {
+		// Create new user
+		user = &User{
+			ID:        fmt.Sprintf("u_%d", time.Now().UnixNano()),
+			Name:      name,
+			CreatedAt: time.Now(),
+		}
+		_, err = s.db.ExecContext(ctx,
+			`INSERT INTO users (id, name, created_at) VALUES (?, ?, ?)`,
+			user.ID, user.Name, user.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("create user: %w", err)
+		}
+		return user, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *SQLiteStorage) GetUserByName(ctx context.Context, name string) (*User, error) {
+	user := &User{}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, gitlab_credentials, gitlab_credentials_at, created_at
+		 FROM users WHERE name = ?`, name).Scan(
+		&user.ID, &user.Name, &user.GitLabCredentials, &user.GitLabCredentialsAt, &user.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	return user, err
+}
+
+func (s *SQLiteStorage) UpdateUserGitLabCredentials(ctx context.Context, userID, credentials string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET gitlab_credentials = ?, gitlab_credentials_at = ? WHERE id = ?`,
+		credentials, time.Now(), userID)
 	return err
 }
 

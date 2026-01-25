@@ -765,7 +765,7 @@ interface GitLabProject {
   visibility: string
 }
 
-// GitLab setup modal
+// GitLab setup modal with multi-select support
 function GitLabSetupModal({
   mode,
   onClose,
@@ -780,11 +780,13 @@ function GitLabSetupModal({
   const [projects, setProjects] = useState<GitLabProject[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedProject, setSelectedProject] = useState<GitLabProject | null>(null)
+  const [selectedProjects, setSelectedProjects] = useState<Set<number>>(new Set())
   const [setting, setSetting] = useState(false)
+  const [setupProgress, setSetupProgress] = useState({ current: 0, total: 0 })
   const [tokenInput, setTokenInput] = useState('')
   const [tokenChoice, setTokenChoice] = useState<'manual' | 'oauth' | null>(null)
   const [setupOptions, setSetupOptions] = useState<{ id: string; label: string }[]>([])
+  const [pendingProject, setPendingProject] = useState<GitLabProject | null>(null)
 
   // Fetch projects when in select-project mode
   useEffect(() => {
@@ -796,7 +798,8 @@ function GitLabSetupModal({
         return r.json()
       })
       .then(data => {
-        setProjects(data.projects || [])
+        // API returns array directly, not wrapped in object
+        setProjects(Array.isArray(data) ? data : data.projects || [])
         setLoading(false)
       })
       .catch(e => {
@@ -805,15 +808,93 @@ function GitLabSetupModal({
       })
   }, [mode])
 
-  const handleSetup = async (useOAuth = false, manualToken = '') => {
-    if (!selectedProject) return
+  const toggleProject = (projectId: number) => {
+    setSelectedProjects(prev => {
+      const next = new Set(prev)
+      if (next.has(projectId)) {
+        next.delete(projectId)
+      } else {
+        next.add(projectId)
+      }
+      return next
+    })
+  }
+
+  const selectAll = () => {
+    setSelectedProjects(new Set(projects.map(p => p.id)))
+  }
+
+  const selectNone = () => {
+    setSelectedProjects(new Set())
+  }
+
+  const handleSetupMultiple = async () => {
+    const selectedList = projects.filter(p => selectedProjects.has(p.id))
+    if (selectedList.length === 0) return
+
+    setSetting(true)
+    setError(null)
+    setSetupProgress({ current: 0, total: selectedList.length })
+
+    let successCount = 0
+    let needsTokenProject: GitLabProject | null = null
+
+    for (let i = 0; i < selectedList.length; i++) {
+      const project = selectedList[i]
+      setSetupProgress({ current: i + 1, total: selectedList.length })
+
+      try {
+        const res = await fetch('/api/gitlab/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project_id: project.id,
+            project_path: project.path_with_namespace,
+          }),
+        })
+
+        const data = await res.json()
+
+        if (data.status === 'success') {
+          successCount++
+        } else if (data.status === 'needs_token') {
+          // PAT creation failed (free tier), remember for later
+          if (!needsTokenProject) {
+            needsTokenProject = project
+            setSetupOptions(data.options || [])
+          }
+        } else if (data.error) {
+          console.error(`Failed to setup ${project.path_with_namespace}:`, data.error)
+        }
+      } catch (e) {
+        console.error(`Failed to setup ${project.path_with_namespace}:`, e)
+      }
+    }
+
+    setSetting(false)
+
+    if (needsTokenProject) {
+      // Need manual token for at least one project
+      setPendingProject(needsTokenProject)
+      onNeedToken()
+    } else if (successCount > 0) {
+      onComplete()
+    } else {
+      setError('Failed to setup any repositories')
+    }
+  }
+
+  const handleSingleSetup = async (useOAuth = false, manualToken = '') => {
+    const project = pendingProject
+    if (!project) return
+
     setSetting(true)
     setError(null)
 
     try {
       const body: Record<string, unknown> = {
-        project_id: selectedProject.id,
-        project_path: selectedProject.path_with_namespace,
+        project_id: project.id,
+        project_path: project.path_with_namespace,
       }
       if (useOAuth) body.use_oauth = true
       if (manualToken) body.manual_token = manualToken
@@ -828,10 +909,6 @@ function GitLabSetupModal({
 
       if (data.status === 'success') {
         onComplete()
-      } else if (data.status === 'needs_token') {
-        // PAT creation failed (free tier), show options
-        setSetupOptions(data.options || [])
-        onNeedToken()
       } else if (data.error) {
         setError(data.error)
       }
@@ -844,44 +921,61 @@ function GitLabSetupModal({
 
   const handleTokenSubmit = () => {
     if (tokenChoice === 'oauth') {
-      handleSetup(true)
+      handleSingleSetup(true)
     } else if (tokenChoice === 'manual' && tokenInput.trim()) {
-      handleSetup(false, tokenInput.trim())
+      handleSingleSetup(false, tokenInput.trim())
     }
   }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
+      <div className="modal modal-large" onClick={e => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>x</button>
 
         {mode === 'select-project' && (
           <>
-            <h2>Select GitLab Project</h2>
+            <h2>Select GitLab Repositories</h2>
+            <p className="modal-subtitle">Choose which repositories to connect to Cinch</p>
             {loading && <div className="loading">Loading projects...</div>}
             {error && <div className="error-msg">{error}</div>}
             {!loading && !error && (
               <>
+                <div className="project-actions">
+                  <button className="btn-small" onClick={selectAll}>Select All</button>
+                  <button className="btn-small" onClick={selectNone}>Select None</button>
+                  <span className="selection-count">
+                    {selectedProjects.size} of {projects.length} selected
+                  </span>
+                </div>
                 <div className="project-list">
                   {projects.map(p => (
-                    <div
+                    <label
                       key={p.id}
-                      className={`project-item ${selectedProject?.id === p.id ? 'selected' : ''}`}
-                      onClick={() => setSelectedProject(p)}
+                      className={`project-item checkbox ${selectedProjects.has(p.id) ? 'selected' : ''}`}
                     >
+                      <input
+                        type="checkbox"
+                        checked={selectedProjects.has(p.id)}
+                        onChange={() => toggleProject(p.id)}
+                      />
                       <span className="project-name">{p.path_with_namespace}</span>
                       <span className="project-visibility">{p.visibility}</span>
-                    </div>
+                    </label>
                   ))}
                 </div>
+                {setting && (
+                  <div className="setup-progress">
+                    Setting up {setupProgress.current} of {setupProgress.total}...
+                  </div>
+                )}
                 <div className="modal-actions">
                   <button onClick={onClose}>Cancel</button>
                   <button
                     className="primary"
-                    disabled={!selectedProject || setting}
-                    onClick={() => handleSetup()}
+                    disabled={selectedProjects.size === 0 || setting}
+                    onClick={handleSetupMultiple}
                   >
-                    {setting ? 'Setting up...' : 'Connect Repository'}
+                    {setting ? `Setting up...` : `Connect ${selectedProjects.size} ${selectedProjects.size === 1 ? 'Repository' : 'Repositories'}`}
                   </button>
                 </div>
               </>
@@ -889,11 +983,11 @@ function GitLabSetupModal({
           </>
         )}
 
-        {mode === 'token-choice' && (
+        {mode === 'token-choice' && pendingProject && (
           <>
             <h2>One More Step</h2>
             <p className="modal-desc">
-              GitLab free tier doesn't allow automated token creation.
+              GitLab free tier doesn't allow automated token creation for <strong>{pendingProject.path_with_namespace}</strong>.
               Choose how to authenticate for status updates:
             </p>
 
@@ -911,16 +1005,16 @@ function GitLabSetupModal({
               ))}
             </div>
 
-            {tokenChoice === 'manual' && selectedProject && (
+            {tokenChoice === 'manual' && (
               <div className="manual-token-input">
                 <p>
                   Create a Project Access Token at:{' '}
                   <a
-                    href={`${selectedProject.web_url}/-/settings/access_tokens`}
+                    href={`${pendingProject.web_url}/-/settings/access_tokens`}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    {selectedProject.path_with_namespace} settings
+                    {pendingProject.path_with_namespace} settings
                   </a>
                 </p>
                 <p className="token-instructions">

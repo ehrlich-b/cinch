@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -143,10 +144,31 @@ func (h *GitLabOAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Store token temporarily for this user
+	// Store token temporarily for this user (for immediate web UI use)
 	h.oauthTokensMu.Lock()
 	h.oauthTokens[username] = token
 	h.oauthTokensMu.Unlock()
+
+	// Also persist to database (for CLI use later)
+	ctx := r.Context()
+	user, err := h.storage.GetOrCreateUser(ctx, username)
+	if err != nil {
+		h.log.Error("failed to get/create user", "error", err, "user", username)
+	} else {
+		creds := GitLabOAuthCredentials{
+			Type:         "oauth",
+			AccessToken:  token.AccessToken,
+			RefreshToken: token.RefreshToken,
+			ExpiresAt:    token.ExpiresAt,
+			BaseURL:      token.GitLabURL,
+		}
+		credsJSON, _ := json.Marshal(creds)
+		if err := h.storage.UpdateUserGitLabCredentials(ctx, user.ID, string(credsJSON)); err != nil {
+			h.log.Error("failed to save GitLab credentials", "error", err, "user", username)
+		} else {
+			h.log.Info("GitLab credentials saved to database", "user", username)
+		}
+	}
 
 	h.log.Info("GitLab OAuth successful", "user", username)
 
@@ -351,9 +373,41 @@ func (h *GitLabOAuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request,
 // --- Helper methods ---
 
 func (h *GitLabOAuthHandler) getOAuthToken(username string) *gitlabOAuthToken {
+	// First check in-memory cache
 	h.oauthTokensMu.RLock()
-	defer h.oauthTokensMu.RUnlock()
-	return h.oauthTokens[username]
+	token := h.oauthTokens[username]
+	h.oauthTokensMu.RUnlock()
+	if token != nil {
+		return token
+	}
+
+	// Fall back to database
+	ctx := context.Background()
+	user, err := h.storage.GetUserByName(ctx, username)
+	if err != nil || user == nil || user.GitLabCredentials == "" {
+		return nil
+	}
+
+	// Parse stored credentials
+	var creds GitLabOAuthCredentials
+	if err := json.Unmarshal([]byte(user.GitLabCredentials), &creds); err != nil {
+		h.log.Error("failed to parse stored GitLab credentials", "error", err, "user", username)
+		return nil
+	}
+
+	// Convert to token struct and cache in memory
+	token = &gitlabOAuthToken{
+		AccessToken:  creds.AccessToken,
+		RefreshToken: creds.RefreshToken,
+		ExpiresAt:    creds.ExpiresAt,
+		GitLabURL:    creds.BaseURL,
+	}
+
+	h.oauthTokensMu.Lock()
+	h.oauthTokens[username] = token
+	h.oauthTokensMu.Unlock()
+
+	return token
 }
 
 func (h *GitLabOAuthHandler) createOAuthState() (string, error) {
