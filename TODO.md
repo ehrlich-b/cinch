@@ -546,6 +546,7 @@ Already done: Gitea, Forgejo (same codebase). These cover the self-hosted commun
 - [x] **Worker logs too noisy** - Added `--verbose` flag, quiet mode by default shows only banners.
 - [x] **Banner should show forge** - Now shows "GITHUB STARTED" / "GITLAB STARTED" / "FORGEJO STARTED".
 - [ ] **Worker should check dependencies on startup** - Probe for docker/podman before accepting jobs. Fail fast with "no container runtime found" instead of failing on first job.
+- [ ] **Cache volumes need docs + configurability** - Currently hardcoded defaults (npm, cargo, gomod, ~/.cache). Document what's cached, allow override via .cinch.yaml if needed.
 
 ---
 
