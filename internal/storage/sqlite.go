@@ -322,9 +322,13 @@ func (s *SQLiteStorage) DeleteWorker(ctx context.Context, id string) error {
 // --- Repos ---
 
 func (s *SQLiteStorage) CreateRepo(ctx context.Context, repo *Repo) error {
+	// Use upsert to handle re-onboarding: if repo exists, update token and webhook secret
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO repos (id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(clone_url) DO UPDATE SET
+		 	webhook_secret = excluded.webhook_secret,
+		 	forge_token = excluded.forge_token`,
 		repo.ID, repo.ForgeType, repo.Owner, repo.Name, repo.CloneURL, repo.HTMLURL,
 		repo.WebhookSecret, repo.ForgeToken, repo.Build, repo.Release, repo.CreatedAt)
 	return err

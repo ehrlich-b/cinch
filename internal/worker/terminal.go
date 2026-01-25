@@ -34,7 +34,7 @@ func NewTerminal(out io.Writer) *Terminal {
 }
 
 // PrintJobStart prints the job start banner.
-func (t *Terminal) PrintJobStart(repo, branch, tag, commit, command, mode string) {
+func (t *Terminal) PrintJobStart(repo, branch, tag, commit, command, mode, forge string) {
 	// Parse owner/repo from clone URL
 	repoShort := parseRepoShort(repo)
 
@@ -50,9 +50,15 @@ func (t *Terminal) PrintJobStart(repo, branch, tag, commit, command, mode string
 		commitShort = commit[:8]
 	}
 
+	// Format forge name for display
+	forgeDisplay := strings.ToUpper(forge)
+	if forgeDisplay == "" {
+		forgeDisplay = "BUILD"
+	}
+
 	fmt.Fprintln(t.out)
 	t.printLine("━")
-	fmt.Fprintf(t.out, "%s%s  BUILD STARTED%s\n", colorBold, colorCyan, colorReset)
+	fmt.Fprintf(t.out, "%s%s  %s STARTED%s\n", colorBold, colorCyan, forgeDisplay, colorReset)
 	t.printLine("─")
 	fmt.Fprintf(t.out, "  %s%s%s @ %s (%s)\n", colorBold, repoShort, colorReset, refDisplay, commitShort)
 	fmt.Fprintf(t.out, "  %s$ %s%s\n", colorDim, command, colorReset)
@@ -99,6 +105,12 @@ func (t *Terminal) PrintJobError(phase, errMsg string) {
 // printLine prints a horizontal line of the given character.
 func (t *Terminal) printLine(char string) {
 	fmt.Fprintln(t.out, colorDim+strings.Repeat(char, t.width)+colorReset)
+}
+
+// PrintConnected prints a connection success message.
+func (t *Terminal) PrintConnected(user, server string) {
+	fmt.Fprintf(t.out, "%s%s✓ Connected%s as %s to %s\n", colorBold, colorGreen, colorReset, user, server)
+	fmt.Fprintf(t.out, "%sWaiting for jobs...%s\n", colorDim, colorReset)
 }
 
 // parseRepoShort extracts "owner/repo" from a clone URL.

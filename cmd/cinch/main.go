@@ -412,12 +412,14 @@ If --server and --token are not provided, uses credentials from ~/.cinch/config
 
 Example:
   cinch worker                              # uses saved credentials
+  cinch worker --verbose                    # show all logs
   cinch worker --server wss://cinch.sh/ws/worker --token xxx`,
 		RunE: runWorker,
 	}
 	cmd.Flags().String("server", "", "Server WebSocket URL (uses saved credentials if not set)")
 	cmd.Flags().String("token", "", "Authentication token (uses saved credentials if not set)")
 	cmd.Flags().StringSlice("labels", nil, "Worker labels (e.g., linux-amd64,docker)")
+	cmd.Flags().BoolP("verbose", "v", false, "Show detailed logs (default: only banners)")
 	return cmd
 }
 
@@ -425,8 +427,19 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	serverURL, _ := cmd.Flags().GetString("server")
 	token, _ := cmd.Flags().GetString("token")
 	labels, _ := cmd.Flags().GetStringSlice("labels")
+	verbose, _ := cmd.Flags().GetBool("verbose")
 
-	log := slog.Default()
+	// Configure logger based on verbose flag
+	var log *slog.Logger
+	if verbose {
+		log = slog.Default()
+	} else {
+		// Quiet mode: discard all logs
+		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+
+	term := worker.NewTerminal(os.Stdout)
+	var user, serverDisplay string
 
 	// If server/token not provided, try to use saved credentials
 	if serverURL == "" || token == "" {
@@ -451,7 +464,8 @@ func runWorker(cmd *cobra.Command, args []string) error {
 			token = defaultServer.Token
 		}
 
-		log.Info("using saved credentials", "user", defaultServer.User, "server", defaultServer.URL)
+		user = defaultServer.User
+		serverDisplay = defaultServer.URL
 	}
 
 	workerCfg := worker.WorkerConfig{
@@ -464,9 +478,15 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	w := worker.NewWorker(workerCfg, log)
 
 	// Start worker
-	log.Info("starting worker", "server", serverURL, "labels", labels)
 	if err := w.Start(); err != nil {
 		return fmt.Errorf("start worker: %w", err)
+	}
+
+	// Print connection banner (quiet mode)
+	if !verbose {
+		term.PrintConnected(user, serverDisplay)
+	} else {
+		log.Info("connected", "user", user, "server", serverDisplay)
 	}
 
 	// Wait for interrupt
@@ -474,7 +494,11 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	<-ctx.Done()
-	log.Info("shutting down worker")
+	if verbose {
+		log.Info("shutting down worker")
+	} else {
+		fmt.Println("\nShutting down...")
+	}
 	w.Stop()
 
 	return nil
