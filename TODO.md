@@ -8,13 +8,32 @@
 
 **Goal:** Make cinch presentable for public use.
 
+### Branding
+
+**Identity:** Friendly/utilitarian. "CI that's a CInch."
+
+- Logo: **CI** in monospace caps (double meaning: Continuous Integration + CInch)
+- Minimal footprint, obviously noticeable
+- Pro: swap in own icon + own link destination
+
 ### Build Badges
-- [x] `/badge/{owner}/{repo}.svg` endpoint
-- [x] Status: passing (green), failing (red), running (yellow), unknown (gray)
-- [x] Cache headers for CDN-friendly serving
-- [x] 12 badge styles (shields, flat, modern, neon, electric, terminal, brutalist, gradient, holographic, pixel, minimal, outlined)
-- [x] Markdown snippet in `/badges` gallery page
-- [ ] Shields.io compatibility - support shields.io endpoint format so users can use either
+
+**Approach:** Lock in `.svg` endpoint now, redirect to shields.io. Render custom Cinch badges later.
+
+```
+cinch.sh/badge/github.com/owner/repo.svg
+    ↓
+302 redirect to:
+img.shields.io/endpoint?url=https://cinch.sh/api/badge/github.com/owner/repo.json
+```
+
+- [x] Endpoint format: `/badge/{forge}/{owner}/{repo}.svg` (e.g. `/badge/github.com/owner/repo.svg`)
+- [x] JSON endpoint for shields.io: `/api/badge/{forge}/{owner}/{repo}.json`
+  - Returns: `{"schemaVersion":1,"label":"","message":"passing","color":"brightgreen","logoSvg":"..."}`
+- [x] `.svg` endpoint redirects to shields.io with our JSON URL
+- [x] Cache headers on JSON endpoint
+- [x] Removed badge rendering code (12 styles) - using shields.io
+- [x] Updated `/badges` page to show shields.io badge with CI logo
 
 ### Website Polish
 - [ ] Landing page that doesn't look like dog shit

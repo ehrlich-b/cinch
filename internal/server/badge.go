@@ -1,104 +1,123 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"embed"
+	"encoding/json"
 	"fmt"
-	"html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/ehrlich-b/cinch/internal/storage"
 )
 
-//go:embed badges/*.svg
-var badgeFS embed.FS
-
-// BadgeHandler serves build status badges as SVG.
+// BadgeHandler serves build status badges.
+// SVG requests redirect to shields.io, JSON provides the data.
 type BadgeHandler struct {
-	store     storage.Storage
-	log       *slog.Logger
-	templates map[string]*template.Template
+	store   storage.Storage
+	log     *slog.Logger
+	baseURL string // e.g. "https://cinch.sh"
 }
 
 // NewBadgeHandler creates a new badge handler.
-func NewBadgeHandler(store storage.Storage, log *slog.Logger) *BadgeHandler {
-	h := &BadgeHandler{
-		store:     store,
-		log:       log,
-		templates: make(map[string]*template.Template),
+func NewBadgeHandler(store storage.Storage, log *slog.Logger, baseURL string) *BadgeHandler {
+	return &BadgeHandler{
+		store:   store,
+		log:     log,
+		baseURL: strings.TrimSuffix(baseURL, "/"),
 	}
-
-	// Load all badge templates
-	styles := []string{"shields", "flat", "modern", "neon", "electric", "terminal",
-		"brutalist", "gradient", "holographic", "pixel", "minimal", "outlined"}
-
-	for _, style := range styles {
-		data, err := badgeFS.ReadFile("badges/" + style + ".svg")
-		if err != nil {
-			log.Error("failed to load badge template", "style", style, "error", err)
-			continue
-		}
-		tmpl, err := template.New(style).Parse(string(data))
-		if err != nil {
-			log.Error("failed to parse badge template", "style", style, "error", err)
-			continue
-		}
-		h.templates[style] = tmpl
-	}
-
-	return h
 }
 
-// BadgeData holds the template data for rendering a badge.
-type BadgeData struct {
-	Status      string
-	StatusUpper string
-	StatusShort string
-	Color       string
-	Glow        string
-	Icon        template.HTML // For minimal badge icons
+// ShieldsEndpoint is the JSON response format for shields.io endpoint badges.
+// See: https://shields.io/badges/endpoint-badge
+type ShieldsEndpoint struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	Label         string `json:"label"`
+	Message       string `json:"message"`
+	Color         string `json:"color"`
 }
 
 // ServeHTTP handles badge requests.
-// Path format: /badge/{owner}/{repo}.svg
-// Query params: ?style=neon&branch=main
+// JSON: /api/badge/{forge}/{owner}/{repo}.json -> returns shields.io endpoint JSON
+// SVG: /badge/{forge}/{owner}/{repo}.svg -> redirects to shields.io
 func (h *BadgeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Parse path: /badge/owner/repo.svg
-	path := strings.TrimPrefix(r.URL.Path, "/badge/")
-	path = strings.TrimSuffix(path, ".svg")
-	parts := strings.Split(path, "/")
+	path := r.URL.Path
 
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		http.Error(w, "invalid path: expected /badge/{owner}/{repo}.svg", http.StatusBadRequest)
+	if strings.HasPrefix(path, "/api/badge/") {
+		h.serveJSON(w, r)
 		return
 	}
 
-	owner := parts[0]
-	repo := parts[1]
-
-	// Get query params
-	style := r.URL.Query().Get("style")
-	if style == "" {
-		style = "shields" // Default to shields.io style
+	if strings.HasPrefix(path, "/badge/") {
+		h.redirectToShields(w, r)
+		return
 	}
-	branch := r.URL.Query().Get("branch")
 
-	// Look up repo and get latest job status
-	status := h.getRepoStatus(r.Context(), owner, repo, branch)
-
-	// Generate and serve SVG
-	svg := h.renderBadge(style, status)
-
-	w.Header().Set("Content-Type", "image/svg+xml")
-	w.Header().Set("Cache-Control", "public, max-age=60, s-maxage=60") // 1 minute cache
-	w.Header().Set("ETag", fmt.Sprintf(`"%s-%s-%s"`, owner, repo, status))
-	w.Write([]byte(svg))
+	http.NotFound(w, r)
 }
 
-func (h *BadgeHandler) getRepoStatus(ctx context.Context, owner, repo, branch string) string {
+// serveJSON serves the shields.io endpoint JSON.
+// Path: /api/badge/{forge}/{owner}/{repo}.json
+func (h *BadgeHandler) serveJSON(w http.ResponseWriter, r *http.Request) {
+	forge, owner, repo, ok := h.parsePath(r.URL.Path, "/api/badge/", ".json")
+	if !ok {
+		http.Error(w, "invalid path: expected /api/badge/{forge}/{owner}/{repo}.json", http.StatusBadRequest)
+		return
+	}
+
+	branch := r.URL.Query().Get("branch")
+	status := h.getRepoStatus(r.Context(), forge, owner, repo, branch)
+
+	// Build shields.io endpoint response
+	resp := ShieldsEndpoint{
+		SchemaVersion: 1,
+		Label:         "CI",
+		Message:       status,
+		Color:         statusToColor(status),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=60, s-maxage=60")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// redirectToShields redirects .svg requests to shields.io.
+// Path: /badge/{forge}/{owner}/{repo}.svg
+func (h *BadgeHandler) redirectToShields(w http.ResponseWriter, r *http.Request) {
+	forge, owner, repo, ok := h.parsePath(r.URL.Path, "/badge/", ".svg")
+	if !ok {
+		http.Error(w, "invalid path: expected /badge/{forge}/{owner}/{repo}.svg", http.StatusBadRequest)
+		return
+	}
+
+	// Build our JSON endpoint URL
+	jsonURL := fmt.Sprintf("%s/api/badge/%s/%s/%s.json", h.baseURL, forge, owner, repo)
+	if branch := r.URL.Query().Get("branch"); branch != "" {
+		jsonURL += "?branch=" + url.QueryEscape(branch)
+	}
+
+	// Build shields.io URL
+	shieldsURL := fmt.Sprintf("https://img.shields.io/endpoint?url=%s&style=flat", url.QueryEscape(jsonURL))
+
+	http.Redirect(w, r, shieldsURL, http.StatusFound)
+}
+
+// parsePath extracts forge, owner, repo from paths like /prefix/{forge}/{owner}/{repo}.suffix
+func (h *BadgeHandler) parsePath(path, prefix, suffix string) (forge, owner, repo string, ok bool) {
+	path = strings.TrimPrefix(path, prefix)
+	path = strings.TrimSuffix(path, suffix)
+	parts := strings.Split(path, "/")
+
+	// Expect: github.com/owner/repo or forge/owner/repo
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return "", "", "", false
+	}
+
+	return parts[0], parts[1], parts[2], true
+}
+
+func (h *BadgeHandler) getRepoStatus(ctx context.Context, _, owner, repo, branch string) string {
 	// Find repo by owner/name
 	repos, err := h.store.ListRepos(ctx)
 	if err != nil {
@@ -150,73 +169,15 @@ func (h *BadgeHandler) getRepoStatus(ctx context.Context, owner, repo, branch st
 	}
 }
 
-// Color schemes for each status
-var statusColors = map[string]struct {
-	main string
-	glow string
-}{
-	"passing": {"#22c55e", "#4ade80"},
-	"failing": {"#ef4444", "#f87171"},
-	"running": {"#eab308", "#facc15"},
-	"unknown": {"#6b7280", "#9ca3af"},
-}
-
-// Icons for minimal badge
-var statusIcons = map[string]string{
-	"passing": `<path d="M16 10 L20 14 L28 6" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
-	"failing": `<path d="M16 8 L26 18 M26 8 L16 18" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
-	"running": `<circle cx="21" cy="12" r="5" stroke="#fff" stroke-width="2" fill="none"/><path d="M21 9 L21 12 L23 14" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/>`,
-	"unknown": `<text x="21" y="16" font-family="-apple-system,sans-serif" font-size="14" font-weight="700" fill="#fff" text-anchor="middle">?</text>`,
-}
-
-func (h *BadgeHandler) renderBadge(style, status string) string {
-	tmpl, ok := h.templates[style]
-	if !ok {
-		tmpl = h.templates["shields"] // Fallback to shields
+func statusToColor(status string) string {
+	switch status {
+	case "passing":
+		return "brightgreen"
+	case "failing":
+		return "red"
+	case "running":
+		return "yellow"
+	default:
+		return "lightgrey"
 	}
-	if tmpl == nil {
-		return fallbackBadge(status)
-	}
-
-	colors, ok := statusColors[status]
-	if !ok {
-		colors = statusColors["unknown"]
-	}
-
-	statusShort := strings.ToUpper(status)
-	if len(statusShort) > 4 {
-		statusShort = statusShort[:4]
-	}
-
-	data := BadgeData{
-		Status:      status,
-		StatusUpper: strings.ToUpper(status),
-		StatusShort: statusShort,
-		Color:       colors.main,
-		Glow:        colors.glow,
-		Icon:        template.HTML(statusIcons[status]),
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return fallbackBadge(status)
-	}
-
-	return buf.String()
-}
-
-// fallbackBadge returns a simple badge if templates fail
-func fallbackBadge(status string) string {
-	colors := statusColors[status]
-	if colors.main == "" {
-		colors = statusColors["unknown"]
-	}
-	return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="108" height="20">
-  <rect width="49" height="20" fill="#555"/>
-  <rect x="49" width="59" height="20" fill="%s"/>
-  <g fill="#fff" text-anchor="middle" font-family="sans-serif" font-size="11">
-    <text x="24.5" y="14">cinch</text>
-    <text x="77.5" y="14">%s</text>
-  </g>
-</svg>`, colors.main, status)
 }

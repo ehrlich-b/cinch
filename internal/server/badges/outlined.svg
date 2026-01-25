@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="108" height="24">
-  <rect x="1" y="1" width="106" height="22" rx="4" fill="none" stroke="{{.Color}}" stroke-width="1.5"/>
-  <line x1="50" y1="5" x2="50" y2="19" stroke="{{.Color}}" stroke-width="1" opacity="0.5"/>
-  <text x="25" y="16" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="11" font-weight="600" fill="{{.Color}}" text-anchor="middle">cinch</text>
-  <text x="78" y="16" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="11" font-weight="500" fill="{{.Color}}" text-anchor="middle">{{.Status}}</text>
-</svg>
