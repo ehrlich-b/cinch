@@ -135,16 +135,16 @@ const (
 
 // User represents a Cinch user with connected forge credentials.
 type User struct {
-	ID                    string
-	Name                  string    // Username (from primary auth provider)
-	Email                 string    // Primary email (for account linking)
-	Emails                []string  // All known emails (for account linking during OAuth)
-	GitHubConnectedAt     time.Time // When GitHub was connected (zero = not connected)
-	GitLabCredentials     string    // JSON-encoded OAuth credentials (access_token, refresh_token, expires_at, base_url)
-	GitLabCredentialsAt   time.Time // When GitLab was connected
-	ForgejoCredentials    string    // JSON-encoded OAuth credentials for Forgejo/Codeberg
-	ForgejoCredentialsAt  time.Time // When Forgejo was connected
-	CreatedAt             time.Time
+	ID                   string
+	Name                 string    // Username (from primary auth provider)
+	Email                string    // Primary email (for account linking)
+	Emails               []string  // All known emails (for account linking during OAuth)
+	GitHubConnectedAt    time.Time // When GitHub was connected (zero = not connected)
+	GitLabCredentials    string    // JSON-encoded OAuth credentials (access_token, refresh_token, expires_at, base_url)
+	GitLabCredentialsAt  time.Time // When GitLab was connected
+	ForgejoCredentials   string    // JSON-encoded OAuth credentials for Forgejo/Codeberg
+	ForgejoCredentialsAt time.Time // When Forgejo was connected
+	CreatedAt            time.Time
 }
 
 // Repo represents a configured repository.
