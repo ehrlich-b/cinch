@@ -3,7 +3,10 @@
 # Install with: make install-hooks
 
 echo "Running pre-commit checks..."
-make check
+
+# Source profile to get PATH (cinch is installed globally)
+export PATH="$HOME/.cinch/bin:$PATH"
+cinch run
 
 if [ $? -ne 0 ]; then
     echo ""
