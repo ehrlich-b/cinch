@@ -4,9 +4,9 @@ CI that's a cinch. One config. Every forge. Your hardware.
 
 **This repo builds on all three forges with the same `.cinch.yaml`:**
 
-[![GitHub](https://img.shields.io/endpoint?url=https%3A%2F%2Fcinch.sh%2Fapi%2Fbadge%2Fgithub.com%2Fehrlich-b%2Fcinch.json&label=GitHub&logo=github)](https://github.com/ehrlich-b/cinch)
-[![GitLab](https://img.shields.io/endpoint?url=https%3A%2F%2Fcinch.sh%2Fapi%2Fbadge%2Fgitlab.com%2Fehrlich-b%2Fcinch.json&label=GitLab&logo=gitlab)](https://gitlab.com/ehrlich-b/cinch)
-[![Codeberg](https://img.shields.io/endpoint?url=https%3A%2F%2Fcinch.sh%2Fapi%2Fbadge%2Fcodeberg.org%2Fehrlich-b%2Fcinch.json&label=Codeberg&logo=codeberg)](https://codeberg.org/ehrlich-b/cinch)
+[![GitHub](https://img.shields.io/endpoint?url=https%3A%2F%2Fcinch.sh%2Fapi%2Fbadge%2Fgithub.com%2Fehrlich-b%2Fcinch.json&label=GitHub&logo=github)](https://cinch.sh/jobs/github.com/ehrlich-b/cinch)
+[![GitLab](https://img.shields.io/endpoint?url=https%3A%2F%2Fcinch.sh%2Fapi%2Fbadge%2Fgitlab.com%2Fehrlich-b%2Fcinch.json&label=GitLab&logo=gitlab)](https://cinch.sh/jobs/gitlab.com/ehrlich-b/cinch)
+[![Codeberg](https://img.shields.io/endpoint?url=https%3A%2F%2Fcinch.sh%2Fapi%2Fbadge%2Fcodeberg.org%2Fehrlich-b%2Fcinch.json&label=Codeberg&logo=codeberg)](https://cinch.sh/jobs/codeberg.org/ehrlich-b/cinch)
 
 ```yaml
 # .cinch.yaml

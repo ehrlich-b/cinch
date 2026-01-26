@@ -4,7 +4,7 @@ import gitlabLogo from './assets/gitlab.svg'
 import giteaLogo from './assets/gitea.svg'
 import forgejoLogo from './assets/forgejo.svg'
 
-type Page = 'home' | 'jobs' | 'workers' | 'repos' | 'badges' | 'account' | 'gitlab-onboard' | 'forgejo-onboard' | 'success'
+type Page = 'home' | 'jobs' | 'repo-jobs' | 'workers' | 'repos' | 'badges' | 'account' | 'gitlab-onboard' | 'forgejo-onboard' | 'success'
 
 interface AuthState {
   authenticated: boolean
@@ -13,47 +13,67 @@ interface AuthState {
   loading: boolean
 }
 
+interface RepoPath {
+  forge: string
+  owner: string
+  repo: string
+}
+
 // Simple URL routing
-function getPageFromPath(): { page: Page; jobId: string | null } {
+function getPageFromPath(): { page: Page; jobId: string | null; repoPath: RepoPath | null } {
   const path = window.location.pathname
 
   if (path.startsWith('/jobs/')) {
-    return { page: 'jobs', jobId: path.slice(6) }
+    const rest = path.slice(6) // after /jobs/
+    // Check if this is a repo path like github.com/owner/repo
+    const parts = rest.split('/')
+    if (parts.length >= 3 && parts[0].includes('.')) {
+      return {
+        page: 'repo-jobs',
+        jobId: null,
+        repoPath: { forge: parts[0], owner: parts[1], repo: parts[2] }
+      }
+    }
+    // Otherwise it's a job ID
+    return { page: 'jobs', jobId: rest, repoPath: null }
   }
-  if (path === '/jobs') return { page: 'jobs', jobId: null }
-  if (path === '/workers') return { page: 'workers', jobId: null }
-  if (path === '/repos') return { page: 'repos', jobId: null }
-  if (path === '/badges') return { page: 'badges', jobId: null }
-  if (path === '/account') return { page: 'account', jobId: null }
-  if (path === '/gitlab/onboard') return { page: 'gitlab-onboard', jobId: null }
-  if (path === '/forgejo/onboard') return { page: 'forgejo-onboard', jobId: null }
-  if (path === '/success') return { page: 'success', jobId: null }
-  return { page: 'home', jobId: null }
+  if (path === '/jobs') return { page: 'jobs', jobId: null, repoPath: null }
+  if (path === '/workers') return { page: 'workers', jobId: null, repoPath: null }
+  if (path === '/repos') return { page: 'repos', jobId: null, repoPath: null }
+  if (path === '/badges') return { page: 'badges', jobId: null, repoPath: null }
+  if (path === '/account') return { page: 'account', jobId: null, repoPath: null }
+  if (path === '/gitlab/onboard') return { page: 'gitlab-onboard', jobId: null, repoPath: null }
+  if (path === '/forgejo/onboard') return { page: 'forgejo-onboard', jobId: null, repoPath: null }
+  if (path === '/success') return { page: 'success', jobId: null, repoPath: null }
+  return { page: 'home', jobId: null, repoPath: null }
 }
 
 export function App() {
   const initial = getPageFromPath()
   const [page, setPage] = useState<Page>(initial.page)
   const [selectedJob, setSelectedJob] = useState<string | null>(initial.jobId)
+  const [selectedRepoPath, setSelectedRepoPath] = useState<RepoPath | null>(initial.repoPath)
   const [auth, setAuth] = useState<AuthState>({ authenticated: false, loading: true })
   const [gitlabModal, setGitlabModal] = useState<'select-project' | 'token-choice' | null>(null)
 
   // Handle browser back/forward
   useEffect(() => {
     const handlePopState = () => {
-      const { page, jobId } = getPageFromPath()
+      const { page, jobId, repoPath } = getPageFromPath()
       setPage(page)
       setSelectedJob(jobId)
+      setSelectedRepoPath(repoPath)
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
   // Navigate with history
-  const navigate = (newPage: Page, jobId: string | null = null) => {
+  const navigate = (newPage: Page, jobId: string | null = null, repoPath: RepoPath | null = null) => {
     let path = '/'
     if (newPage === 'jobs' && jobId) path = `/jobs/${jobId}`
     else if (newPage === 'jobs') path = '/jobs'
+    else if (newPage === 'repo-jobs' && repoPath) path = `/jobs/${repoPath.forge}/${repoPath.owner}/${repoPath.repo}`
     else if (newPage === 'workers') path = '/workers'
     else if (newPage === 'repos') path = '/repos'
     else if (newPage === 'badges') path = '/badges'
@@ -65,6 +85,7 @@ export function App() {
     history.pushState({}, '', path)
     setPage(newPage)
     setSelectedJob(jobId)
+    setSelectedRepoPath(repoPath)
   }
 
   // Check auth status on load
@@ -161,8 +182,21 @@ export function App() {
         {page === 'jobs' && selectedJob && (
           <JobDetailPage jobId={selectedJob} onBack={() => navigate('jobs')} />
         )}
+        {page === 'repo-jobs' && selectedRepoPath && (
+          <RepoJobsPage
+            repoPath={selectedRepoPath}
+            onSelectJob={(id) => navigate('jobs', id)}
+            onBack={() => navigate('jobs')}
+          />
+        )}
         {page === 'workers' && <WorkersPage />}
-        {page === 'repos' && <ReposPage onAddGitLab={() => window.location.href = '/auth/gitlab'} onAddForgejo={() => window.location.href = '/auth/forgejo'} />}
+        {page === 'repos' && (
+          <ReposPage
+            onAddGitLab={() => window.location.href = '/auth/gitlab'}
+            onAddForgejo={() => window.location.href = '/auth/forgejo'}
+            onSelectRepo={(repoPath) => navigate('repo-jobs', null, repoPath)}
+          />
+        )}
         {page === 'badges' && <BadgesPage />}
         {page === 'account' && <AccountPage onLogout={() => window.location.href = '/auth/logout'} />}
       </main>
@@ -401,19 +435,32 @@ function LandingPage({ auth, setAuth, onNavigate }: {
 
 function JobsPage({ onSelectJob }: { onSelectJob: (id: string) => void }) {
   const [jobs, setJobs] = useState<Job[]>([])
+  const [allJobs, setAllJobs] = useState<Job[]>([]) // For extracting filter options
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [branchFilter, setBranchFilter] = useState('')
 
   const fetchJobs = () => {
     setLoading(true)
     setError(null)
-    fetch('/api/jobs')
+    const params = new URLSearchParams()
+    if (statusFilter) params.set('status', statusFilter)
+    if (branchFilter) params.set('branch', branchFilter)
+    const url = '/api/jobs' + (params.toString() ? '?' + params.toString() : '')
+
+    fetch(url)
       .then(r => {
         if (!r.ok) throw new Error(`Failed to load jobs (${r.status})`)
         return r.json()
       })
       .then(data => {
-        setJobs(data.jobs || [])
+        const jobsList = data.jobs || []
+        setJobs(jobsList)
+        // If no filters, update allJobs for filter options
+        if (!statusFilter && !branchFilter) {
+          setAllJobs(jobsList)
+        }
         setLoading(false)
       })
       .catch(e => {
@@ -424,11 +471,14 @@ function JobsPage({ onSelectJob }: { onSelectJob: (id: string) => void }) {
 
   useEffect(() => {
     fetchJobs()
-  }, [])
+  }, [statusFilter, branchFilter])
 
-  if (loading) return <div className="loading">Loading...</div>
+  // Get unique branches for filter
+  const branches = Array.from(new Set(allJobs.map(j => j.branch).filter(Boolean)))
+
+  if (loading && allJobs.length === 0) return <div className="loading">Loading...</div>
   if (error) return <ErrorState message={error} onRetry={fetchJobs} />
-  if (jobs.length === 0) return (
+  if (allJobs.length === 0 && !loading) return (
     <div className="empty-state">
       <h2>No builds yet</h2>
       <p>Push to a connected repo to trigger your first build.</p>
@@ -450,30 +500,54 @@ function JobsPage({ onSelectJob }: { onSelectJob: (id: string) => void }) {
 
   return (
     <div className="jobs">
-      <table>
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>Repo</th>
-            <th>Branch</th>
-            <th>Commit</th>
-            <th>Duration</th>
-            <th>When</th>
-          </tr>
-        </thead>
-        <tbody>
-          {jobs.map(job => (
-            <tr key={job.id} onClick={() => onSelectJob(job.id)} className="clickable">
-              <td><StatusIcon status={job.status} /></td>
-              <td>{job.repo}</td>
-              <td>{job.branch}</td>
-              <td className="mono">{job.commit?.slice(0, 7)}</td>
-              <td>{formatDuration(job.duration)}</td>
-              <td className="text-muted">{relativeTime(job.created_at)}</td>
-            </tr>
+      <div className="jobs-filters">
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+          <option value="">All statuses</option>
+          <option value="success">Success</option>
+          <option value="failed">Failed</option>
+          <option value="running">Running</option>
+          <option value="pending">Pending</option>
+        </select>
+        <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
+          <option value="">All branches</option>
+          {branches.map(b => (
+            <option key={b} value={b}>{b}</option>
           ))}
-        </tbody>
-      </table>
+        </select>
+      </div>
+      {loading ? (
+        <div className="loading">Loading...</div>
+      ) : jobs.length === 0 ? (
+        <div className="empty-state">
+          <h3>No builds match filters</h3>
+          <p>Try adjusting your filters.</p>
+        </div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Repo</th>
+              <th>Branch</th>
+              <th>Commit</th>
+              <th>Duration</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.map(job => (
+              <tr key={job.id} onClick={() => onSelectJob(job.id)} className="clickable">
+                <td><StatusIcon status={job.status} /></td>
+                <td>{job.repo}</td>
+                <td>{job.branch}</td>
+                <td className="mono">{job.commit?.slice(0, 7)}</td>
+                <td>{formatDuration(job.duration)}</td>
+                <td className="text-muted">{relativeTime(job.created_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   )
 }
@@ -568,6 +642,133 @@ function JobDetailPage({ jobId, onBack }: { jobId: string; onBack: () => void })
         </pre>
         <div ref={logsEndRef} />
       </div>
+    </div>
+  )
+}
+
+// Per-repo jobs page
+function RepoJobsPage({ repoPath, onSelectJob, onBack }: {
+  repoPath: RepoPath
+  onSelectJob: (id: string) => void
+  onBack: () => void
+}) {
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [repoInfo, setRepoInfo] = useState<{ html_url?: string; private?: boolean } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [branchFilter, setBranchFilter] = useState('')
+
+  const apiPath = `/api/repos/${repoPath.forge}/${repoPath.owner}/${repoPath.repo}`
+
+  const fetchData = () => {
+    setLoading(true)
+    setError(null)
+
+    // Fetch repo info and jobs in parallel
+    Promise.all([
+      fetch(apiPath).then(r => {
+        if (r.status === 401) throw new Error('Login required to view this repo')
+        if (r.status === 403) throw new Error('You don\'t have access to this private repo')
+        if (r.status === 404) throw new Error('Repository not found')
+        if (!r.ok) throw new Error(`Failed to load repo (${r.status})`)
+        return r.json()
+      }),
+      fetch(`${apiPath}/jobs${statusFilter || branchFilter ? '?' : ''}${statusFilter ? `status=${statusFilter}` : ''}${statusFilter && branchFilter ? '&' : ''}${branchFilter ? `branch=${branchFilter}` : ''}`).then(r => {
+        if (!r.ok) throw new Error(`Failed to load jobs (${r.status})`)
+        return r.json()
+      })
+    ])
+      .then(([repo, jobsData]) => {
+        setRepoInfo(repo)
+        setJobs(jobsData.jobs || [])
+        setLoading(false)
+      })
+      .catch(e => {
+        setError(e.message || 'Failed to load data')
+        setLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    fetchData()
+  }, [repoPath.forge, repoPath.owner, repoPath.repo, statusFilter, branchFilter])
+
+  // Get unique branches for filter dropdown
+  const branches = Array.from(new Set(jobs.map(j => j.branch).filter(Boolean)))
+
+  if (loading) return <div className="loading">Loading...</div>
+  if (error) return (
+    <div className="repo-jobs">
+      <div className="repo-jobs-header">
+        <button onClick={onBack} className="back-btn">← Back</button>
+        <h2>{repoPath.owner}/{repoPath.repo}</h2>
+      </div>
+      <ErrorState message={error} onRetry={fetchData} />
+    </div>
+  )
+
+  return (
+    <div className="repo-jobs">
+      <div className="repo-jobs-header">
+        <button onClick={onBack} className="back-btn">← All Jobs</button>
+        <div className="repo-info">
+          <ForgeIcon forge={repoPath.forge.split('.')[0]} />
+          <h2>{repoPath.owner}/{repoPath.repo}</h2>
+          {repoInfo?.private && <span className="private-badge">private</span>}
+          {repoInfo?.html_url && (
+            <a href={repoInfo.html_url} target="_blank" rel="noopener noreferrer" className="forge-link">
+              View on {repoPath.forge}
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div className="jobs-filters">
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+          <option value="">All statuses</option>
+          <option value="success">Success</option>
+          <option value="failed">Failed</option>
+          <option value="running">Running</option>
+          <option value="pending">Pending</option>
+        </select>
+        <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
+          <option value="">All branches</option>
+          {branches.map(b => (
+            <option key={b} value={b}>{b}</option>
+          ))}
+        </select>
+      </div>
+
+      {jobs.length === 0 ? (
+        <div className="empty-state">
+          <h3>No builds yet</h3>
+          <p>Push to this repo to trigger your first build.</p>
+        </div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Branch</th>
+              <th>Commit</th>
+              <th>Duration</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.map(job => (
+              <tr key={job.id} onClick={() => onSelectJob(job.id)} className="clickable">
+                <td><StatusIcon status={job.status} /></td>
+                <td>{job.branch}</td>
+                <td className="mono">{job.commit?.slice(0, 7)}</td>
+                <td>{formatDuration(job.duration)}</td>
+                <td className="text-muted">{relativeTime(job.created_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   )
 }
@@ -968,8 +1169,23 @@ function renderAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*m/g, '')
 }
 
+// Helper to get forge domain from forge type
+function forgeToDomain(forgeType: string): string {
+  switch (forgeType) {
+    case 'github': return 'github.com'
+    case 'gitlab': return 'gitlab.com'
+    case 'forgejo': return 'codeberg.org'
+    case 'gitea': return 'gitea.com'
+    default: return forgeType
+  }
+}
+
 // Repos page
-function ReposPage({ onAddGitLab, onAddForgejo }: { onAddGitLab: () => void; onAddForgejo: () => void }) {
+function ReposPage({ onAddGitLab, onAddForgejo, onSelectRepo }: {
+  onAddGitLab: () => void
+  onAddForgejo: () => void
+  onSelectRepo?: (repoPath: RepoPath) => void
+}) {
   const [repos, setRepos] = useState<Repo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -977,7 +1193,7 @@ function ReposPage({ onAddGitLab, onAddForgejo }: { onAddGitLab: () => void; onA
   const fetchRepos = () => {
     setLoading(true)
     setError(null)
-    fetch('/api/repos')
+    fetch('/api/repos?include_status=true')
       .then(r => {
         if (!r.ok) throw new Error(`Failed to load repos (${r.status})`)
         return r.json()
@@ -995,6 +1211,16 @@ function ReposPage({ onAddGitLab, onAddForgejo }: { onAddGitLab: () => void; onA
   useEffect(() => {
     fetchRepos()
   }, [])
+
+  const handleRepoClick = (repo: Repo) => {
+    if (onSelectRepo) {
+      onSelectRepo({
+        forge: forgeToDomain(repo.forge_type),
+        owner: repo.owner,
+        repo: repo.name
+      })
+    }
+  }
 
   if (loading) return <div className="loading">Loading...</div>
   if (error) return <ErrorState message={error} onRetry={fetchRepos} />
@@ -1021,6 +1247,7 @@ function ReposPage({ onAddGitLab, onAddForgejo }: { onAddGitLab: () => void; onA
         <table>
           <thead>
             <tr>
+              <th>Status</th>
               <th></th>
               <th>Repository</th>
               <th>Added</th>
@@ -1028,12 +1255,12 @@ function ReposPage({ onAddGitLab, onAddForgejo }: { onAddGitLab: () => void; onA
           </thead>
           <tbody>
             {repos.map(repo => (
-              <tr key={repo.id}>
+              <tr key={repo.id} onClick={() => handleRepoClick(repo)} className="clickable">
+                <td><StatusIcon status={repo.latest_job_status || ''} /></td>
                 <td className="forge-icon"><ForgeIcon forge={repo.forge_type} /></td>
                 <td>
-                  <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
-                    {repo.owner}/{repo.name}
-                  </a>
+                  {repo.owner}/{repo.name}
+                  {repo.private && <span className="private-badge">private</span>}
                 </td>
                 <td className="text-muted">{relativeTime(repo.created_at)}</td>
               </tr>
@@ -1903,11 +2130,13 @@ interface Repo {
   forge_type: string
   owner: string
   name: string
+  private?: boolean
   clone_url: string
   html_url: string
   build: string
   release: string
   created_at: string
+  latest_job_status?: string
 }
 
 interface Job {

@@ -109,6 +109,16 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sync private flag if it changed
+	if repo.Private != event.Repo.Private {
+		if err := h.storage.UpdateRepoPrivate(ctx, repo.ID, event.Repo.Private); err != nil {
+			h.log.Warn("failed to update repo private flag", "error", err)
+		} else {
+			h.log.Info("repo private flag updated", "repo", event.Repo.FullName(), "private", event.Repo.Private)
+			repo.Private = event.Repo.Private
+		}
+	}
+
 	// Now verify signature with the stored secret
 	if repo.WebhookSecret != "" {
 		r.Body = io.NopCloser(strings.NewReader(string(body)))
