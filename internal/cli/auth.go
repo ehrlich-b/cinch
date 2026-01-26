@@ -21,7 +21,7 @@ type CLIConfig struct {
 type ServerConfig struct {
 	URL   string `toml:"url"`
 	Token string `toml:"token"`
-	User  string `toml:"user"`
+	Email string `toml:"email"` // User's email (identity)
 }
 
 // DefaultConfigPath returns the default config file path.
@@ -124,7 +124,7 @@ type DeviceAuthResponse struct {
 type DeviceTokenResponse struct {
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`
-	User        string `json:"user"`
+	Email       string `json:"email"` // User's email
 	Error       string `json:"error"`
 }
 
