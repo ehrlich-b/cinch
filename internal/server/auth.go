@@ -702,9 +702,9 @@ func (h *AuthHandler) completeLogin(w http.ResponseWriter, r *http.Request, emai
 
 	h.log.Info("user authenticated via GitHub", "email", email, "username", username)
 
-	// Redirect to return_to or home
+	// Redirect to return_to or dashboard
 	if returnTo == "" || returnTo == "/" {
-		returnTo = "/"
+		returnTo = "/dashboard"
 	}
 	http.Redirect(w, r, returnTo, http.StatusFound)
 }
