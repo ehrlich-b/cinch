@@ -122,11 +122,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 	defer store.Close()
 
 	// Create auth handler
-	// Note: CINCH_GITHUB_CLIENT_ID/SECRET should be the GitHub App's OAuth credentials
-	// (not a separate OAuth App - the GitHub App handles both auth and webhooks)
+	// Uses the GitHub App's OAuth credentials (Client ID + Client Secret from App settings)
 	authConfig := server.AuthConfig{
-		GitHubClientID:     os.Getenv("CINCH_GITHUB_CLIENT_ID"),
-		GitHubClientSecret: os.Getenv("CINCH_GITHUB_CLIENT_SECRET"),
+		GitHubClientID:     os.Getenv("CINCH_GITHUB_APP_CLIENT_ID"),
+		GitHubClientSecret: os.Getenv("CINCH_GITHUB_APP_CLIENT_SECRET"),
 		JWTSecret:          os.Getenv("CINCH_JWT_SECRET"),
 		BaseURL:            baseURL,
 	}
