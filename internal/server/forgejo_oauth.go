@@ -45,6 +45,14 @@ type forgejoOAuthToken struct {
 	ForgejoURL   string // Base URL (for self-hosted support)
 }
 
+// forgejoUser represents Forgejo/Gitea user info from API.
+type forgejoUser struct {
+	ID       int    `json:"id"`
+	Login    string `json:"login"`
+	Email    string `json:"email"`
+	FullName string `json:"full_name"`
+}
+
 // NewForgejoOAuthHandler creates a new Forgejo OAuth handler.
 func NewForgejoOAuthHandler(cfg ForgejoOAuthConfig, appBaseURL string, jwtSecret []byte, store storage.Storage, log *slog.Logger) *ForgejoOAuthHandler {
 	if log == nil {
@@ -99,7 +107,8 @@ func (h *ForgejoOAuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request
 
 // HandleCallback handles Forgejo OAuth callback.
 // GET /auth/forgejo/callback
-func (h *ForgejoOAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request, username string) {
+// Now supports both onboarding (new users) and connecting (existing users).
+func (h *ForgejoOAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request, authHelper ForgeAuthHelper) {
 	// Validate state parameter
 	stateToken := r.URL.Query().Get("state")
 	if err := h.validateOAuthState(stateToken); err != nil {
@@ -132,33 +141,91 @@ func (h *ForgejoOAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Store token temporarily for this user
-	h.oauthTokensMu.Lock()
-	h.oauthTokens[username] = token
-	h.oauthTokensMu.Unlock()
-
-	// Also persist to database (for CLI use later)
-	ctx := r.Context()
-	user, err := h.storage.GetOrCreateUser(ctx, username)
+	// Get user info from Forgejo (includes email)
+	fjUser, err := h.getForgejoUser(token)
 	if err != nil {
-		h.log.Error("failed to get/create user", "error", err, "user", username)
-	} else {
-		creds := map[string]any{
-			"type":          "oauth",
-			"access_token":  token.AccessToken,
-			"refresh_token": token.RefreshToken,
-			"expires_at":    token.ExpiresAt,
-			"base_url":      token.ForgejoURL,
-		}
-		credsJSON, _ := json.Marshal(creds)
-		if err := h.storage.UpdateUserForgejoCredentials(ctx, user.ID, string(credsJSON)); err != nil {
-			h.log.Error("failed to save Forgejo credentials", "error", err, "user", username)
-		} else {
-			h.log.Info("Forgejo credentials saved to database", "user", username)
-		}
+		h.log.Error("failed to get Forgejo user", "error", err)
+		http.Error(w, "Failed to get user info from Forgejo", http.StatusInternalServerError)
+		return
 	}
 
-	h.log.Info("Forgejo OAuth successful", "user", username)
+	h.log.Info("Forgejo OAuth callback", "user", fjUser.Login, "email", fjUser.Email)
+
+	ctx := r.Context()
+
+	// Check if user is already logged in (connecting Forgejo to existing account)
+	if existingEmail := authHelper.GetUser(r); existingEmail != "" {
+		// Already logged in - just update Forgejo connection
+		user, err := h.storage.GetUserByEmail(ctx, existingEmail)
+		if err == nil && user != nil {
+			// Store OAuth token for this user (keyed by email now)
+			h.oauthTokensMu.Lock()
+			h.oauthTokens[existingEmail] = token
+			h.oauthTokensMu.Unlock()
+
+			// Persist credentials
+			creds := map[string]any{
+				"type":          "oauth",
+				"access_token":  token.AccessToken,
+				"refresh_token": token.RefreshToken,
+				"expires_at":    token.ExpiresAt,
+				"base_url":      token.ForgejoURL,
+			}
+			credsJSON, _ := json.Marshal(creds)
+			if err := h.storage.UpdateUserForgejoCredentials(ctx, user.ID, string(credsJSON)); err != nil {
+				h.log.Error("failed to save Forgejo credentials", "error", err)
+			}
+			_ = h.storage.UpdateUserForgejoConnected(ctx, user.ID)
+			h.log.Info("Forgejo connected to existing account", "email", existingEmail)
+		}
+		http.Redirect(w, r, "/forgejo/onboard", http.StatusFound)
+		return
+	}
+
+	// Not logged in - find or create account by email
+	email := fjUser.Email
+	if email == "" {
+		h.log.Error("Forgejo user has no email")
+		http.Error(w, "Forgejo account has no email configured", http.StatusBadRequest)
+		return
+	}
+
+	// Find existing account or create new one
+	// If email exists, this is a returning user - log them in and connect Forgejo
+	user, err := h.storage.GetOrCreateUserByEmail(ctx, email, fjUser.Login)
+	if err != nil {
+		h.log.Error("failed to get/create user", "error", err)
+		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		return
+	}
+
+	// Store OAuth token for this user
+	h.oauthTokensMu.Lock()
+	h.oauthTokens[email] = token
+	h.oauthTokensMu.Unlock()
+
+	// Persist credentials and mark Forgejo as connected
+	creds := map[string]any{
+		"type":          "oauth",
+		"access_token":  token.AccessToken,
+		"refresh_token": token.RefreshToken,
+		"expires_at":    token.ExpiresAt,
+		"base_url":      token.ForgejoURL,
+	}
+	credsJSON, _ := json.Marshal(creds)
+	if err := h.storage.UpdateUserForgejoCredentials(ctx, user.ID, string(credsJSON)); err != nil {
+		h.log.Error("failed to save Forgejo credentials", "error", err)
+	}
+	_ = h.storage.UpdateUserForgejoConnected(ctx, user.ID)
+
+	// Set auth cookie
+	if err := authHelper.SetAuthCookie(w, email); err != nil {
+		h.log.Error("failed to set auth cookie", "error", err)
+		http.Error(w, "Failed to complete login", http.StatusInternalServerError)
+		return
+	}
+
+	h.log.Info("user authenticated via Forgejo", "email", email, "username", fjUser.Login)
 
 	// Redirect to project selector
 	http.Redirect(w, r, "/forgejo/onboard", http.StatusFound)
@@ -166,8 +233,8 @@ func (h *ForgejoOAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Requ
 
 // HandleProjects lists user's Forgejo repositories.
 // GET /api/forgejo/repos
-func (h *ForgejoOAuthHandler) HandleProjects(w http.ResponseWriter, r *http.Request, username string) {
-	token := h.getOAuthToken(username)
+func (h *ForgejoOAuthHandler) HandleProjects(w http.ResponseWriter, r *http.Request, userEmail string) {
+	token := h.getOAuthToken(userEmail)
 	if token == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -191,8 +258,8 @@ func (h *ForgejoOAuthHandler) HandleProjects(w http.ResponseWriter, r *http.Requ
 
 // HandleSetup creates webhook and prompts for manual PAT.
 // POST /api/forgejo/setup
-func (h *ForgejoOAuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request, username string) {
-	token := h.getOAuthToken(username)
+func (h *ForgejoOAuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request, userEmail string) {
+	token := h.getOAuthToken(userEmail)
 	if token == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -278,7 +345,7 @@ func (h *ForgejoOAuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request
 
 	// Clean up OAuth token (no longer needed)
 	h.oauthTokensMu.Lock()
-	delete(h.oauthTokens, username)
+	delete(h.oauthTokens, userEmail)
 	h.oauthTokensMu.Unlock()
 
 	h.log.Info("Forgejo repo setup complete", "repo", req.Owner+"/"+req.Name)
@@ -293,18 +360,114 @@ func (h *ForgejoOAuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request
 
 // --- Helper methods ---
 
-func (h *ForgejoOAuthHandler) getOAuthToken(username string) *forgejoOAuthToken {
+// getForgejoUser fetches user info from Forgejo/Gitea API.
+func (h *ForgejoOAuthHandler) getForgejoUser(token *forgejoOAuthToken) (*forgejoUser, error) {
+	req, err := http.NewRequest("GET", token.ForgejoURL+"/api/v1/user", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "token "+token.AccessToken)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("user request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("user request returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var user forgejoUser
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return nil, fmt.Errorf("failed to decode user: %w", err)
+	}
+
+	return &user, nil
+}
+
+// renderAccountExistsError shows an error when trying to create an account with an existing email.
+func (h *ForgejoOAuthHandler) renderAccountExistsError(w http.ResponseWriter, email string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusConflict)
+
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account Exists - Cinch</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0d1117;
+  color: #c9d1d9;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.container {
+  text-align: center;
+  padding: 2rem;
+  max-width: 500px;
+}
+h1 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+  color: #f85149;
+}
+p {
+  color: #8b949e;
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+.email {
+  font-family: monospace;
+  background: #161b22;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  color: #58a6ff;
+}
+.btn {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  background: #238636;
+  color: #fff;
+  text-decoration: none;
+  border-radius: 6px;
+  font-weight: 500;
+}
+.btn:hover { background: #2ea043; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Account Already Exists</h1>
+  <p>An account already exists with the email <span class="email">%s</span>.</p>
+  <p>Please sign in with the forge you originally used to create your account.</p>
+  <a href="/auth/login" class="btn">Back to Login</a>
+</div>
+</body>
+</html>`, email)
+}
+
+func (h *ForgejoOAuthHandler) getOAuthToken(userEmail string) *forgejoOAuthToken {
 	// First check in-memory cache
 	h.oauthTokensMu.RLock()
-	token := h.oauthTokens[username]
+	token := h.oauthTokens[userEmail]
 	h.oauthTokensMu.RUnlock()
 	if token != nil {
 		return token
 	}
 
-	// Fall back to database
+	// Fall back to database (lookup by email now)
 	ctx := context.Background()
-	user, err := h.storage.GetUserByName(ctx, username)
+	user, err := h.storage.GetUserByEmail(ctx, userEmail)
 	if err != nil || user == nil || user.ForgejoCredentials == "" {
 		return nil
 	}
@@ -318,7 +481,7 @@ func (h *ForgejoOAuthHandler) getOAuthToken(username string) *forgejoOAuthToken 
 		BaseURL      string    `json:"base_url"`
 	}
 	if err := json.Unmarshal([]byte(user.ForgejoCredentials), &creds); err != nil {
-		h.log.Error("failed to parse stored Forgejo credentials", "error", err, "user", username)
+		h.log.Error("failed to parse stored Forgejo credentials", "error", err, "email", userEmail)
 		return nil
 	}
 
@@ -331,7 +494,7 @@ func (h *ForgejoOAuthHandler) getOAuthToken(username string) *forgejoOAuthToken 
 	}
 
 	h.oauthTokensMu.Lock()
-	h.oauthTokens[username] = token
+	h.oauthTokens[userEmail] = token
 	h.oauthTokensMu.Unlock()
 
 	return token

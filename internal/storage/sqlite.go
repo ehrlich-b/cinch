@@ -647,6 +647,20 @@ func (s *SQLiteStorage) UpdateUserGitHubConnected(ctx context.Context, userID st
 	return err
 }
 
+func (s *SQLiteStorage) UpdateUserGitLabConnected(ctx context.Context, userID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET gitlab_credentials_at = ? WHERE id = ?`,
+		time.Now(), userID)
+	return err
+}
+
+func (s *SQLiteStorage) UpdateUserForgejoConnected(ctx context.Context, userID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET forgejo_credentials_at = ? WHERE id = ?`,
+		time.Now(), userID)
+	return err
+}
+
 func (s *SQLiteStorage) ClearUserGitLabCredentials(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE users SET gitlab_credentials = '', gitlab_credentials_at = NULL WHERE id = ?`,

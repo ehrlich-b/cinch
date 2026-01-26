@@ -53,6 +53,8 @@ type Storage interface {
 	UpdateUserEmail(ctx context.Context, userID, email string) error
 	AddUserEmail(ctx context.Context, userID, email string) error
 	UpdateUserGitHubConnected(ctx context.Context, userID string) error
+	UpdateUserGitLabConnected(ctx context.Context, userID string) error
+	UpdateUserForgejoConnected(ctx context.Context, userID string) error
 	UpdateUserGitLabCredentials(ctx context.Context, userID, credentials string) error
 	UpdateUserForgejoCredentials(ctx context.Context, userID, credentials string) error
 	ClearUserGitLabCredentials(ctx context.Context, userID string) error
