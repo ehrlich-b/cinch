@@ -215,15 +215,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 		gitlabOAuthHandler.HandleLogin(w, r)
 	})
 	mux.HandleFunc("/auth/gitlab/callback", func(w http.ResponseWriter, r *http.Request) {
-		// User must be logged in to Cinch first
-		user := authHandler.GetUser(r)
-		if user == "" {
-			// Redirect to login with return to GitLab callback
-			returnURL := r.URL.String()
-			http.Redirect(w, r, "/auth/login?return_to="+returnURL, http.StatusFound)
-			return
-		}
-		gitlabOAuthHandler.HandleCallback(w, r, user)
+		// Callback now handles both onboarding (new users) and connecting (existing users)
+		gitlabOAuthHandler.HandleCallback(w, r, authHandler)
 	})
 
 	// GitLab API routes
@@ -264,13 +257,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 		forgejoOAuthHandler.HandleLogin(w, r)
 	})
 	mux.HandleFunc("/auth/forgejo/callback", func(w http.ResponseWriter, r *http.Request) {
-		user := authHandler.GetUser(r)
-		if user == "" {
-			returnURL := r.URL.String()
-			http.Redirect(w, r, "/auth/login?return_to="+returnURL, http.StatusFound)
-			return
-		}
-		forgejoOAuthHandler.HandleCallback(w, r, user)
+		// Callback now handles both onboarding (new users) and connecting (existing users)
+		forgejoOAuthHandler.HandleCallback(w, r, authHandler)
 	})
 
 	// Forgejo API routes

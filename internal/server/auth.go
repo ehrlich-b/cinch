@@ -281,18 +281,27 @@ func (h *AuthHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// New user - check if any email already exists
+	// Check if any of the user's emails already exists in our system
+	// If so, this is a returning user - log them into their existing account
 	if h.storage != nil {
 		for _, email := range emails {
 			existingUser, err := h.storage.GetUserByEmail(r.Context(), email)
 			if err == nil && existingUser != nil {
-				// Account already exists with this email
-				h.renderAccountExistsError(w, email)
+				// Found existing account - log them in and connect GitHub
+				_ = h.storage.UpdateUserGitHubConnected(r.Context(), existingUser.ID)
+				if err := h.SetAuthCookie(w, existingUser.Email); err != nil {
+					h.log.Error("failed to set auth cookie", "error", err)
+					http.Error(w, "Failed to complete login", http.StatusInternalServerError)
+					return
+				}
+				h.log.Info("returning user logged in via GitHub", "email", existingUser.Email)
+				http.Redirect(w, r, returnTo, http.StatusFound)
 				return
 			}
 		}
 	}
 
+	// No existing account found - this is a new user
 	// If only one email, use it directly
 	if len(emails) == 1 {
 		h.completeLogin(w, r, emails[0], ghUser.Login, returnTo)
@@ -390,7 +399,7 @@ func (h *AuthHandler) GetUser(r *http.Request) string {
 
 // --- Cookie Management ---
 
-func (h *AuthHandler) setAuthCookie(w http.ResponseWriter, username string) error {
+func (h *AuthHandler) SetAuthCookie(w http.ResponseWriter, username string) error {
 	claims := jwt.MapClaims{
 		"sub": username,
 		"iat": time.Now().Unix(),
@@ -685,7 +694,7 @@ func (h *AuthHandler) completeLogin(w http.ResponseWriter, r *http.Request, emai
 	}
 
 	// Set JWT auth cookie with email
-	if err := h.setAuthCookie(w, email); err != nil {
+	if err := h.SetAuthCookie(w, email); err != nil {
 		h.log.Error("failed to set auth cookie", "error", err)
 		http.Error(w, "Failed to complete login", http.StatusInternalServerError)
 		return
@@ -793,74 +802,6 @@ form { display: flex; flex-direction: column; gap: 0.75rem; }
 </html>`, selectionToken, emailOptionsHTML)
 }
 
-// renderAccountExistsError shows an error when trying to create an account with an existing email.
-func (h *AuthHandler) renderAccountExistsError(w http.ResponseWriter, email string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusConflict)
-
-	fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Account Exists - Cinch</title>
-<style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #0d1117;
-  color: #c9d1d9;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.container {
-  text-align: center;
-  padding: 2rem;
-  max-width: 500px;
-}
-h1 {
-  font-size: 1.5rem;
-  margin-bottom: 0.5rem;
-  color: #f85149;
-}
-p {
-  color: #8b949e;
-  margin-bottom: 1.5rem;
-  line-height: 1.6;
-}
-.email {
-  font-family: monospace;
-  background: #161b22;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  color: #58a6ff;
-}
-.btn {
-  display: inline-block;
-  padding: 0.75rem 1.5rem;
-  background: #238636;
-  color: #fff;
-  text-decoration: none;
-  border-radius: 6px;
-  font-weight: 500;
-}
-.btn:hover { background: #2ea043; }
-</style>
-</head>
-<body>
-<div class="container">
-  <h1>Account Already Exists</h1>
-  <p>An account already exists with the email <span class="email">%s</span>.</p>
-  <p>Please sign in with the forge you originally used to create your account.</p>
-  <a href="/auth/login" class="btn">Back to Login</a>
-</div>
-</body>
-</html>`, email)
-}
-
 // handleSelectEmail handles the email selection form submission.
 func (h *AuthHandler) handleSelectEmail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -902,16 +843,24 @@ func (h *AuthHandler) handleSelectEmail(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Check one more time that this email doesn't exist
+	// Check if this email already exists - if so, log them into existing account
 	if h.storage != nil {
 		existingUser, err := h.storage.GetUserByEmail(r.Context(), selectedEmail)
 		if err == nil && existingUser != nil {
-			h.renderAccountExistsError(w, selectedEmail)
+			// Found existing account - log them in and connect GitHub
+			_ = h.storage.UpdateUserGitHubConnected(r.Context(), existingUser.ID)
+			if err := h.SetAuthCookie(w, existingUser.Email); err != nil {
+				h.log.Error("failed to set auth cookie", "error", err)
+				http.Error(w, "Failed to complete login", http.StatusInternalServerError)
+				return
+			}
+			h.log.Info("returning user logged in via GitHub (email selector)", "email", existingUser.Email)
+			http.Redirect(w, r, returnTo, http.StatusFound)
 			return
 		}
 	}
 
-	// Complete the login with the selected email
+	// Complete the login with the selected email (new user)
 	h.completeLogin(w, r, selectedEmail, username, returnTo)
 }
 

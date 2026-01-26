@@ -67,7 +67,25 @@ Browser sessions and CLI authentication.
 - [ ] Session fixation after OAuth callback
 - [ ] CLI config file permissions (currently 0700)
 
-### 4. API Authentication
+### 4. Email-Based Identity
+
+Accounts are identified by email. OAuth from any forge looks up/creates account by email.
+
+| Forge | Email Source | Verification Trust |
+|-------|--------------|-------------------|
+| GitHub | `/user/emails` API | Only `verified: true` |
+| GitLab | `/api/v4/user` | Primary (assumed verified) |
+| Forgejo | `/api/v1/user` | Primary (assumed verified) |
+
+**Risk:** If a forge allows unverified emails in OAuth, attacker could claim victim's email and access their Cinch account.
+
+**Things to poke at:**
+- [ ] Does GitLab actually enforce email verification before OAuth?
+- [ ] Does Forgejo/Codeberg enforce email verification?
+- [ ] Should we require email verification on our side too?
+- [ ] Audit: log which forge was used for each login
+
+### 5. API Authentication
 
 `/api/*` endpoints for managing repos, tokens, workers.
 
@@ -77,7 +95,7 @@ Browser sessions and CLI authentication.
 - [ ] Rate limiting on token creation/validation
 - [ ] CORS policy on API endpoints
 
-### 5. Secrets at Rest
+### 6. Secrets at Rest
 
 Data stored in SQLite/Postgres.
 
@@ -93,7 +111,7 @@ Data stored in SQLite/Postgres.
 - [ ] Should webhook secrets be encrypted at rest?
 - [ ] Backup security - are DB dumps protected?
 
-### 6. Secrets in Transit
+### 7. Secrets in Transit
 
 Credentials flowing through the system.
 
@@ -109,7 +127,7 @@ Credentials flowing through the system.
 - [ ] Log sanitization - are tokens redacted?
 - [ ] Memory handling - are secrets zeroed after use?
 
-### 7. Command Execution
+### 8. Command Execution
 
 Workers execute shell commands from config files.
 
@@ -127,7 +145,7 @@ Workers execute shell commands from config files.
 
 **Note:** Command injection from `.cinch.yaml` is BY DESIGN. The repo is trusted. The question is: are we certain the job came from the expected repo?
 
-### 8. WebSocket Security
+### 9. WebSocket Security
 
 Worker connections to control plane.
 
