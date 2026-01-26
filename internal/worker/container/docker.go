@@ -117,8 +117,8 @@ func DefaultCacheVolumes() map[string]string {
 	return map[string]string{
 		"cinch-cache-npm":   "/root/.npm",
 		"cinch-cache-cargo": "/root/.cargo",
-		"cinch-cache-gomod": "/go/pkg/mod",    // Go module cache (GOMODCACHE)
-		"cinch-cache-xdg":   "/root/.cache",   // XDG cache (go-build, pip, golangci-lint, etc.)
+		"cinch-cache-gomod": "/go/pkg/mod",  // Go module cache (GOMODCACHE)
+		"cinch-cache-xdg":   "/root/.cache", // XDG cache (go-build, pip, golangci-lint, etc.)
 	}
 }
 
