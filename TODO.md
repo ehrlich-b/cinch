@@ -83,18 +83,26 @@ Dashboard with your repos
 **Implementation:**
 - [x] Remove separate login button, replace with "Get Started"
 - [x] Forge selector as first screen (not login screen)
-- [ ] After OAuth callback → email selector (if multiple) → repo selector → success page
-- [ ] Fetch user emails from forge API (GitHub: `user:email` scope, GitLab: `read_user`)
-- [ ] Store selected email in user record (not verified, just preference)
+- [x] After OAuth callback → email selector (if multiple) → repo selector → success page
+- [x] Fetch user emails from forge API (GitHub: `user:email` scope)
+- [x] Store selected email in user record (email is now the identity)
+- [x] Email-based identity: cookie stores email, not username
+- [x] Duplicate email check: if email exists, show "account exists" error
 - [ ] `cinch login` detects existing session, skips device code flow
 - [x] Success page emphasizes `--all` flag for first-time setup
 - [x] Device code page auto-fills token from URL (`/device?code=XXX`)
 
 **Identity model:**
-- No forge is "primary" - all connected forges are equal identity providers
+- Email is the canonical identity (verified by forge)
+- Duplicate accounts rejected: same email = same account
 - Onboard with any forge, then connect additional forges from account settings
 - Each forge connection = repos from that forge available for CI
-- Account = union of all connected forge identities
+- No account merging: if email collision, user must log in with original forge
+
+**GitHub App consolidation:**
+- [x] Use GitHub App's OAuth credentials for login (not separate OAuth App)
+- [x] CINCH_GITHUB_CLIENT_ID/SECRET should be the App's OAuth credentials
+- [ ] Can delete the separate OAuth App from GitHub
 
 **Account settings (per-forge):**
 - [x] Account page with "Connect [Forge]" buttons for each unconnected forge

@@ -122,13 +122,15 @@ func runServer(cmd *cobra.Command, args []string) error {
 	defer store.Close()
 
 	// Create auth handler
+	// Note: CINCH_GITHUB_CLIENT_ID/SECRET should be the GitHub App's OAuth credentials
+	// (not a separate OAuth App - the GitHub App handles both auth and webhooks)
 	authConfig := server.AuthConfig{
 		GitHubClientID:     os.Getenv("CINCH_GITHUB_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("CINCH_GITHUB_CLIENT_SECRET"),
 		JWTSecret:          os.Getenv("CINCH_JWT_SECRET"),
 		BaseURL:            baseURL,
 	}
-	authHandler := server.NewAuthHandler(authConfig, log)
+	authHandler := server.NewAuthHandler(authConfig, store, log)
 
 	// Log auth status
 	if authConfig.GitHubClientID != "" {
@@ -439,7 +441,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	}
 
 	term := worker.NewTerminal(os.Stdout)
-	var user, serverDisplay string
+	var email, serverDisplay string
 
 	// If server/token not provided, try to use saved credentials
 	if serverURL == "" || token == "" {
@@ -464,7 +466,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 			token = defaultServer.Token
 		}
 
-		user = defaultServer.User
+		email = defaultServer.Email
 		serverDisplay = defaultServer.URL
 	}
 
@@ -485,9 +487,9 @@ func runWorker(cmd *cobra.Command, args []string) error {
 
 	// Print connection banner (quiet mode)
 	if !verbose {
-		term.PrintConnected(user, serverDisplay)
+		term.PrintConnected(email, serverDisplay)
 	} else {
-		log.Info("connected", "user", user, "server", serverDisplay)
+		log.Info("connected", "email", email, "server", serverDisplay)
 	}
 
 	// Wait for interrupt
@@ -721,14 +723,14 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	cfg.SetServerConfig("default", cli.ServerConfig{
 		URL:   serverURL,
 		Token: tokenResp.AccessToken,
-		User:  tokenResp.User,
+		Email: tokenResp.Email,
 	})
 
 	if err := cli.SaveConfig(cfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 
-	fmt.Printf("\nLogged in as %s\n", tokenResp.User)
+	fmt.Printf("\nLogged in as %s\n", tokenResp.Email)
 	fmt.Printf("Credentials saved to %s\n", cli.DefaultConfigPath())
 
 	return nil
@@ -778,7 +780,7 @@ func whoamiCmd() *cobra.Command {
 
 			for name, sc := range cfg.Servers {
 				fmt.Printf("Server: %s (%s)\n", sc.URL, name)
-				fmt.Printf("User: %s\n", sc.User)
+				fmt.Printf("Email: %s\n", sc.Email)
 			}
 
 			return nil

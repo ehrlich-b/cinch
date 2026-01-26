@@ -488,6 +488,51 @@ func (s *SQLiteStorage) GetOrCreateUser(ctx context.Context, name string) (*User
 	return nil, err
 }
 
+func (s *SQLiteStorage) GetOrCreateUserByEmail(ctx context.Context, email, name string) (*User, error) {
+	user := &User{}
+	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
+	var emailsJSON string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, email, emails, github_connected_at, gitlab_credentials, gitlab_credentials_at,
+		        forgejo_credentials, forgejo_credentials_at, created_at
+		 FROM users WHERE email = ?`, email).Scan(
+		&user.ID, &user.Name, &user.Email, &emailsJSON, &githubConnectedAt,
+		&user.GitLabCredentials, &gitlabCredentialsAt,
+		&user.ForgejoCredentials, &forgejoCredentialsAt, &user.CreatedAt)
+	if err == nil {
+		if gitlabCredentialsAt.Valid {
+			user.GitLabCredentialsAt = gitlabCredentialsAt.Time
+		}
+		if forgejoCredentialsAt.Valid {
+			user.ForgejoCredentialsAt = forgejoCredentialsAt.Time
+		}
+		if githubConnectedAt.Valid {
+			user.GitHubConnectedAt = githubConnectedAt.Time
+		}
+		if emailsJSON != "" {
+			user.Emails = parseEmailsJSON(emailsJSON)
+		}
+		return user, nil
+	}
+	if err == sql.ErrNoRows {
+		// Create new user with email as primary identity
+		user = &User{
+			ID:        fmt.Sprintf("u_%d", time.Now().UnixNano()),
+			Name:      name,
+			Email:     email,
+			CreatedAt: time.Now(),
+		}
+		_, err = s.db.ExecContext(ctx,
+			`INSERT INTO users (id, name, email, created_at) VALUES (?, ?, ?, ?)`,
+			user.ID, user.Name, user.Email, user.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("create user: %w", err)
+		}
+		return user, nil
+	}
+	return nil, err
+}
+
 func (s *SQLiteStorage) GetUserByName(ctx context.Context, name string) (*User, error) {
 	user := &User{}
 	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
