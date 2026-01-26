@@ -1,6 +1,6 @@
 # Cinch Makefile
 
-.PHONY: build test fmt lint check release clean web web-deps web-dev dev dev-worker run push push-tags
+.PHONY: build test fmt lint check release clean web web-deps web-dev dev dev-worker run push push-tags install-hooks
 
 # -----------------------------------------------------------------------------
 # Development
@@ -29,6 +29,11 @@ lint:
 
 # Full check: format, test, lint
 check: fmt test lint
+
+# Install git hooks (runs checks before commit)
+install-hooks:
+	git config --local core.hooksPath .githooks
+	@echo "Git hooks installed. Pre-commit will run 'make check'."
 
 # Clean build artifacts
 clean:

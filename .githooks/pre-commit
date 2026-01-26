@@ -1,0 +1,13 @@
+#!/bin/sh
+# Pre-commit hook: runs the same checks as CI
+# Install with: make install-hooks
+
+echo "Running pre-commit checks..."
+make check
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "Pre-commit checks failed. Fix issues before committing."
+    echo "To bypass (not recommended): git commit --no-verify"
+    exit 1
+fi
