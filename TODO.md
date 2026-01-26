@@ -1,6 +1,6 @@
 # Cinch TODO
 
-**Last Updated:** 2026-01-25
+**Last Updated:** 2026-01-26
 
 ---
 
@@ -93,16 +93,18 @@ Dashboard with your repos
 - [x] Device code page auto-fills token from URL (`/device?code=XXX`)
 
 **Identity model:**
-- Email is the canonical identity (verified by forge)
-- Duplicate accounts rejected: same email = same account
-- Onboard with any forge, then connect additional forges from account settings
-- Each forge connection = repos from that forge available for CI
-- No account merging: if email collision, user must log in with original forge
+- [x] Email is the canonical identity (verified by forge)
+- [x] Same email = same account (login finds existing, connects forge)
+- [x] Onboard with any forge, then connect additional forges from account settings
+- [x] Each forge connection = repos from that forge available for CI
+- [ ] Username is just metadata (not unique) - drop UNIQUE constraint on users.name
+- [ ] Worker IDs should use email, not username (`user:email@example.com` not `user:username`)
 
 **GitHub App consolidation:**
 - [x] Use GitHub App's OAuth credentials for login (not separate OAuth App)
-- [x] CINCH_GITHUB_CLIENT_ID/SECRET should be the App's OAuth credentials
-- [ ] Can delete the separate OAuth App from GitHub
+- [x] CINCH_GITHUB_APP_CLIENT_ID/SECRET env vars (from App settings)
+- [x] Deleted the separate OAuth App from GitHub
+- [x] Redirect to /dashboard after login (not homepage)
 
 **Account settings (per-forge):**
 - [x] Account page with "Connect [Forge]" buttons for each unconnected forge
@@ -546,6 +548,9 @@ Already done: Gitea, Forgejo (same codebase). These cover the self-hosted commun
 - [ ] Homepage should only show your own jobs (not all jobs)
 - [ ] Retry/rerun failed builds from UI
 - [ ] Create releases from cinch.sh UI (push tag to user's repo via forge API)
+
+### Dev Experience
+- [x] **Pre-commit hook** - Runs `cinch run` before every commit (dogfooding). Install with `make install-hooks`.
 
 ### Known Issues
 - [x] **Rejected jobs not re-queued** - Fixed: jobs re-queue automatically on worker disconnect.
