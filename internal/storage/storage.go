@@ -32,7 +32,9 @@ type Storage interface {
 	CreateRepo(ctx context.Context, repo *Repo) error
 	GetRepo(ctx context.Context, id string) (*Repo, error)
 	GetRepoByCloneURL(ctx context.Context, cloneURL string) (*Repo, error)
+	GetRepoByOwnerName(ctx context.Context, forge, owner, name string) (*Repo, error)
 	ListRepos(ctx context.Context) ([]*Repo, error)
+	UpdateRepoPrivate(ctx context.Context, id string, private bool) error
 	DeleteRepo(ctx context.Context, id string) error
 
 	// Tokens
@@ -159,6 +161,7 @@ type Repo struct {
 	ForgeToken    string // Token for API calls (status posting, cloning private repos)
 	Build         string // Build command (e.g., "make check") - runs on branches/PRs
 	Release       string // Release command (e.g., "make release") - runs on tags
+	Private       bool   // Whether the repo is private
 	CreatedAt     time.Time
 }
 

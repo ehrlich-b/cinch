@@ -71,14 +71,40 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/repos" && r.Method == http.MethodPost:
 		h.createRepo(w, r)
 	case strings.HasPrefix(path, "/repos/"):
-		repoID := strings.TrimPrefix(path, "/repos/")
-		switch r.Method {
-		case http.MethodGet:
-			h.getRepo(w, r, repoID)
-		case http.MethodDelete:
-			h.deleteRepo(w, r, repoID)
-		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		repoPath := strings.TrimPrefix(path, "/repos/")
+		// Check if this is a forge/owner/repo path (forge contains a dot like github.com)
+		parts := strings.SplitN(repoPath, "/", 4)
+		if len(parts) >= 3 && strings.Contains(parts[0], ".") {
+			// This is /repos/{forge}/{owner}/{repo}[/jobs]
+			forge, owner, repoName := parts[0], parts[1], parts[2]
+			if len(parts) == 4 && parts[3] == "jobs" {
+				// /repos/{forge}/{owner}/{repo}/jobs
+				if r.Method == http.MethodGet {
+					h.listRepoJobs(w, r, forge, owner, repoName)
+				} else {
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
+			} else if len(parts) == 3 {
+				// /repos/{forge}/{owner}/{repo}
+				if r.Method == http.MethodGet {
+					h.getRepoByPath(w, r, forge, owner, repoName)
+				} else {
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
+			} else {
+				http.Error(w, "not found", http.StatusNotFound)
+			}
+		} else {
+			// This is /repos/{id} (legacy)
+			repoID := repoPath
+			switch r.Method {
+			case http.MethodGet:
+				h.getRepo(w, r, repoID)
+			case http.MethodDelete:
+				h.deleteRepo(w, r, repoID)
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
 		}
 
 	// Tokens
@@ -288,16 +314,18 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 // --- Repos ---
 
 type repoResponse struct {
-	ID            string    `json:"id"`
-	ForgeType     string    `json:"forge_type"`
-	Owner         string    `json:"owner"`
-	Name          string    `json:"name"`
-	CloneURL      string    `json:"clone_url"`
-	HTMLURL       string    `json:"html_url,omitempty"`
-	WebhookSecret string    `json:"webhook_secret,omitempty"`
-	Build         string    `json:"build"`
-	Release       string    `json:"release,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID              string    `json:"id"`
+	ForgeType       string    `json:"forge_type"`
+	Owner           string    `json:"owner"`
+	Name            string    `json:"name"`
+	Private         bool      `json:"private,omitempty"`
+	CloneURL        string    `json:"clone_url"`
+	HTMLURL         string    `json:"html_url,omitempty"`
+	WebhookSecret   string    `json:"webhook_secret,omitempty"`
+	Build           string    `json:"build"`
+	Release         string    `json:"release,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	LatestJobStatus *string   `json:"latest_job_status,omitempty"` // For ?include_status=true
 }
 
 type createRepoRequest struct {
@@ -319,6 +347,8 @@ func (h *APIHandler) listRepos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	includeStatus := r.URL.Query().Get("include_status") == "true"
+
 	resp := make([]repoResponse, len(repos))
 	for i, repo := range repos {
 		htmlURL := repo.HTMLURL
@@ -330,11 +360,24 @@ func (h *APIHandler) listRepos(w http.ResponseWriter, r *http.Request) {
 			ForgeType: string(repo.ForgeType),
 			Owner:     repo.Owner,
 			Name:      repo.Name,
+			Private:   repo.Private,
 			CloneURL:  repo.CloneURL,
 			HTMLURL:   htmlURL,
 			Build:     repo.Build,
 			Release:   repo.Release,
 			CreatedAt: repo.CreatedAt,
+		}
+
+		// Include latest job status if requested
+		if includeStatus {
+			jobs, err := h.storage.ListJobs(r.Context(), storage.JobFilter{
+				RepoID: repo.ID,
+				Limit:  1,
+			})
+			if err == nil && len(jobs) > 0 {
+				status := string(jobs[0].Status)
+				resp[i].LatestJobStatus = &status
+			}
 		}
 	}
 
@@ -358,6 +401,7 @@ func (h *APIHandler) getRepo(w http.ResponseWriter, r *http.Request, repoID stri
 		ForgeType:     string(repo.ForgeType),
 		Owner:         repo.Owner,
 		Name:          repo.Name,
+		Private:       repo.Private,
 		CloneURL:      repo.CloneURL,
 		HTMLURL:       repo.HTMLURL,
 		WebhookSecret: repo.WebhookSecret, // Include for admin viewing
@@ -443,6 +487,192 @@ func (h *APIHandler) deleteRepo(w http.ResponseWriter, r *http.Request, repoID s
 
 	h.log.Info("repo deleted", "repo_id", repoID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// forgeDomainToType converts a domain like "github.com" to a forge type like "github"
+func forgeDomainToType(domain string) string {
+	switch domain {
+	case "github.com":
+		return "github"
+	case "gitlab.com":
+		return "gitlab"
+	case "codeberg.org":
+		return "forgejo"
+	case "gitea.com":
+		return "gitea"
+	default:
+		// For self-hosted instances, try to infer from domain
+		if strings.Contains(domain, "gitlab") {
+			return "gitlab"
+		}
+		if strings.Contains(domain, "gitea") {
+			return "gitea"
+		}
+		if strings.Contains(domain, "forgejo") || strings.Contains(domain, "codeberg") {
+			return "forgejo"
+		}
+		return domain
+	}
+}
+
+// checkRepoAccess verifies user has access to a private repo
+// Returns true if access is allowed, false otherwise (and writes error response)
+func (h *APIHandler) checkRepoAccess(w http.ResponseWriter, r *http.Request, repo *storage.Repo) bool {
+	if !repo.Private {
+		return true // Public repos are always accessible
+	}
+
+	// Private repo - check auth
+	username := h.auth.GetUser(r)
+	if username == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+
+	// Check if user has connected the required forge
+	user, err := h.storage.GetUserByName(r.Context(), username)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+
+	// Check if user has the required forge connected
+	hasAccess := false
+	switch repo.ForgeType {
+	case storage.ForgeTypeGitHub:
+		hasAccess = !user.GitHubConnectedAt.IsZero()
+	case storage.ForgeTypeGitLab:
+		hasAccess = user.GitLabCredentials != ""
+	case storage.ForgeTypeForgejo, storage.ForgeTypeGitea:
+		hasAccess = user.ForgejoCredentials != ""
+	}
+
+	if !hasAccess {
+		http.Error(w, "forbidden: connect your "+string(repo.ForgeType)+" account to access this repo", http.StatusForbidden)
+		return false
+	}
+
+	return true
+}
+
+// Response type for per-repo endpoint with latest job
+type repoWithStatusResponse struct {
+	ID            string       `json:"id"`
+	ForgeType     string       `json:"forge_type"`
+	Owner         string       `json:"owner"`
+	Name          string       `json:"name"`
+	Private       bool         `json:"private"`
+	CloneURL      string       `json:"clone_url"`
+	HTMLURL       string       `json:"html_url,omitempty"`
+	Build         string       `json:"build"`
+	Release       string       `json:"release,omitempty"`
+	CreatedAt     time.Time    `json:"created_at"`
+	LatestJob     *jobResponse `json:"latest_job,omitempty"`
+}
+
+func (h *APIHandler) getRepoByPath(w http.ResponseWriter, r *http.Request, forge, owner, repoName string) {
+	forgeType := forgeDomainToType(forge)
+
+	repo, err := h.storage.GetRepoByOwnerName(r.Context(), forgeType, owner, repoName)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "repo not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get repo", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Check access for private repos
+	if !h.checkRepoAccess(w, r, repo) {
+		return
+	}
+
+	htmlURL := repo.HTMLURL
+	if htmlURL == "" {
+		htmlURL = computeHTMLURL(repo.ForgeType, repo.Owner, repo.Name)
+	}
+
+	resp := repoWithStatusResponse{
+		ID:        repo.ID,
+		ForgeType: string(repo.ForgeType),
+		Owner:     repo.Owner,
+		Name:      repo.Name,
+		Private:   repo.Private,
+		CloneURL:  repo.CloneURL,
+		HTMLURL:   htmlURL,
+		Build:     repo.Build,
+		Release:   repo.Release,
+		CreatedAt: repo.CreatedAt,
+	}
+
+	// Get latest job
+	jobs, err := h.storage.ListJobs(r.Context(), storage.JobFilter{
+		RepoID: repo.ID,
+		Limit:  1,
+	})
+	if err == nil && len(jobs) > 0 {
+		jr := jobToResponse(jobs[0])
+		jr.Repo = repo.Owner + "/" + repo.Name
+		resp.LatestJob = &jr
+	}
+
+	h.writeJSON(w, resp)
+}
+
+func (h *APIHandler) listRepoJobs(w http.ResponseWriter, r *http.Request, forge, owner, repoName string) {
+	forgeType := forgeDomainToType(forge)
+
+	repo, err := h.storage.GetRepoByOwnerName(r.Context(), forgeType, owner, repoName)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "repo not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get repo", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Check access for private repos
+	if !h.checkRepoAccess(w, r, repo) {
+		return
+	}
+
+	q := r.URL.Query()
+	filter := storage.JobFilter{
+		RepoID: repo.ID,
+		Status: storage.JobStatus(q.Get("status")),
+		Branch: q.Get("branch"),
+		Limit:  50,
+	}
+
+	if limit := q.Get("limit"); limit != "" {
+		if n, err := strconv.Atoi(limit); err == nil && n > 0 && n <= 100 {
+			filter.Limit = n
+		}
+	}
+	if offset := q.Get("offset"); offset != "" {
+		if n, err := strconv.Atoi(offset); err == nil && n >= 0 {
+			filter.Offset = n
+		}
+	}
+
+	jobs, err := h.storage.ListJobs(r.Context(), filter)
+	if err != nil {
+		h.log.Error("failed to list jobs", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := make([]jobResponse, len(jobs))
+	for i, j := range jobs {
+		resp[i] = jobToResponse(j)
+		resp[i].Repo = repo.Owner + "/" + repo.Name
+	}
+
+	h.writeJSON(w, map[string]any{"jobs": resp})
 }
 
 // --- Tokens ---

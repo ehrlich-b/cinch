@@ -139,6 +139,11 @@ func (s *SQLiteStorage) migrate() error {
 	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN github_connected_at DATETIME")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 
+	// Add private column to repos
+	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
+	// Index for efficient forge/owner/name lookups
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_repos_forge_owner_name ON repos(forge_type, owner, name)")
+
 	return nil
 }
 
@@ -331,23 +336,24 @@ func (s *SQLiteStorage) DeleteWorker(ctx context.Context, id string) error {
 func (s *SQLiteStorage) CreateRepo(ctx context.Context, repo *Repo) error {
 	// Use upsert to handle re-onboarding: if repo exists, update token and webhook secret
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO repos (id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO repos (id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, private, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(clone_url) DO UPDATE SET
 		 	webhook_secret = excluded.webhook_secret,
-		 	forge_token = excluded.forge_token`,
+		 	forge_token = excluded.forge_token,
+		 	private = excluded.private`,
 		repo.ID, repo.ForgeType, repo.Owner, repo.Name, repo.CloneURL, repo.HTMLURL,
-		repo.WebhookSecret, repo.ForgeToken, repo.Build, repo.Release, repo.CreatedAt)
+		repo.WebhookSecret, repo.ForgeToken, repo.Build, repo.Release, repo.Private, repo.CreatedAt)
 	return err
 }
 
 func (s *SQLiteStorage) GetRepo(ctx context.Context, id string) (*Repo, error) {
 	repo := &Repo{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, private, created_at
 		 FROM repos WHERE id = ?`, id).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
-		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.CreatedAt)
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.Private, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -357,10 +363,10 @@ func (s *SQLiteStorage) GetRepo(ctx context.Context, id string) (*Repo, error) {
 func (s *SQLiteStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string) (*Repo, error) {
 	repo := &Repo{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, private, created_at
 		 FROM repos WHERE clone_url = ?`, cloneURL).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
-		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.CreatedAt)
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.Private, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -369,7 +375,7 @@ func (s *SQLiteStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string) 
 
 func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, private, created_at
 		 FROM repos ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -380,7 +386,7 @@ func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 	for rows.Next() {
 		repo := &Repo{}
 		if err := rows.Scan(&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL,
-			&repo.HTMLURL, &repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.CreatedAt); err != nil {
+			&repo.HTMLURL, &repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.Private, &repo.CreatedAt); err != nil {
 			return nil, err
 		}
 		repos = append(repos, repo)
@@ -390,6 +396,26 @@ func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 
 func (s *SQLiteStorage) DeleteRepo(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM repos WHERE id = ?`, id)
+	return err
+}
+
+func (s *SQLiteStorage) GetRepoByOwnerName(ctx context.Context, forge, owner, name string) (*Repo, error) {
+	repo := &Repo{}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, private, created_at
+		 FROM repos WHERE forge_type = ? AND owner = ? AND name = ?`, forge, owner, name).Scan(
+		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.Private, &repo.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	return repo, err
+}
+
+func (s *SQLiteStorage) UpdateRepoPrivate(ctx context.Context, id string, private bool) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE repos SET private = ? WHERE id = ?`,
+		private, id)
 	return err
 }
 
