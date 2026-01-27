@@ -172,17 +172,17 @@ Note: `cinch release` works on GitHub, GitLab, Gitea - move forges, keep your Ma
 ### Remaining Polish (Backlog)
 
 - [ ] Light/dark theme toggle
-- [ ] Public repo pages: `cinch.sh/jobs/github.com/owner/repo` shows builds for that repo
+- [x] Public repo pages: `cinch.sh/jobs/github.com/owner/repo` shows builds for that repo
   - Public repos: accessible without login
   - Private repos: require auth
   - This is what badges should link to
-- [ ] Repo detail pages (click repo → see all builds for that repo)
+- [x] Repo detail pages (click repo → see all builds for that repo)
 - [ ] Loading skeletons
 - [ ] Real Settings page (tokens, repos)
-- [ ] Job filtering by repo/status/branch
+- [x] Job filtering by repo/status/branch
 - [ ] Re-run failed builds
 - [ ] Badge repo selector
-- [ ] Badge links should go to repo job page (e.g., `cinch.sh/jobs/github.com/owner/repo`)
+- [x] Badge links should go to repo job page (e.g., `cinch.sh/jobs/github.com/owner/repo`)
 - [ ] **Distinctive badge design** - Shields.io badges are invisible (everyone uses them, they all look identical). If badges are a distribution channel, they need to look recognizably "Cinch" at a glance. Different shape, proportions, or style. Serve custom SVG from `cinch.sh/badge/...` instead of redirecting to shields.io.
 
 ---
