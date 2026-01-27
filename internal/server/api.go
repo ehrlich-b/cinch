@@ -137,6 +137,10 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 
+	// Forge connect (self-hosted instances)
+	case path == "/forge/connect" && r.Method == http.MethodPost:
+		h.connectForge(w, r)
+
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
@@ -941,6 +945,83 @@ func (h *APIHandler) disconnectForge(w http.ResponseWriter, r *http.Request, for
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// connectForge handles connecting self-hosted forge instances via PAT.
+// POST /api/forge/connect
+func (h *APIHandler) connectForge(w http.ResponseWriter, r *http.Request) {
+	username := h.auth.GetUser(r)
+	if username == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Forge    string `json:"forge"`    // "gitlab", "forgejo", "gitea"
+		Host     string `json:"host"`     // Base URL (e.g., "https://gitlab.mycompany.com")
+		Token    string `json:"token"`    // Personal Access Token
+		Username string `json:"username"` // Forge username (for display)
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Forge == "" || req.Host == "" || req.Token == "" {
+		http.Error(w, "forge, host, and token are required", http.StatusBadRequest)
+		return
+	}
+
+	// Get user
+	user, err := h.storage.GetUserByEmail(r.Context(), username)
+	if err != nil {
+		h.log.Error("failed to get user", "error", err)
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	// Store credentials based on forge type
+	// We use a JSON structure to store host + token together
+	creds := map[string]string{
+		"type":     "pat",
+		"host":     req.Host,
+		"token":    req.Token,
+		"username": req.Username,
+	}
+	credsJSON, _ := json.Marshal(creds)
+
+	switch req.Forge {
+	case "gitlab":
+		if err := h.storage.UpdateUserGitLabCredentials(r.Context(), user.ID, string(credsJSON)); err != nil {
+			h.log.Error("failed to save GitLab credentials", "error", err)
+			http.Error(w, "failed to save credentials", http.StatusInternalServerError)
+			return
+		}
+		if err := h.storage.UpdateUserGitLabConnected(r.Context(), user.ID); err != nil {
+			h.log.Error("failed to mark GitLab connected", "error", err)
+		}
+		h.log.Info("user connected self-hosted GitLab", "user", username, "host", req.Host)
+
+	case "forgejo", "gitea":
+		if err := h.storage.UpdateUserForgejoCredentials(r.Context(), user.ID, string(credsJSON)); err != nil {
+			h.log.Error("failed to save Forgejo credentials", "error", err)
+			http.Error(w, "failed to save credentials", http.StatusInternalServerError)
+			return
+		}
+		if err := h.storage.UpdateUserForgejoConnected(r.Context(), user.ID); err != nil {
+			h.log.Error("failed to mark Forgejo connected", "error", err)
+		}
+		h.log.Info("user connected self-hosted Forgejo/Gitea", "user", username, "host", req.Host)
+
+	default:
+		http.Error(w, "unsupported forge type", http.StatusBadRequest)
+		return
+	}
+
+	h.writeJSON(w, map[string]any{
+		"ok":      true,
+		"message": fmt.Sprintf("Connected to %s at %s", req.Forge, req.Host),
+	})
 }
 
 func (h *APIHandler) deleteUser(w http.ResponseWriter, r *http.Request) {

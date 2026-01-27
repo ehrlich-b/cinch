@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/ehrlich-b/cinch/internal/cli"
 	"github.com/ehrlich-b/cinch/internal/config"
@@ -1201,42 +1202,54 @@ all platform binaries to ~/.cinch/bin/.`,
 }
 
 func connectCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "connect <forge>",
 		Short: "Connect a forge account to Cinch",
-		Long: `Connect a forge account (GitLab, Codeberg, etc.) to Cinch via OAuth.
+		Long: `Connect a forge account (GitLab, Codeberg, Forgejo, etc.) to Cinch.
 
-This opens your browser to authenticate with the forge. Once authorized,
-you can add repositories from that forge to Cinch.
+For hosted services (gitlab.com, codeberg.org), this opens your browser
+to authenticate via OAuth. For self-hosted instances, you'll be prompted
+for a Personal Access Token (PAT).
 
 Supported forges:
   gitlab    - GitLab.com (or self-hosted GitLab)
   codeberg  - Codeberg.org (Forgejo)
+  forgejo   - Self-hosted Forgejo/Gitea
 
 Example:
-  cinch connect gitlab
-  cinch connect codeberg`,
+  cinch connect gitlab                              # gitlab.com via OAuth
+  cinch connect gitlab --host gitlab.mycompany.com  # self-hosted via PAT
+  cinch connect codeberg                            # codeberg.org via OAuth
+  cinch connect forgejo --host git.mycompany.com    # self-hosted via PAT`,
 		Args: cobra.ExactArgs(1),
 		RunE: runConnect,
 	}
+	cmd.Flags().String("host", "", "Self-hosted instance URL (e.g., gitlab.mycompany.com)")
+	return cmd
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
 	forge := strings.ToLower(args[0])
+	host, _ := cmd.Flags().GetString("host")
 
-	// Map forge names to API paths
-	var apiPath, authPath, forgeName string
+	// Map forge names to defaults
+	var apiPath, authPath, forgeName, defaultHost string
 	switch forge {
 	case "gitlab":
 		apiPath = "/api/gitlab/status"
 		authPath = "/auth/gitlab"
 		forgeName = "GitLab"
-	case "codeberg", "forgejo":
+		defaultHost = "gitlab.com"
+	case "codeberg":
 		apiPath = "/api/forgejo/status"
 		authPath = "/auth/forgejo"
 		forgeName = "Codeberg"
+		defaultHost = "codeberg.org"
+	case "forgejo", "gitea":
+		forgeName = "Forgejo"
+		defaultHost = "" // No default for generic forgejo/gitea
 	default:
-		return fmt.Errorf("unknown forge: %s (supported: gitlab, codeberg)", forge)
+		return fmt.Errorf("unknown forge: %s (supported: gitlab, codeberg, forgejo)", forge)
 	}
 
 	// Load credentials to get server URL
@@ -1252,6 +1265,15 @@ func runConnect(cmd *cobra.Command, args []string) error {
 
 	serverURL := serverCfg.URL
 
+	// If host is specified or forge has no default (forgejo/gitea), use PAT flow
+	if host != "" || defaultHost == "" {
+		if host == "" {
+			return fmt.Errorf("%s requires --host flag (e.g., --host git.mycompany.com)", forge)
+		}
+		return runConnectPAT(forge, host, forgeName, serverURL, serverCfg.Token)
+	}
+
+	// Otherwise, use OAuth flow for hosted services
 	// Check if OAuth is configured on server
 	resp, err := http.Get(serverURL + apiPath)
 	if err != nil {
@@ -1283,6 +1305,131 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  cinch repo add owner/name --forge %s\n", forge)
 	fmt.Println()
 	fmt.Println("Or visit the web UI to select repositories to onboard.")
+
+	return nil
+}
+
+// runConnectPAT handles PAT-based connection for self-hosted instances.
+func runConnectPAT(forge, host, forgeName, serverURL, userToken string) error {
+	// Normalize host to URL
+	baseURL := host
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		baseURL = "https://" + baseURL
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
+
+	fmt.Printf("Connecting to self-hosted %s at %s\n", forgeName, baseURL)
+	fmt.Println()
+	fmt.Println("You'll need a Personal Access Token (PAT) with the following scopes:")
+	fmt.Println("  - api (for webhook creation and status updates)")
+	fmt.Println()
+
+	// Provide URL to create token based on forge type
+	switch forge {
+	case "gitlab":
+		fmt.Printf("Create a token at: %s/-/user_settings/personal_access_tokens\n", baseURL)
+	case "forgejo", "gitea":
+		fmt.Printf("Create a token at: %s/user/settings/applications\n", baseURL)
+	}
+	fmt.Println()
+
+	// Prompt for PAT
+	fmt.Print("Enter your Personal Access Token: ")
+	var pat string
+	if _, err := fmt.Scanln(&pat); err != nil {
+		return fmt.Errorf("failed to read token: %w", err)
+	}
+	pat = strings.TrimSpace(pat)
+
+	if pat == "" {
+		return fmt.Errorf("token cannot be empty")
+	}
+
+	// Test the token by calling the API
+	fmt.Printf("Verifying token with %s...\n", forgeName)
+
+	var apiURL string
+	switch forge {
+	case "gitlab":
+		apiURL = baseURL + "/api/v4/user"
+	case "forgejo", "gitea":
+		apiURL = baseURL + "/api/v1/user"
+	}
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	// Set auth header based on forge type
+	switch forge {
+	case "gitlab":
+		req.Header.Set("PRIVATE-TOKEN", pat)
+	case "forgejo", "gitea":
+		req.Header.Set("Authorization", "token "+pat)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("verify token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("invalid token (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var userInfo struct {
+		Username string `json:"username"`
+		Login    string `json:"login"` // Forgejo/Gitea uses login
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+		return fmt.Errorf("decode user info: %w", err)
+	}
+
+	username := userInfo.Username
+	if username == "" {
+		username = userInfo.Login
+	}
+
+	fmt.Printf("✓ Token verified for user: %s\n", username)
+	fmt.Println()
+
+	// Store the credentials on the server
+	fmt.Println("Saving credentials...")
+
+	storeReq := map[string]string{
+		"forge":    forge,
+		"host":     baseURL,
+		"token":    pat,
+		"username": username,
+	}
+	storeBody, _ := json.Marshal(storeReq)
+
+	req, err = http.NewRequest("POST", serverURL+"/api/forge/connect", strings.NewReader(string(storeBody)))
+	if err != nil {
+		return fmt.Errorf("create store request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+userToken)
+
+	resp, err = client.Do(req)
+	if err != nil {
+		return fmt.Errorf("store credentials: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to store credentials (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	fmt.Println("✓ Connected!")
+	fmt.Println()
+	fmt.Printf("You can now add repos from %s:\n", host)
+	fmt.Printf("  cinch repo add owner/name --forge %s --url %s\n", forge, baseURL)
 
 	return nil
 }
