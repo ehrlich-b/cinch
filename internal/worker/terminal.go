@@ -50,11 +50,8 @@ func (t *Terminal) PrintJobStart(repo, branch, tag, commit, command, mode, forge
 		commitShort = commit[:8]
 	}
 
-	// Format forge name for display
-	forgeDisplay := strings.ToUpper(forge)
-	if forgeDisplay == "" {
-		forgeDisplay = "BUILD"
-	}
+	// Format forge name for display based on hostname
+	forgeDisplay := forgeDisplayName(repo, forge)
 
 	fmt.Fprintln(t.out)
 	t.printLine("━")
@@ -156,4 +153,46 @@ func formatDuration(d time.Duration) string {
 	hours := int(d.Hours())
 	mins := int(d.Minutes()) % 60
 	return fmt.Sprintf("%dh%dm", hours, mins)
+}
+
+// forgeDisplayName returns a user-friendly forge name based on the clone URL and forge type.
+// Known hosted services get their brand name, self-hosted instances show the forge type.
+func forgeDisplayName(cloneURL, forgeType string) string {
+	// Extract hostname from clone URL
+	host := parseHostFromURL(cloneURL)
+
+	// Map known hosted services to friendly names
+	switch host {
+	case "github.com":
+		return "GITHUB"
+	case "gitlab.com":
+		return "GITLAB"
+	case "codeberg.org":
+		return "CODEBERG"
+	case "gitea.com":
+		return "GITEA"
+	}
+
+	// For self-hosted or unknown hosts, use the forge type
+	if forgeType != "" {
+		return strings.ToUpper(forgeType)
+	}
+	return "BUILD"
+}
+
+// parseHostFromURL extracts the hostname from a clone URL.
+func parseHostFromURL(cloneURL string) string {
+	// Handle https://github.com/owner/repo.git
+	httpsRe := regexp.MustCompile(`https?://([^/]+)`)
+	if matches := httpsRe.FindStringSubmatch(cloneURL); len(matches) > 1 {
+		return strings.ToLower(matches[1])
+	}
+
+	// Handle git@github.com:owner/repo.git
+	sshRe := regexp.MustCompile(`git@([^:]+):`)
+	if matches := sshRe.FindStringSubmatch(cloneURL); len(matches) > 1 {
+		return strings.ToLower(matches[1])
+	}
+
+	return ""
 }

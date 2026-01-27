@@ -3,6 +3,7 @@ import githubLogo from './assets/github.svg'
 import gitlabLogo from './assets/gitlab.svg'
 import giteaLogo from './assets/gitea.svg'
 import forgejoLogo from './assets/forgejo.svg'
+import codebergLogo from './assets/codeberg.svg'
 
 type Page = 'home' | 'jobs' | 'repo-jobs' | 'workers' | 'repos' | 'badges' | 'account' | 'gitlab-onboard' | 'forgejo-onboard' | 'success'
 
@@ -735,7 +736,7 @@ function RepoJobsPage({ repoPath, onSelectJob, onBack }: {
       <div className="repo-jobs-header">
         <button onClick={onBack} className="back-btn">← All Jobs</button>
         <div className="repo-info">
-          <ForgeIcon forge={repoPath.forge.split('.')[0]} />
+          <ForgeIcon forge={repoPath.forge.split('.')[0]} domain={repoPath.forge} />
           <h2>{repoPath.owner}/{repoPath.repo}</h2>
           {repoInfo?.private && <span className="private-badge">private</span>}
           {repoInfo?.html_url && (
@@ -1142,7 +1143,15 @@ function StatusIcon({ status }: { status: string }) {
   }
 }
 
-function ForgeIcon({ forge }: { forge: string }) {
+function ForgeIcon({ forge, cloneUrl, domain }: { forge: string; cloneUrl?: string; domain?: string }) {
+  // Determine the host - prefer explicit domain, then extract from cloneUrl
+  const host = domain || (cloneUrl ? getDomainFromURL(cloneUrl) : null)
+
+  // Check if this is Codeberg (forgejo at codeberg.org)
+  if (forge === 'forgejo' && host === 'codeberg.org') {
+    return <img src={codebergLogo} alt="Codeberg" className="forge-icon" />
+  }
+
   switch (forge) {
     case 'github':
       return <img src={githubLogo} alt="GitHub" className="forge-icon github" />
@@ -1195,8 +1204,28 @@ function renderAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*m/g, '')
 }
 
-// Helper to get forge domain from forge type
-function forgeToDomain(forgeType: string): string {
+// Helper to extract domain from clone URL
+function getDomainFromURL(url: string): string | null {
+  // Handle https://github.com/owner/repo.git
+  const httpsMatch = url.match(/https?:\/\/([^/]+)/)
+  if (httpsMatch) return httpsMatch[1].toLowerCase()
+
+  // Handle git@github.com:owner/repo.git
+  const sshMatch = url.match(/git@([^:]+):/)
+  if (sshMatch) return sshMatch[1].toLowerCase()
+
+  return null
+}
+
+// Helper to get forge domain - prefers extracting from clone_url
+function forgeToDomain(forgeType: string, cloneUrl?: string): string {
+  // If we have a clone URL, extract the actual domain
+  if (cloneUrl) {
+    const domain = getDomainFromURL(cloneUrl)
+    if (domain) return domain
+  }
+
+  // Fallback to static mapping for default hosted services
   switch (forgeType) {
     case 'github': return 'github.com'
     case 'gitlab': return 'gitlab.com'
@@ -1205,6 +1234,7 @@ function forgeToDomain(forgeType: string): string {
     default: return forgeType
   }
 }
+
 
 // Repos page
 function ReposPage({ onAddGitLab, onAddForgejo, onSelectRepo }: {
@@ -1241,7 +1271,7 @@ function ReposPage({ onAddGitLab, onAddForgejo, onSelectRepo }: {
   const handleRepoClick = (repo: Repo) => {
     if (onSelectRepo) {
       onSelectRepo({
-        forge: forgeToDomain(repo.forge_type),
+        forge: forgeToDomain(repo.forge_type, repo.clone_url),
         owner: repo.owner,
         repo: repo.name
       })
@@ -1283,7 +1313,7 @@ function ReposPage({ onAddGitLab, onAddForgejo, onSelectRepo }: {
             {repos.map(repo => (
               <tr key={repo.id} onClick={() => handleRepoClick(repo)} className="clickable">
                 <td><StatusIcon status={repo.latest_job_status || ''} /></td>
-                <td className="forge-icon"><ForgeIcon forge={repo.forge_type} /></td>
+                <td className="forge-icon"><ForgeIcon forge={repo.forge_type} cloneUrl={repo.clone_url} /></td>
                 <td>
                   {repo.owner}/{repo.name}
                   {repo.private && <span className="private-badge">private</span>}
