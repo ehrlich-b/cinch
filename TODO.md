@@ -281,8 +281,8 @@ See `design/12-multi-forge-presence.md` for mechanical details.
 - [x] Prompt for manual PAT (status posting)
 - [x] `cinch connect codeberg` CLI command
 - [x] Idempotent re-onboarding (delete old webhooks, upsert repo tokens)
-- [ ] Self-hosted support: `cinch connect gitlab --host gitlab.mycompany.com`
-- [ ] Self-hosted support: `cinch connect forgejo --host git.mycompany.com`
+- [x] Self-hosted support: `cinch connect gitlab --host gitlab.mycompany.com`
+- [x] Self-hosted support: `cinch connect forgejo --host git.mycompany.com`
 - [ ] Differentiate "codeberg" vs "forgejo" in CLI/UI (codeberg = forgejo at codeberg.org)
 
 ### Multi-Forge Setup for Cinch ✅
