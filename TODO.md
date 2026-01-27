@@ -1,6 +1,6 @@
 # Cinch TODO
 
-**Last Updated:** 2026-01-26
+**Last Updated:** 2026-01-27
 
 ---
 
@@ -88,7 +88,7 @@ Dashboard with your repos
 - [x] Store selected email in user record (email is now the identity)
 - [x] Email-based identity: cookie stores email, not username
 - [x] Duplicate email check: if email exists, show "account exists" error
-- [ ] `cinch login` detects existing session, skips device code flow
+- [x] `cinch login` detects existing session, skips device code flow
 - [x] Success page emphasizes `--all` flag for first-time setup
 - [x] Device code page auto-fills token from URL (`/device?code=XXX`)
 
@@ -97,8 +97,8 @@ Dashboard with your repos
 - [x] Same email = same account (login finds existing, connects forge)
 - [x] Onboard with any forge, then connect additional forges from account settings
 - [x] Each forge connection = repos from that forge available for CI
-- [ ] Username is just metadata (not unique) - drop UNIQUE constraint on users.name
-- [ ] Worker IDs should use email, not username (`user:email@example.com` not `user:username`)
+- [x] Username is just metadata (not unique) - drop UNIQUE constraint on users.name
+- [x] Worker IDs should use email, not username (`user:email@example.com` not `user:username`)
 
 **GitHub App consolidation:**
 - [x] Use GitHub App's OAuth credentials for login (not separate OAuth App)
@@ -183,6 +183,7 @@ Note: `cinch release` works on GitHub, GitLab, Gitea - move forges, keep your Ma
 - [ ] Re-run failed builds
 - [ ] Badge repo selector
 - [ ] Badge links should go to repo job page (e.g., `cinch.sh/jobs/github.com/owner/repo`)
+- [ ] **Distinctive badge design** - Shields.io badges are invisible (everyone uses them, they all look identical). If badges are a distribution channel, they need to look recognizably "Cinch" at a glance. Different shape, proportions, or style. Serve custom SVG from `cinch.sh/badge/...` instead of redirecting to shields.io.
 
 ---
 

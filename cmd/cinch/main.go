@@ -679,6 +679,24 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	// Normalize URL (remove trailing slash)
 	serverURL = strings.TrimSuffix(serverURL, "/")
 
+	// Check for existing valid session
+	if existingCfg, loadErr := cli.LoadConfig(); loadErr == nil {
+		if serverCfg, ok := existingCfg.Servers["default"]; ok && serverCfg.Token != "" {
+			// Verify token is still valid
+			req, _ := http.NewRequest("GET", serverURL+"/api/whoami", nil)
+			req.Header.Set("Authorization", "Bearer "+serverCfg.Token)
+			resp, doErr := http.DefaultClient.Do(req)
+			if doErr == nil && resp.StatusCode == http.StatusOK {
+				resp.Body.Close()
+				fmt.Printf("Already logged in as %s\n", serverCfg.Email)
+				return nil
+			}
+			if resp != nil {
+				resp.Body.Close()
+			}
+		}
+	}
+
 	fmt.Printf("Logging in to %s...\n", serverURL)
 
 	// Request device code
