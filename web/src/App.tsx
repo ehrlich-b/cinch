@@ -97,8 +97,8 @@ export function App() {
   }, [])
 
   // Show landing page for unauthenticated users or when on home
-  // Exception: onboard pages and success page should show their content
-  if (!auth.loading && (!auth.authenticated || page === 'home') && page !== 'gitlab-onboard' && page !== 'forgejo-onboard' && page !== 'success') {
+  // Exceptions: onboard pages, success page, and repo-jobs (public repos viewable without login)
+  if (!auth.loading && (!auth.authenticated || page === 'home') && page !== 'gitlab-onboard' && page !== 'forgejo-onboard' && page !== 'success' && page !== 'repo-jobs') {
     return <LandingPage auth={auth} setAuth={setAuth} onNavigate={(p) => navigate(p)} />
   }
 
@@ -134,6 +134,28 @@ export function App() {
   // Success page after onboarding
   if (page === 'success') {
     return <SuccessPage onContinue={() => navigate('jobs')} />
+  }
+
+  // Public repo jobs page (accessible without login)
+  if (page === 'repo-jobs' && !auth.authenticated && selectedRepoPath) {
+    return (
+      <div className="app">
+        <header>
+          <h1 onClick={() => navigate('home')} style={{ cursor: 'pointer' }}>cinch</h1>
+          <nav></nav>
+          <div className="auth">
+            <a href="/auth/login" className="login">Login</a>
+          </div>
+        </header>
+        <main>
+          <RepoJobsPage
+            repoPath={selectedRepoPath}
+            onSelectJob={(id) => navigate('jobs', id)}
+            onBack={() => navigate('home')}
+          />
+        </main>
+      </div>
+    )
   }
 
   return (
@@ -849,8 +871,12 @@ function WorkersPage() {
 function BadgesPage() {
   const [copied, setCopied] = useState(false)
 
-  const badgeUrl = 'https://cinch.sh/badge/github.com/owner/repo.svg'
-  const markdownSnippet = `[![build](${badgeUrl})](https://cinch.sh)`
+  const exampleForge = 'github.com'
+  const exampleOwner = 'owner'
+  const exampleRepo = 'repo'
+  const badgeUrl = `https://cinch.sh/badge/${exampleForge}/${exampleOwner}/${exampleRepo}.svg`
+  const jobsUrl = `https://cinch.sh/jobs/${exampleForge}/${exampleOwner}/${exampleRepo}`
+  const markdownSnippet = `[![build](${badgeUrl})](${jobsUrl})`
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(markdownSnippet)
@@ -883,7 +909,7 @@ function BadgesPage() {
           </button>
         </div>
         <p className="usage-note">
-          Replace <code>github.com/owner/repo</code> with your repository.
+          Replace <code>github.com/owner/repo</code> with your repository. Badge links to your build history.
         </p>
       </div>
     </div>
