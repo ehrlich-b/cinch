@@ -54,6 +54,39 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
+func TestForgeDisplayName(t *testing.T) {
+	tests := []struct {
+		cloneURL  string
+		forgeType string
+		expected  string
+	}{
+		// Known hosted services
+		{"https://github.com/owner/repo.git", "github", "GITHUB"},
+		{"https://gitlab.com/owner/repo.git", "gitlab", "GITLAB"},
+		{"https://codeberg.org/owner/repo.git", "forgejo", "CODEBERG"},
+		{"https://gitea.com/owner/repo.git", "gitea", "GITEA"},
+		// Self-hosted instances show forge type
+		{"https://gitlab.mycompany.com/owner/repo.git", "gitlab", "GITLAB"},
+		{"https://git.example.org/owner/repo.git", "forgejo", "FORGEJO"},
+		{"https://gitea.internal/owner/repo.git", "gitea", "GITEA"},
+		// SSH URLs
+		{"git@github.com:owner/repo.git", "github", "GITHUB"},
+		{"git@codeberg.org:owner/repo.git", "forgejo", "CODEBERG"},
+		// Fallback
+		{"", "", "BUILD"},
+		{"", "github", "GITHUB"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.cloneURL+"/"+tt.forgeType, func(t *testing.T) {
+			result := forgeDisplayName(tt.cloneURL, tt.forgeType)
+			if result != tt.expected {
+				t.Errorf("forgeDisplayName(%q, %q) = %q, want %q", tt.cloneURL, tt.forgeType, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestTerminalPrintJobStart(t *testing.T) {
 	var buf bytes.Buffer
 	term := NewTerminal(&buf)
@@ -80,6 +113,20 @@ func TestTerminalPrintJobStart(t *testing.T) {
 	}
 	if !strings.Contains(output, "bare-metal") {
 		t.Error("missing mode")
+	}
+}
+
+func TestTerminalPrintJobStartCodeberg(t *testing.T) {
+	var buf bytes.Buffer
+	term := NewTerminal(&buf)
+
+	term.PrintJobStart("https://codeberg.org/owner/repo.git", "main", "", "abc1234567890", "make build", "bare-metal", "forgejo")
+
+	output := buf.String()
+
+	// Should show CODEBERG, not FORGEJO
+	if !strings.Contains(output, "CODEBERG STARTED") {
+		t.Error("missing CODEBERG STARTED - got: " + output)
 	}
 }
 

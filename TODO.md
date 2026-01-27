@@ -185,23 +185,6 @@ Note: `cinch release` works on GitHub, GitLab, Gitea - move forges, keep your Ma
 - [x] Badge links should go to repo job page (e.g., `cinch.sh/jobs/github.com/owner/repo`)
 ---
 
-## Then: MVP 1.3.1 - Distinctive Badge Design (Strong Consider for MVP)
-
-**Goal:** Make Cinch badges recognizable at a glance.
-
-**Problem:** Shields.io badges are invisible - everyone uses them, they all look identical. If badges are a distribution channel, they need to look recognizably "Cinch".
-
-**Approach:**
-- Serve custom SVG directly from `cinch.sh/badge/...` instead of redirecting to shields.io
-- Different shape, proportions, or style that stands out
-- Keep the same URL structure for backwards compatibility
-
-- [ ] Design distinctive badge style (shape, colors, typography)
-- [ ] Implement custom SVG rendering in badge handler
-- [ ] Remove shields.io redirect, serve SVG directly
-
----
-
 ## Then: MVP 1.4 - Forge Expansion + Multi-Forge Presence
 
 **Goal:** Cover the major forges beyond GitHub AND dogfood multi-forge by hosting Cinch itself on all supported platforms.
@@ -283,7 +266,7 @@ See `design/12-multi-forge-presence.md` for mechanical details.
 - [x] Idempotent re-onboarding (delete old webhooks, upsert repo tokens)
 - [x] Self-hosted support: `cinch connect gitlab --host gitlab.mycompany.com`
 - [x] Self-hosted support: `cinch connect forgejo --host git.mycompany.com`
-- [ ] Differentiate "codeberg" vs "forgejo" in CLI/UI (codeberg = forgejo at codeberg.org)
+- [x] Differentiate "codeberg" vs "forgejo" in CLI/UI (codeberg.org shows "CODEBERG" in banners)
 
 ### Multi-Forge Setup for Cinch ✅
 
@@ -463,6 +446,23 @@ Currently push-only. PRs are table stakes for real adoption.
 - [ ] Test payment flow with a real private repo (dogfood the pro tier)
 - [ ] Billing page in web UI
 - [ ] Grace period for failed payments
+
+---
+
+## Then: MVP 1.8 - Distinctive Badge Design (Strong Consider for MVP)
+
+**Goal:** Make Cinch badges recognizable at a glance.
+
+**Problem:** Shields.io badges are invisible - everyone uses them, they all look identical. If badges are a distribution channel, they need to look recognizably "Cinch".
+
+**Approach:**
+- Serve custom SVG directly from `cinch.sh/badge/...` instead of redirecting to shields.io
+- Different shape, proportions, or style that stands out
+- Keep the same URL structure for backwards compatibility
+
+- [ ] Design distinctive badge style (shape, colors, typography)
+- [ ] Implement custom SVG rendering in badge handler
+- [ ] Remove shields.io redirect, serve SVG directly
 
 ---
 
