@@ -181,9 +181,24 @@ Note: `cinch release` works on GitHub, GitLab, Gitea - move forges, keep your Ma
 - [ ] Real Settings page (tokens, repos)
 - [x] Job filtering by repo/status/branch
 - [ ] Re-run failed builds
-- [ ] Badge repo selector
+- [ ] Badge repo selector (show user's repos, generate badge markdown)
 - [x] Badge links should go to repo job page (e.g., `cinch.sh/jobs/github.com/owner/repo`)
-- [ ] **Distinctive badge design** - Shields.io badges are invisible (everyone uses them, they all look identical). If badges are a distribution channel, they need to look recognizably "Cinch" at a glance. Different shape, proportions, or style. Serve custom SVG from `cinch.sh/badge/...` instead of redirecting to shields.io.
+---
+
+## Then: MVP 1.3.1 - Distinctive Badge Design (Strong Consider for MVP)
+
+**Goal:** Make Cinch badges recognizable at a glance.
+
+**Problem:** Shields.io badges are invisible - everyone uses them, they all look identical. If badges are a distribution channel, they need to look recognizably "Cinch".
+
+**Approach:**
+- Serve custom SVG directly from `cinch.sh/badge/...` instead of redirecting to shields.io
+- Different shape, proportions, or style that stands out
+- Keep the same URL structure for backwards compatibility
+
+- [ ] Design distinctive badge style (shape, colors, typography)
+- [ ] Implement custom SVG rendering in badge handler
+- [ ] Remove shields.io redirect, serve SVG directly
 
 ---
 
@@ -250,11 +265,10 @@ See `design/12-multi-forge-presence.md` for mechanical details.
 - [x] Same UX via CLI or web (both hit same API)
 - [x] Web UI: Repos page with "Connect GitLab" button → project selector (multi-select)
 
-**GitHub App auto-onboarding (TODO):**
-Currently repos are created lazily on first push. The GitHub App already knows which repos user selected during install.
-- [ ] On `installation` webhook event, auto-create repos for all selected repositories
-- [ ] On `installation_repositories` (added/removed), sync repo list
-- [ ] Show repos in UI immediately after app install, before first push
+**GitHub App auto-onboarding:**
+- [x] On `installation` webhook event, auto-create repos for all selected repositories
+- [x] On `installation_repositories` (added/removed), sync repo list
+- [x] Show repos in UI immediately after app install, before first push
 
 **GitHub web onboarding (TODO - loop back):**
 - [ ] Allow GitHub repo onboarding through web UI (not just GitHub App)
