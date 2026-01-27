@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -123,10 +124,10 @@ func (h *GitHubAppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch eventType {
 	case "push":
 		h.handlePush(w, r, body)
-	case "installation", "installation_repositories":
-		// Log but don't process yet - repos auto-created on push
-		h.log.Info("installation event received", "action", eventType)
-		w.WriteHeader(http.StatusOK)
+	case "installation":
+		h.handleInstallation(w, r, body)
+	case "installation_repositories":
+		h.handleInstallationRepositories(w, r, body)
 	case "ping":
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
@@ -295,6 +296,140 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"job_id": job.ID})
+}
+
+// handleInstallation handles GitHub App installation events.
+// When action is "created", we auto-create repos for all selected repositories.
+func (h *GitHubAppHandler) handleInstallation(w http.ResponseWriter, r *http.Request, body []byte) {
+	var event struct {
+		Action       string `json:"action"`
+		Installation struct {
+			ID int64 `json:"id"`
+		} `json:"installation"`
+		Repositories []struct {
+			ID       int64  `json:"id"`
+			FullName string `json:"full_name"`
+			Private  bool   `json:"private"`
+		} `json:"repositories"`
+	}
+
+	if err := json.Unmarshal(body, &event); err != nil {
+		h.log.Error("failed to parse installation event", "error", err)
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	h.log.Info("installation event",
+		"action", event.Action,
+		"installation_id", event.Installation.ID,
+		"repos_count", len(event.Repositories),
+	)
+
+	ctx := r.Context()
+
+	switch event.Action {
+	case "created":
+		// User installed the app - create repos for all selected repositories
+		for _, repo := range event.Repositories {
+			if err := h.createRepoFromInstallation(ctx, repo.FullName, repo.Private); err != nil {
+				h.log.Warn("failed to create repo from installation", "repo", repo.FullName, "error", err)
+			}
+		}
+	case "deleted":
+		// User uninstalled the app - we could delete repos, but leaving them is safer
+		h.log.Info("app uninstalled", "installation_id", event.Installation.ID)
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleInstallationRepositories handles when users add/remove repos from an existing installation.
+func (h *GitHubAppHandler) handleInstallationRepositories(w http.ResponseWriter, r *http.Request, body []byte) {
+	var event struct {
+		Action       string `json:"action"`
+		Installation struct {
+			ID int64 `json:"id"`
+		} `json:"installation"`
+		RepositoriesAdded []struct {
+			ID       int64  `json:"id"`
+			FullName string `json:"full_name"`
+			Private  bool   `json:"private"`
+		} `json:"repositories_added"`
+		RepositoriesRemoved []struct {
+			ID       int64  `json:"id"`
+			FullName string `json:"full_name"`
+		} `json:"repositories_removed"`
+	}
+
+	if err := json.Unmarshal(body, &event); err != nil {
+		h.log.Error("failed to parse installation_repositories event", "error", err)
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	h.log.Info("installation_repositories event",
+		"action", event.Action,
+		"installation_id", event.Installation.ID,
+		"added", len(event.RepositoriesAdded),
+		"removed", len(event.RepositoriesRemoved),
+	)
+
+	ctx := r.Context()
+
+	// Handle added repositories
+	for _, repo := range event.RepositoriesAdded {
+		if err := h.createRepoFromInstallation(ctx, repo.FullName, repo.Private); err != nil {
+			h.log.Warn("failed to create repo from installation", "repo", repo.FullName, "error", err)
+		}
+	}
+
+	// Handle removed repositories - we leave them in DB but log it
+	// Could optionally mark them as "disconnected" in future
+	for _, repo := range event.RepositoriesRemoved {
+		h.log.Info("repo removed from installation", "repo", repo.FullName)
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// createRepoFromInstallation creates a repo record from installation event data.
+func (h *GitHubAppHandler) createRepoFromInstallation(ctx context.Context, fullName string, private bool) error {
+	parts := strings.SplitN(fullName, "/", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid repo name: %s", fullName)
+	}
+
+	owner, name := parts[0], parts[1]
+	cloneURL := fmt.Sprintf("https://github.com/%s.git", fullName)
+	htmlURL := fmt.Sprintf("https://github.com/%s", fullName)
+
+	// Check if repo already exists
+	_, err := h.storage.GetRepoByCloneURL(ctx, cloneURL)
+	if err == nil {
+		// Repo already exists
+		h.log.Debug("repo already exists", "repo", fullName)
+		return nil
+	}
+
+	// Create new repo
+	repo := &storage.Repo{
+		ID:            fmt.Sprintf("r_%d", time.Now().UnixNano()),
+		ForgeType:     storage.ForgeTypeGitHub,
+		Owner:         owner,
+		Name:          name,
+		CloneURL:      cloneURL,
+		HTMLURL:       htmlURL,
+		WebhookSecret: "", // Not needed for GitHub App
+		Private:       private,
+		CreatedAt:     time.Now(),
+	}
+
+	if err := h.storage.CreateRepo(ctx, repo); err != nil {
+		return fmt.Errorf("create repo: %w", err)
+	}
+
+	h.log.Info("created repo from installation", "repo", fullName, "private", private)
+	return nil
 }
 
 // GetInstallationToken gets or refreshes an installation token.
