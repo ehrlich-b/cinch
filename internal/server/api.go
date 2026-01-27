@@ -557,17 +557,17 @@ func (h *APIHandler) checkRepoAccess(w http.ResponseWriter, r *http.Request, rep
 
 // Response type for per-repo endpoint with latest job
 type repoWithStatusResponse struct {
-	ID            string       `json:"id"`
-	ForgeType     string       `json:"forge_type"`
-	Owner         string       `json:"owner"`
-	Name          string       `json:"name"`
-	Private       bool         `json:"private"`
-	CloneURL      string       `json:"clone_url"`
-	HTMLURL       string       `json:"html_url,omitempty"`
-	Build         string       `json:"build"`
-	Release       string       `json:"release,omitempty"`
-	CreatedAt     time.Time    `json:"created_at"`
-	LatestJob     *jobResponse `json:"latest_job,omitempty"`
+	ID        string       `json:"id"`
+	ForgeType string       `json:"forge_type"`
+	Owner     string       `json:"owner"`
+	Name      string       `json:"name"`
+	Private   bool         `json:"private"`
+	CloneURL  string       `json:"clone_url"`
+	HTMLURL   string       `json:"html_url,omitempty"`
+	Build     string       `json:"build"`
+	Release   string       `json:"release,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
+	LatestJob *jobResponse `json:"latest_job,omitempty"`
 }
 
 func (h *APIHandler) getRepoByPath(w http.ResponseWriter, r *http.Request, forge, owner, repoName string) {

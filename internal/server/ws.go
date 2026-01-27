@@ -182,9 +182,9 @@ func (h *WSHandler) validateToken(ctx context.Context, token string) (string, er
 
 	// If database lookup failed and we have a JWT validator, try JWT
 	if h.jwtValidator != nil {
-		if username := h.jwtValidator.ValidateUserToken(token); username != "" {
-			// Use username as worker ID prefix for user tokens
-			return "user:" + username, nil
+		if email := h.jwtValidator.ValidateUserToken(token); email != "" {
+			// Use email as worker ID prefix for user tokens
+			return "user:" + email, nil
 		}
 	}
 

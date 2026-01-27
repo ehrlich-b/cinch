@@ -1,6 +1,6 @@
 # Cinch Makefile
 
-.PHONY: build test fmt lint check release clean web web-deps web-dev dev dev-worker run push push-tags install-hooks
+.PHONY: build test fmt lint check release clean web web-deps web-dev dev dev-worker run pull push push-tags install-hooks
 
 # -----------------------------------------------------------------------------
 # Development
@@ -99,6 +99,10 @@ release: web
 # -----------------------------------------------------------------------------
 # Multi-Forge Push (GitHub, GitLab, Codeberg)
 # -----------------------------------------------------------------------------
+
+# Pull from GitHub (canonical source)
+pull:
+	git pull github main
 
 # Push main branch to all forges
 push:

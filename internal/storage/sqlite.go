@@ -144,7 +144,39 @@ func (s *SQLiteStorage) migrate() error {
 	// Index for efficient forge/owner/name lookups
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_repos_forge_owner_name ON repos(forge_type, owner, name)")
 
+	// Drop UNIQUE constraint on users.name (email is the identity, not username)
+	// SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the table
+	if s.hasUniqueConstraintOnUsersName() {
+		_, _ = s.db.Exec(`CREATE TABLE users_new (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			email TEXT NOT NULL DEFAULT '',
+			emails TEXT NOT NULL DEFAULT '',
+			github_connected_at DATETIME,
+			gitlab_credentials TEXT NOT NULL DEFAULT '',
+			gitlab_credentials_at DATETIME,
+			forgejo_credentials TEXT NOT NULL DEFAULT '',
+			forgejo_credentials_at DATETIME,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`)
+		_, _ = s.db.Exec(`INSERT INTO users_new SELECT id, name, email, emails, github_connected_at,
+			gitlab_credentials, gitlab_credentials_at, forgejo_credentials, forgejo_credentials_at, created_at FROM users`)
+		_, _ = s.db.Exec(`DROP TABLE users`)
+		_, _ = s.db.Exec(`ALTER TABLE users_new RENAME TO users`)
+		_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+	}
+
 	return nil
+}
+
+// hasUniqueConstraintOnUsersName checks if users.name has a UNIQUE constraint.
+func (s *SQLiteStorage) hasUniqueConstraintOnUsersName() bool {
+	var sql string
+	err := s.db.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").Scan(&sql)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(sql, "name TEXT NOT NULL UNIQUE")
 }
 
 func (s *SQLiteStorage) Close() error {

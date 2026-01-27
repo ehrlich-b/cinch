@@ -1200,7 +1200,7 @@ func (h *AuthHandler) createUserToken(email string) (string, error) {
 }
 
 // ValidateUserToken validates a Bearer token from the CLI.
-// Returns the username if valid, empty string if not.
+// Returns the user's email if valid, empty string if not.
 func (h *AuthHandler) ValidateUserToken(tokenString string) string {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
