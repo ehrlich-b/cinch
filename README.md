@@ -103,3 +103,5 @@ See `CLAUDE.md` for architecture details.
 ## License
 
 MIT
+
+<!-- PR support test -->
