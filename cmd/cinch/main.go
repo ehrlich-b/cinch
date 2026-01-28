@@ -488,7 +488,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	if verbose {
 		log.Info("shutting down worker")
 	} else {
-		fmt.Println("\nShutting down...")
+		term.PrintShutdown()
 	}
 	w.Stop()
 

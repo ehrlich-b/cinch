@@ -406,6 +406,9 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 		w.jobsLock.Unlock()
 	}()
 
+	// Print job claimed (non-TTY mode)
+	term.PrintJobClaimed(jobID)
+
 	// Notify start
 	if err := w.send(protocol.TypeJobStarted, protocol.NewJobStarted(jobID)); err != nil {
 		w.log.Warn("failed to send JOB_STARTED", "job_id", jobID, "error", err)
@@ -413,6 +416,13 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	if w.OnJobStart != nil {
 		w.OnJobStart(jobID)
 	}
+
+	// Print cloning (non-TTY mode)
+	ref := assign.Repo.Branch
+	if assign.Repo.Tag != "" {
+		ref = assign.Repo.Tag
+	}
+	term.PrintCloning(assign.Repo.CloneURL, ref)
 
 	// Clone repository
 	workDir, err := w.cloneRepo(ctx, assign.Repo)
@@ -560,6 +570,9 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 
 	// Print job completion banner
 	term.PrintJobComplete(exitCode, duration)
+
+	// Print waiting message (non-TTY mode)
+	term.PrintJobWaiting()
 
 	// Report completion
 	if err := w.send(protocol.TypeJobComplete, protocol.NewJobComplete(jobID, exitCode, duration)); err != nil {

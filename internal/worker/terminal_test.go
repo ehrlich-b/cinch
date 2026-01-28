@@ -89,7 +89,7 @@ func TestForgeDisplayName(t *testing.T) {
 
 func TestTerminalPrintJobStart(t *testing.T) {
 	var buf bytes.Buffer
-	term := NewTerminal(&buf)
+	term := NewTerminalWithTTY(&buf, true) // Force TTY mode for ANSI output
 
 	term.PrintJobStart("https://github.com/owner/repo.git", "main", "", "abc1234567890", "make build", "bare-metal", "github")
 
@@ -116,9 +116,30 @@ func TestTerminalPrintJobStart(t *testing.T) {
 	}
 }
 
+func TestTerminalPrintJobStartNonTTY(t *testing.T) {
+	var buf bytes.Buffer
+	term := NewTerminalWithTTY(&buf, false) // Non-TTY mode
+
+	term.PrintJobStart("https://github.com/owner/repo.git", "main", "", "abc1234567890", "make build", "bare-metal", "github")
+
+	output := buf.String()
+
+	// Non-TTY output should be plain prefixed text
+	if !strings.Contains(output, "[job] owner/repo@main") {
+		t.Error("missing [job] owner/repo@main - got: " + output)
+	}
+	if !strings.Contains(output, "[job] running: make build") {
+		t.Error("missing [job] running: make build")
+	}
+	// Should NOT contain ANSI decorations
+	if strings.Contains(output, "GITHUB STARTED") {
+		t.Error("TTY banner should not appear in non-TTY mode")
+	}
+}
+
 func TestTerminalPrintJobStartCodeberg(t *testing.T) {
 	var buf bytes.Buffer
-	term := NewTerminal(&buf)
+	term := NewTerminalWithTTY(&buf, true) // Force TTY mode for ANSI output
 
 	term.PrintJobStart("https://codeberg.org/owner/repo.git", "main", "", "abc1234567890", "make build", "bare-metal", "forgejo")
 
@@ -131,9 +152,9 @@ func TestTerminalPrintJobStartCodeberg(t *testing.T) {
 }
 
 func TestTerminalPrintJobComplete(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
+	t.Run("success TTY", func(t *testing.T) {
 		var buf bytes.Buffer
-		term := NewTerminal(&buf)
+		term := NewTerminalWithTTY(&buf, true)
 		term.PrintJobComplete(0, 12*time.Second)
 
 		output := buf.String()
@@ -145,9 +166,9 @@ func TestTerminalPrintJobComplete(t *testing.T) {
 		}
 	})
 
-	t.Run("failure", func(t *testing.T) {
+	t.Run("failure TTY", func(t *testing.T) {
 		var buf bytes.Buffer
-		term := NewTerminal(&buf)
+		term := NewTerminalWithTTY(&buf, true)
 		term.PrintJobComplete(1, 5*time.Second)
 
 		output := buf.String()
@@ -158,21 +179,86 @@ func TestTerminalPrintJobComplete(t *testing.T) {
 			t.Error("missing exit code")
 		}
 	})
+
+	t.Run("success non-TTY", func(t *testing.T) {
+		var buf bytes.Buffer
+		term := NewTerminalWithTTY(&buf, false)
+		term.PrintJobComplete(0, 12*time.Second)
+
+		output := buf.String()
+		if !strings.Contains(output, "[job] exit 0 (12.0s)") {
+			t.Error("expected [job] exit 0 (12.0s) - got: " + output)
+		}
+	})
+
+	t.Run("failure non-TTY", func(t *testing.T) {
+		var buf bytes.Buffer
+		term := NewTerminalWithTTY(&buf, false)
+		term.PrintJobComplete(1, 5*time.Second)
+
+		output := buf.String()
+		if !strings.Contains(output, "[job] exit 1 (5.0s)") {
+			t.Error("expected [job] exit 1 (5.0s) - got: " + output)
+		}
+	})
 }
 
 func TestTerminalPrintJobError(t *testing.T) {
-	var buf bytes.Buffer
-	term := NewTerminal(&buf)
-	term.PrintJobError("clone", "permission denied")
+	t.Run("TTY", func(t *testing.T) {
+		var buf bytes.Buffer
+		term := NewTerminalWithTTY(&buf, true)
+		term.PrintJobError("clone", "permission denied")
 
-	output := buf.String()
-	if !strings.Contains(output, "BUILD ERROR") {
-		t.Error("missing BUILD ERROR")
-	}
-	if !strings.Contains(output, "clone") {
-		t.Error("missing phase")
-	}
-	if !strings.Contains(output, "permission denied") {
-		t.Error("missing error message")
-	}
+		output := buf.String()
+		if !strings.Contains(output, "BUILD ERROR") {
+			t.Error("missing BUILD ERROR")
+		}
+		if !strings.Contains(output, "clone") {
+			t.Error("missing phase")
+		}
+		if !strings.Contains(output, "permission denied") {
+			t.Error("missing error message")
+		}
+	})
+
+	t.Run("non-TTY", func(t *testing.T) {
+		var buf bytes.Buffer
+		term := NewTerminalWithTTY(&buf, false)
+		term.PrintJobError("clone", "permission denied")
+
+		output := buf.String()
+		if !strings.Contains(output, "[job] error (clone): permission denied") {
+			t.Error("expected plain error format - got: " + output)
+		}
+	})
+}
+
+func TestTerminalPrintConnected(t *testing.T) {
+	t.Run("TTY", func(t *testing.T) {
+		var buf bytes.Buffer
+		term := NewTerminalWithTTY(&buf, true)
+		term.PrintConnected("user@example.com", "https://cinch.sh")
+
+		output := buf.String()
+		if !strings.Contains(output, "Connected") {
+			t.Error("missing Connected")
+		}
+		if !strings.Contains(output, "user@example.com") {
+			t.Error("missing user")
+		}
+	})
+
+	t.Run("non-TTY", func(t *testing.T) {
+		var buf bytes.Buffer
+		term := NewTerminalWithTTY(&buf, false)
+		term.PrintConnected("user@example.com", "https://cinch.sh")
+
+		output := buf.String()
+		if !strings.Contains(output, "[worker] connected to https://cinch.sh as user@example.com") {
+			t.Error("expected plain connected format - got: " + output)
+		}
+		if !strings.Contains(output, "[worker] waiting for jobs") {
+			t.Error("expected waiting message")
+		}
+	})
 }
