@@ -116,7 +116,7 @@ That's it. That's the whole UX. Cinch should feel like a living dashboard.
 - [ ] Recent jobs list (last 5-10)
 - [ ] Progress estimation from log patterns
 - [ ] Keyboard navigation (view full logs, quit, etc.)
-- [ ] Graceful fallback to simple mode for non-TTY (just raw log stream, no banners/decoration)
+- [x] Graceful fallback to simple mode for non-TTY (just raw log stream, no banners/decoration)
 - [ ] Retry from TUI (`r` key on failed build)
 - [ ] Retry from web UI (button on failed job)
 - [ ] Daemon harness with multi-worker support (`-n` flag)

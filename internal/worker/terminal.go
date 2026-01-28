@@ -3,9 +3,12 @@ package worker
 import (
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // ANSI color codes
@@ -20,16 +23,34 @@ const (
 )
 
 // Terminal provides formatted output for the worker terminal.
+// When isTTY is true, outputs ANSI-decorated banners.
+// When isTTY is false, outputs plain prefixed text suitable for pipes/logs.
 type Terminal struct {
 	out   io.Writer
 	width int
+	isTTY bool
 }
 
-// NewTerminal creates a terminal output helper.
+// NewTerminal creates a terminal output helper with auto-detected TTY mode.
+// If out is os.Stdout, checks if it's a terminal.
 func NewTerminal(out io.Writer) *Terminal {
+	isTTY := false
+	if f, ok := out.(*os.File); ok {
+		isTTY = term.IsTerminal(int(f.Fd()))
+	}
 	return &Terminal{
 		out:   out,
-		width: 80, // Default width
+		width: 80,
+		isTTY: isTTY,
+	}
+}
+
+// NewTerminalWithTTY creates a terminal output helper with explicit TTY mode.
+func NewTerminalWithTTY(out io.Writer, isTTY bool) *Terminal {
+	return &Terminal{
+		out:   out,
+		width: 80,
+		isTTY: isTTY,
 	}
 }
 
@@ -50,6 +71,13 @@ func (t *Terminal) PrintJobStart(repo, branch, tag, commit, command, mode, forge
 		commitShort = commit[:8]
 	}
 
+	if !t.isTTY {
+		// Plain output for pipes/logs
+		fmt.Fprintf(t.out, "[job] %s@%s (%s)\n", repoShort, refDisplay, commitShort)
+		fmt.Fprintf(t.out, "[job] running: %s\n", command)
+		return
+	}
+
 	// Format forge name for display based on hostname
 	forgeDisplay := forgeDisplayName(repo, forge)
 
@@ -68,10 +96,20 @@ func (t *Terminal) PrintJobStart(repo, branch, tag, commit, command, mode, forge
 
 // PrintJobComplete prints the job completion banner.
 func (t *Terminal) PrintJobComplete(exitCode int, duration time.Duration) {
+	durationStr := formatDuration(duration)
+
+	if !t.isTTY {
+		// Plain output for pipes/logs
+		if exitCode == 0 {
+			fmt.Fprintf(t.out, "[job] exit 0 (%s)\n", durationStr)
+		} else {
+			fmt.Fprintf(t.out, "[job] exit %d (%s)\n", exitCode, durationStr)
+		}
+		return
+	}
+
 	fmt.Fprintln(t.out)
 	t.printLine("━")
-
-	durationStr := formatDuration(duration)
 
 	if exitCode == 0 {
 		fmt.Fprintf(t.out, "%s%s  ✓ BUILD PASSED%s  %s%s%s\n",
@@ -89,6 +127,12 @@ func (t *Terminal) PrintJobComplete(exitCode int, duration time.Duration) {
 
 // PrintJobError prints a job error banner.
 func (t *Terminal) PrintJobError(phase, errMsg string) {
+	if !t.isTTY {
+		// Plain output for pipes/logs
+		fmt.Fprintf(t.out, "[job] error (%s): %s\n", phase, errMsg)
+		return
+	}
+
 	fmt.Fprintln(t.out)
 	t.printLine("━")
 	fmt.Fprintf(t.out, "%s%s  ✗ BUILD ERROR%s  %s(%s)%s\n",
@@ -106,8 +150,49 @@ func (t *Terminal) printLine(char string) {
 
 // PrintConnected prints a connection success message.
 func (t *Terminal) PrintConnected(user, server string) {
+	if !t.isTTY {
+		// Plain output for pipes/logs
+		fmt.Fprintf(t.out, "[worker] connected to %s as %s\n", server, user)
+		fmt.Fprintf(t.out, "[worker] waiting for jobs\n")
+		return
+	}
+
 	fmt.Fprintf(t.out, "%s%s✓ Connected%s as %s to %s\n", colorBold, colorGreen, colorReset, user, server)
 	fmt.Fprintf(t.out, "%sWaiting for jobs...%s\n", colorDim, colorReset)
+}
+
+// PrintJobClaimed prints when a job is claimed (non-TTY only, TTY uses PrintJobStart).
+func (t *Terminal) PrintJobClaimed(jobID string) {
+	if !t.isTTY {
+		fmt.Fprintf(t.out, "[worker] claiming job %s\n", jobID)
+	}
+	// TTY mode: job start banner handles this
+}
+
+// PrintCloning prints when cloning starts (non-TTY only).
+func (t *Terminal) PrintCloning(repo, ref string) {
+	if !t.isTTY {
+		repoShort := parseRepoShort(repo)
+		fmt.Fprintf(t.out, "[job] cloning %s@%s\n", repoShort, ref)
+	}
+	// TTY mode: included in job start banner
+}
+
+// PrintJobWaiting prints the waiting message after a job completes.
+func (t *Terminal) PrintJobWaiting() {
+	if !t.isTTY {
+		fmt.Fprintf(t.out, "[worker] job complete, waiting for next\n")
+	}
+	// TTY mode: job complete banner is sufficient
+}
+
+// PrintShutdown prints the shutdown message.
+func (t *Terminal) PrintShutdown() {
+	if !t.isTTY {
+		fmt.Fprintf(t.out, "[worker] shutting down\n")
+	} else {
+		fmt.Fprintln(t.out, "\nShutting down...")
+	}
 }
 
 // parseRepoShort extracts "owner/repo" from a clone URL.
