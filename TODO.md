@@ -4,34 +4,9 @@
 
 ---
 
-## Current: MVP 1.6 - Logs → R2
-
-**Problem:** Logs are in SQLite. That's a timebomb - log blobs grow unbounded.
-
-**Solution:** Move logs to R2 (Cloudflare object storage). This also sets up infrastructure for build cache.
-
-```
-R2 Storage
-├── logs/{job_id}       # job output, append-only
-├── cache/{repo}/       # build cache (future)
-└── artifacts/{job_id}/ # build outputs (future)
-```
-
-**Why R2:**
-- $0.015/GB/mo (basically free)
-- Cloudflare integration (same network as workers)
-- Enables horizontal scaling (shared storage)
-
-**Implementation:**
-- [ ] R2 bucket setup
-- [ ] Log streaming to R2 (append chunks during job)
-- [ ] Log retrieval from R2 (web UI, CLI)
-- [ ] Retention policy (30 days free tier, configurable for paid)
-- [ ] Migration: existing SQLite logs → R2
+## Current: MVP 1.7 - Build Cache
 
 ---
-
-## Then: MVP 1.7 - Build Cache
 
 **The killer feature.** Fast builds are the #1 thing that makes CI good.
 
@@ -79,6 +54,23 @@ Currently push-only. PRs are table stakes for real adoption.
 - [ ] Payment prompt during onboarding (private repo selected → pay first)
 - [ ] Billing page in web UI
 - [ ] Storage quota billing (for cache overage)
+
+---
+
+## 2.x - Edge Architecture
+
+Move client-facing traffic to Cloudflare edge, reduce Fly egress costs.
+
+### Cloudflare Worker Proxy
+- [ ] Worker in front of Fly origin
+- [ ] Presigned URLs for direct R2 log reads
+- [ ] Edge caching for API responses
+- [ ] Custom domain on Cloudflare
+
+### Direct R2 Access
+- [ ] Workers upload logs directly to R2 (presigned PUT URLs)
+- [ ] UI fetches logs directly from R2 (presigned GET URLs)
+- [ ] Server becomes orchestration-only (no log data flows through it)
 
 ---
 
@@ -176,6 +168,18 @@ Native artifact storage (beyond `cinch release` which pushes to forge releases).
 ---
 
 ## Done
+
+### MVP 1.6 - Logs → R2 (2026-01-28)
+
+Job logs stored in Cloudflare R2 instead of SQLite.
+
+- ✅ R2 bucket setup (`cinch` bucket)
+- ✅ LogStore interface with SQLite fallback
+- ✅ R2 implementation with 256KB buffer + 30s flush
+- ✅ Log streaming to R2 (chunks during job, final.log on complete)
+- ✅ Log retrieval from R2 (web UI, API)
+- [ ] Retention policy (30 days free tier, configurable for paid)
+- [ ] Migration: existing SQLite logs → R2
 
 ### MVP 1.5 - Daemon (2026-01-28)
 
