@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -124,6 +125,9 @@ func StartDaemon(cfg DaemonConfig, serverURL, token string, labels []string) err
 	if cfg.Verbose {
 		args = append(args, "-v")
 	}
+	if len(labels) > 0 {
+		args = append(args, "--labels", strings.Join(labels, ","))
+	}
 
 	// Start the daemon process
 	cmd := exec.Command(executable, args...)
@@ -155,14 +159,32 @@ func StartDaemon(cfg DaemonConfig, serverURL, token string, labels []string) err
 	return fmt.Errorf("daemon failed to start")
 }
 
-// StopDaemon stops the running daemon.
+// StopDaemon stops the running daemon gracefully.
+// It waits for running jobs to complete before shutting down.
 func StopDaemon(socketPath string) error {
+	// First check if daemon is running and get status
+	client, err := daemon.Connect(socketPath)
+	if err != nil {
+		// Check pid file as fallback
+		pidFile := socketPath + ".pid"
+		if _, err := os.Stat(pidFile); os.IsNotExist(err) {
+			return fmt.Errorf("daemon not running")
+		}
+		// Pid file exists but socket doesn't - stale state, clean up
+		os.Remove(pidFile)
+		return fmt.Errorf("daemon not running (cleaned up stale pid file)")
+	}
+
+	status, err := client.Status()
+	client.Close()
+	if err != nil {
+		return fmt.Errorf("get status: %w", err)
+	}
+
+	// Read pid file
 	pidFile := socketPath + ".pid"
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("daemon not running (no pid file)")
-		}
 		return fmt.Errorf("read pid file: %w", err)
 	}
 
@@ -176,21 +198,54 @@ func StopDaemon(socketPath string) error {
 		return fmt.Errorf("find process: %w", err)
 	}
 
+	// Show running jobs
+	if status.SlotsBusy > 0 {
+		fmt.Printf("Quiescing %d running job(s)...\n", status.SlotsBusy)
+		for _, job := range status.RunningJobs {
+			repo := parseRepoShort(job.Repo)
+			fmt.Printf("  %s: %s\n", job.JobID, repo)
+		}
+	}
+
+	// Send SIGTERM to initiate graceful shutdown
 	if err := process.Signal(syscall.SIGTERM); err != nil {
 		return fmt.Errorf("send signal: %w", err)
 	}
 
-	// Wait for socket to disappear
-	for i := 0; i < 30; i++ {
+	// Wait for daemon to stop (up to 5 minutes for jobs to complete)
+	timeout := 5 * time.Minute
+	start := time.Now()
+	lastCount := status.SlotsBusy
+
+	for time.Since(start) < timeout {
 		if !daemon.IsDaemonRunning(socketPath) {
 			os.Remove(pidFile)
 			fmt.Println("Daemon stopped")
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+
+		// Check status periodically to show progress
+		if time.Since(start) > 2*time.Second {
+			if client, err := daemon.Connect(socketPath); err == nil {
+				if status, err := client.Status(); err == nil {
+					if status.SlotsBusy != lastCount {
+						if status.SlotsBusy == 0 {
+							fmt.Println("All jobs complete, shutting down...")
+						} else {
+							fmt.Printf("Waiting for %d job(s)...\n", status.SlotsBusy)
+						}
+						lastCount = status.SlotsBusy
+					}
+				}
+				client.Close()
+			}
+		}
+
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Force kill if still running
+	// Timeout - force kill
+	fmt.Println("Timeout waiting for jobs, forcing shutdown...")
 	_ = process.Kill()
 	os.Remove(pidFile)
 	os.Remove(socketPath)

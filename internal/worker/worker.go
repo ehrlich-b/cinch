@@ -70,9 +70,10 @@ type Worker struct {
 	activeJobs map[string]*JobInfo
 
 	// Control
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx      context.Context
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+	draining bool // When true, reject new jobs but let existing ones finish
 
 	// Callbacks
 	OnJobStart    func(jobID string)
@@ -164,11 +165,21 @@ func (w *Worker) Start() error {
 	return nil
 }
 
-// Stop gracefully shuts down the worker.
-func (w *Worker) Stop() {
-	w.cancel()
+// Drain stops accepting new jobs and waits for running jobs to complete.
+// Returns the number of jobs that were running when drain started.
+func (w *Worker) Drain(timeout time.Duration) int {
+	w.jobsLock.Lock()
+	w.draining = true
+	initialCount := len(w.activeJobs)
+	w.jobsLock.Unlock()
 
-	// Wait for active jobs to complete (with timeout)
+	if initialCount == 0 {
+		return 0
+	}
+
+	w.log.Info("draining", "jobs", initialCount)
+
+	// Wait for active jobs to complete
 	done := make(chan struct{})
 	go func() {
 		for {
@@ -185,9 +196,29 @@ func (w *Worker) Stop() {
 
 	select {
 	case <-done:
-	case <-time.After(30 * time.Second):
-		w.log.Warn("timeout waiting for jobs to complete")
+		w.log.Info("drain complete")
+	case <-time.After(timeout):
+		w.log.Warn("drain timeout", "remaining", w.ActiveJobCount())
 	}
+
+	return initialCount
+}
+
+// IsDraining returns true if the worker is draining (not accepting new jobs).
+func (w *Worker) IsDraining() bool {
+	w.jobsLock.Lock()
+	defer w.jobsLock.Unlock()
+	return w.draining
+}
+
+// Stop gracefully shuts down the worker.
+// It first drains (waits for running jobs), then cancels and cleans up.
+func (w *Worker) Stop() {
+	// Drain first - let running jobs complete
+	w.Drain(5 * time.Minute)
+
+	// Now cancel context and cleanup
+	w.cancel()
 
 	w.connLock.Lock()
 	if w.conn != nil {
@@ -415,8 +446,19 @@ func (w *Worker) handleJobAssign(payload []byte) {
 		return
 	}
 
-	// Check capacity
+	// Check if draining or at capacity
 	w.jobsLock.Lock()
+	if w.draining {
+		w.jobsLock.Unlock()
+		w.log.Info("draining, rejecting new job", "job_id", assign.JobID)
+		if err := w.send(protocol.TypeJobReject, protocol.JobReject{
+			JobID:  assign.JobID,
+			Reason: "worker draining",
+		}); err != nil {
+			w.log.Warn("failed to send JOB_REJECT", "job_id", assign.JobID, "error", err)
+		}
+		return
+	}
 	if len(w.activeJobs) >= w.config.Concurrency {
 		w.jobsLock.Unlock()
 		w.log.Warn("at capacity, rejecting", "job_id", assign.JobID, "current", len(w.activeJobs), "max", w.config.Concurrency)

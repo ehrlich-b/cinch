@@ -396,36 +396,27 @@ func runServer(cmd *cobra.Command, args []string) error {
 func workerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "worker",
-		Short: "Start a worker or connect to a daemon",
-		Long: `Start a worker that connects to a Cinch server.
+		Short: "View jobs from the daemon",
+		Long: `Connect to the daemon and stream job events.
 
-If a daemon is running (via 'cinch daemon start'), connects to it and streams
-job events. Otherwise, starts a worker directly.
-
-Use -s for standalone mode: spawns a temporary daemon that exits with Ctrl-C.
+The daemon must be running (via 'cinch daemon start') or use -s for standalone mode.
 
 Examples:
-  cinch worker                              # connect to daemon or start worker
-  cinch worker -v                           # show full job logs
-  cinch worker -s                           # standalone: temp daemon + viewer
-  cinch worker --job j_abc123               # follow specific job
-  cinch worker --server wss://... --token x # direct connection (no daemon)`,
+  cinch worker                 # connect to daemon, watch jobs
+  cinch worker -v              # include full build logs
+  cinch worker --job j_abc123  # follow specific job
+  cinch worker -s              # standalone: temp daemon + viewer`,
 		RunE: runWorker,
 	}
-	cmd.Flags().String("server", "", "Server WebSocket URL (uses saved credentials if not set)")
-	cmd.Flags().String("token", "", "Authentication token (uses saved credentials if not set)")
-	cmd.Flags().StringSlice("labels", nil, "Worker labels (e.g., linux-amd64,docker)")
 	cmd.Flags().BoolP("verbose", "v", false, "Show full job logs")
 	cmd.Flags().BoolP("standalone", "s", false, "Standalone mode: spawn temp daemon")
-	cmd.Flags().String("job", "", "Follow specific job ID (like kubectl logs -c)")
-	cmd.Flags().String("socket", "", "Daemon socket path (default: ~/.cinch/daemon.sock)")
+	cmd.Flags().String("job", "", "Follow specific job ID")
+	cmd.Flags().String("socket", "", "Daemon socket path")
+	cmd.Flags().StringSlice("labels", nil, "Worker labels (standalone mode only)")
 	return cmd
 }
 
 func runWorker(cmd *cobra.Command, args []string) error {
-	serverURL, _ := cmd.Flags().GetString("server")
-	token, _ := cmd.Flags().GetString("token")
-	labels, _ := cmd.Flags().GetStringSlice("labels")
 	verbose, _ := cmd.Flags().GetBool("verbose")
 	standalone, _ := cmd.Flags().GetBool("standalone")
 	jobID, _ := cmd.Flags().GetString("job")
@@ -437,12 +428,8 @@ func runWorker(cmd *cobra.Command, args []string) error {
 
 	// Standalone mode: spawn a temp daemon with concurrency=1
 	if standalone {
+		labels, _ := cmd.Flags().GetStringSlice("labels")
 		return runStandaloneWorker(verbose, labels)
-	}
-
-	// If explicit server/token provided, run direct worker (no daemon)
-	if serverURL != "" && token != "" {
-		return runDirectWorker(serverURL, token, labels, verbose)
 	}
 
 	// Check if daemon is running
@@ -450,88 +437,11 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		return runDaemonClient(socketPath, jobID, verbose)
 	}
 
-	// No daemon running, start a direct worker
-	return runDirectWorker("", "", labels, verbose)
+	// No daemon running - tell user how to start one
+	return fmt.Errorf("no daemon running\n\nStart a daemon:  cinch daemon start\nOr standalone:   cinch worker -s")
 }
 
 // runDirectWorker starts a worker that connects directly to the server.
-func runDirectWorker(serverURL, token string, labels []string, verbose bool) error {
-	// Configure logger based on verbose flag
-	var log *slog.Logger
-	if verbose {
-		log = slog.Default()
-	} else {
-		// Quiet mode: discard all logs
-		log = slog.New(slog.NewTextHandler(io.Discard, nil))
-	}
-
-	term := worker.NewTerminal(os.Stdout)
-	var email, serverDisplay string
-
-	// If server/token not provided, try to use saved credentials
-	if serverURL == "" || token == "" {
-		cliCfg, err := cli.LoadConfig()
-		if err != nil {
-			return fmt.Errorf("load credentials: %w", err)
-		}
-
-		defaultServer, ok := cliCfg.Servers["default"]
-		if !ok || defaultServer.Token == "" {
-			return fmt.Errorf("not logged in - run 'cinch login' first, or provide --server and --token")
-		}
-
-		if serverURL == "" {
-			// Convert HTTP URL to WebSocket URL
-			wsURL := defaultServer.URL
-			wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
-			wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
-			serverURL = wsURL + "/ws/worker"
-		}
-		if token == "" {
-			token = defaultServer.Token
-		}
-
-		email = defaultServer.Email
-		serverDisplay = defaultServer.URL
-	}
-
-	workerCfg := worker.WorkerConfig{
-		ServerURL: serverURL,
-		Token:     token,
-		Labels:    labels,
-		Docker:    true, // Assume Docker available
-		Verbose:   verbose,
-	}
-
-	w := worker.NewWorker(workerCfg, log)
-
-	// Start worker
-	if err := w.Start(); err != nil {
-		return fmt.Errorf("start worker: %w", err)
-	}
-
-	// Print connection banner (quiet mode)
-	if !verbose {
-		term.PrintConnected(email, serverDisplay)
-	} else {
-		log.Info("connected", "email", email, "server", serverDisplay)
-	}
-
-	// Wait for interrupt
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	<-ctx.Done()
-	if verbose {
-		log.Info("shutting down worker")
-	} else {
-		term.PrintShutdown()
-	}
-	w.Stop()
-
-	return nil
-}
-
 // runDaemonClient connects to a running daemon and streams events.
 func runDaemonClient(socketPath, jobID string, verbose bool) error {
 	term := worker.NewTerminal(os.Stdout)
@@ -644,6 +554,9 @@ func runStandaloneWorker(verbose bool, labels []string) error {
 	args := []string{"daemon", "run",
 		"-n", "1", // concurrency=1 so only one job to follow
 		"--socket", socketPath,
+	}
+	if len(labels) > 0 {
+		args = append(args, "--labels", strings.Join(labels, ","))
 	}
 
 	// Start the temp daemon process
@@ -785,6 +698,7 @@ func daemonStartCmd() *cobra.Command {
 			concurrency, _ := cmd.Flags().GetInt("concurrency")
 			socketPath, _ := cmd.Flags().GetString("socket")
 			verbose, _ := cmd.Flags().GetBool("verbose")
+			labels, _ := cmd.Flags().GetStringSlice("labels")
 
 			// Load credentials
 			cliCfg, err := cli.LoadConfig()
@@ -810,7 +724,7 @@ func daemonStartCmd() *cobra.Command {
 			}
 			cfg.Verbose = verbose
 
-			return cli.StartDaemon(cfg, serverURL, serverCfg.Token, nil)
+			return cli.StartDaemon(cfg, serverURL, serverCfg.Token, labels)
 		},
 	}
 
@@ -818,6 +732,7 @@ func daemonStartCmd() *cobra.Command {
 	cmd.Flags().IntP("concurrency", "n", 1, "Number of concurrent jobs")
 	cmd.Flags().String("socket", cfg.SocketPath, "Unix socket path")
 	cmd.Flags().BoolP("verbose", "v", false, "Verbose logging")
+	cmd.Flags().StringSlice("labels", nil, "Worker labels (e.g., linux-amd64,docker)")
 
 	return cmd
 }
@@ -919,6 +834,7 @@ func daemonRunCmd() *cobra.Command {
 			concurrency, _ := cmd.Flags().GetInt("concurrency")
 			socketPath, _ := cmd.Flags().GetString("socket")
 			verbose, _ := cmd.Flags().GetBool("verbose")
+			labels, _ := cmd.Flags().GetStringSlice("labels")
 
 			// Load credentials
 			cliCfg, err := cli.LoadConfig()
@@ -944,13 +860,14 @@ func daemonRunCmd() *cobra.Command {
 			}
 			cfg.Verbose = verbose
 
-			return cli.RunDaemon(cfg, serverURL, serverCfg.Token, nil)
+			return cli.RunDaemon(cfg, serverURL, serverCfg.Token, labels)
 		},
 	}
 
 	cfg := cli.DefaultDaemonConfig()
 	cmd.Flags().IntP("concurrency", "n", 1, "Number of concurrent jobs")
 	cmd.Flags().String("socket", cfg.SocketPath, "Unix socket path")
+	cmd.Flags().StringSlice("labels", nil, "Worker labels")
 	cmd.Flags().BoolP("verbose", "v", false, "Verbose logging")
 
 	return cmd
@@ -1626,40 +1543,90 @@ auto-detected from environment variables. Outside of CI, use flags.`,
 }
 
 func installCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install or update cinch",
 		Long: `Download and run the cinch install script.
 
 This fetches the latest version from GitHub releases and installs
-all platform binaries to ~/.cinch/bin/.`,
+all platform binaries to ~/.cinch/bin/.
+
+After installation, optionally sets up the daemon as a system service.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Downloading install script...")
+			daemonOnly, _ := cmd.Flags().GetBool("daemon")
 
-			resp, err := http.Get("https://cinch.sh/install.sh")
-			if err != nil {
-				return fmt.Errorf("fetch install script: %w", err)
+			if !daemonOnly {
+				fmt.Println("Downloading install script...")
+
+				resp, err := http.Get("https://cinch.sh/install.sh")
+				if err != nil {
+					return fmt.Errorf("fetch install script: %w", err)
+				}
+				defer resp.Body.Close()
+
+				if resp.StatusCode != http.StatusOK {
+					return fmt.Errorf("failed to fetch install script: %s", resp.Status)
+				}
+
+				script, err := io.ReadAll(resp.Body)
+				if err != nil {
+					return fmt.Errorf("read install script: %w", err)
+				}
+
+				// Run the install script
+				shCmd := exec.Command("sh")
+				shCmd.Stdin = strings.NewReader(string(script))
+				shCmd.Stdout = os.Stdout
+				shCmd.Stderr = os.Stderr
+
+				if err := shCmd.Run(); err != nil {
+					return err
+				}
 			}
-			defer resp.Body.Close()
 
-			if resp.StatusCode != http.StatusOK {
-				return fmt.Errorf("failed to fetch install script: %s", resp.Status)
+			// Offer to set up daemon service
+			setupDaemon, _ := cmd.Flags().GetBool("with-daemon")
+			concurrency, _ := cmd.Flags().GetInt("concurrency")
+
+			if setupDaemon || daemonOnly {
+				fmt.Println()
+				fmt.Println("Setting up daemon service...")
+
+				if err := cli.InstallDaemonService(concurrency); err != nil {
+					return fmt.Errorf("install daemon service: %w", err)
+				}
+
+				// Check if logged in
+				cliCfg, err := cli.LoadConfig()
+				if err == nil {
+					if _, ok := cliCfg.Servers["default"]; ok {
+						fmt.Println()
+						fmt.Println("Starting daemon...")
+						cfg := cli.DefaultDaemonConfig()
+						cfg.Concurrency = concurrency
+						if err := cli.StartDaemon(cfg, "", "", nil); err != nil {
+							fmt.Printf("Note: Could not start daemon: %v\n", err)
+							fmt.Println("Start manually with: cinch daemon start")
+						}
+					} else {
+						fmt.Println()
+						fmt.Println("Run 'cinch login' then 'cinch daemon start' to start the worker.")
+					}
+				}
+			} else if !daemonOnly {
+				fmt.Println()
+				fmt.Println("Tip: Run 'cinch install --with-daemon' to also set up background worker service.")
 			}
 
-			script, err := io.ReadAll(resp.Body)
-			if err != nil {
-				return fmt.Errorf("read install script: %w", err)
-			}
-
-			// Run the install script
-			shCmd := exec.Command("sh")
-			shCmd.Stdin = strings.NewReader(string(script))
-			shCmd.Stdout = os.Stdout
-			shCmd.Stderr = os.Stderr
-
-			return shCmd.Run()
+			return nil
 		},
 	}
+
+	cmd.Flags().Bool("with-daemon", false, "Also install daemon as system service")
+	cmd.Flags().Bool("daemon", false, "Only set up daemon service (skip binary install)")
+	cmd.Flags().IntP("concurrency", "n", 1, "Daemon concurrency (number of parallel jobs)")
+
+	return cmd
 }
 
 func connectCmd() *cobra.Command {
