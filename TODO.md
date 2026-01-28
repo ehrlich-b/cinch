@@ -1,128 +1,12 @@
 # Cinch TODO
 
-**Last Updated:** 2026-01-27
+**Last Updated:** 2026-01-28
 
 ---
 
-## Immediate: Tech Debt
+## Current: MVP 1.5 - Daemon
 
-- [x] **Break up web/src/App.tsx** - Split into components/pages (2200 lines → 184 + modules)
-
----
-
-## Current: MVP 1.5 - Worker Ergonomics
-
-**Goal:** Worker setup so simple that "I don't want to run my own runners" stops being a complaint. And running a worker should feel *cool as shit* - way better than the sad GitHub Actions runner experience (static "Listening for Jobs" message, then silence).
-
-### Worker TUI - Make It Feel Alive
-
-Running a worker should be a visual experience. GitHub's runner is a sad terminal that prints one line and sits there. We can do better.
-
-**Vision:**
-```bash
-cinch daemon start           # Background daemon
-cinch worker                 # Attach with TUI (or just start worker if no daemon)
-```
-
-**The TUI (bubbletea):**
-```
-┌─────────────────────────────────────────────────────────────┐
-│  CINCH WORKER                              ehrlich@macbook  │
-├─────────────────────────────────────────────────────────────┤
-│  ● CONNECTED to cinch.sh                    3 repos         │
-│                                                             │
-│  ┌─ CURRENT BUILD ────────────────────────────────────────┐ │
-│  │  owner/repo @ main (abc1234)                           │ │
-│  │  $ make build                                          │ │
-│  │  ████████████░░░░░░░░░░░░░░░░░  38%  2m 14s            │ │
-│  │                                                        │ │
-│  │  > Compiling src/main.go...                            │ │
-│  │  > go build -o bin/app ./cmd/app                       │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                             │
-│  ┌─ RECENT ───────────────────────────────────────────────┐ │
-│  │  ✓ owner/other  make test         12s    2m ago        │ │
-│  │  ✓ owner/repo   make build        1m 3s  5m ago        │ │
-│  │  ✗ team/proj    make check        45s    12m ago       │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                             │
-│  [q] quit  [l] logs  [r] retry                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Key elements:**
-- Live progress bar (if we can estimate from log output)
-- Scrolling last few lines of current build
-- Recent builds with pass/fail, duration, time ago
-- Keyboard shortcuts for common actions
-- Status indicator (connected, jobs waiting, etc.)
-- **Retry failed builds** - `r` to retry from TUI
-
-**Feature parity: TUI ↔ Web UI**
-
-Anything you can do in the TUI, you should be able to do in the web UI and vice versa:
-- Retry/re-run failed builds
-- View live logs
-- See worker status (connected, current job, recent jobs)
-- **Stop a worker remotely** (from web UI → signal worker to gracefully shut down)
-
-**Daemon parallelism:**
-
-Parallelism = run more worker processes. No code-level concurrency - just spawn more.
-
-```bash
-cinch daemon start              # Starts daemon with 1 worker
-cinch daemon start -n 4         # Starts daemon with 4 worker processes
-cinch daemon scale 2            # Adjust running workers (add/remove)
-cinch daemon status             # Show all worker processes
-```
-
-The daemon harness manages N worker child processes. Each worker is independent, connects to cinch.sh, claims jobs. Want more parallelism? `cinch daemon scale 8`.
-
-**Remote daemon control (stretch):**
-
-From the web UI, manage your daemon:
-- See all your workers (which machines, how many processes each)
-- Shut down a specific worker
-- Scale up/down workers on a machine
-- "Manage workers on your machine" sounds enterprise but it's useful
-
-**Non-TTY mode (pipes, logs, CI):**
-
-No banners, no decoration, just raw output:
-```
-[worker] connected to cinch.sh
-[worker] claiming job j_abc123
-[job] cloning owner/repo@main
-[job] running: make build
-go build -o bin/app ./cmd/app
-...actual build output...
-[job] exit 0 (12.3s)
-[worker] job complete, waiting for next
-```
-
-The current `terminal.go` banner code (━━━ lines, ANSI colors, "GITHUB STARTED") goes away for non-TTY. All that pretty stuff is TUI-only.
-
-**Contrast with GitHub Actions runner:**
-```
-√ Connected to GitHub
-2024-01-24 05:45:56Z: Listening for Jobs
-```
-That's it. That's the whole UX. Cinch should feel like a living dashboard.
-
-**Implementation:**
-- [ ] bubbletea TUI for `cinch worker` attach mode
-- [ ] Real-time log streaming in TUI
-- [ ] Recent jobs list (last 5-10)
-- [ ] Progress estimation from log patterns
-- [ ] Keyboard navigation (view full logs, quit, etc.)
-- [x] Graceful fallback to simple mode for non-TTY (just raw log stream, no banners/decoration)
-- [ ] Retry from TUI (`r` key on failed build)
-- [ ] Retry from web UI (button on failed job)
-- [ ] Daemon harness with multi-worker support (`-n` flag)
-- [ ] `cinch daemon scale N` to adjust worker count
-- [ ] Remote worker shutdown (web UI → graceful stop signal)
-- [ ] Worker list in web UI (see all your connected workers)
+**Goal:** `cinch daemon install && cinch daemon start` - your Mac/Linux box is now a CI runner.
 
 ### `cinch daemon` - Dead Simple Background Worker
 
@@ -148,6 +32,25 @@ cinch daemon uninstall  # Remove service file
 cinch daemon logs       # Tail the daemon logs
 ```
 
+**Parallelism:** Run more worker processes. No code-level concurrency.
+
+```bash
+cinch daemon start              # Starts daemon with 1 worker
+cinch daemon start -n 4         # Starts daemon with 4 worker processes
+cinch daemon scale 2            # Adjust running workers (add/remove)
+cinch daemon status             # Show all worker processes
+```
+
+Each worker process makes its own websocket connection to cinch.sh. The daemon is just a process supervisor.
+
+**Implementation:**
+- [ ] Daemon harness with multi-worker support (`-n` flag)
+- [ ] `cinch daemon scale N` to adjust worker count
+- [ ] launchd plist generation for macOS
+- [ ] systemd unit generation for Linux
+- [ ] `cinch daemon logs` - tail daemon output
+- [ ] Worker list in web UI (see all your connected workers)
+
 **Open questions:**
 - [ ] What about Windows? (Probably just "run in terminal" for now)
 - [ ] Docker-in-Docker on Mac? (Docker Desktop socket passthrough)
@@ -155,7 +58,61 @@ cinch daemon logs       # Tail the daemon logs
 
 ---
 
-## Then: MVP 1.6 - PR/MR Support
+## Then: MVP 1.6 - Logs → R2
+
+**Problem:** Logs are in SQLite. That's a timebomb - log blobs grow unbounded.
+
+**Solution:** Move logs to R2 (Cloudflare object storage). This also sets up infrastructure for build cache.
+
+```
+R2 Storage
+├── logs/{job_id}       # job output, append-only
+├── cache/{repo}/       # build cache (future)
+└── artifacts/{job_id}/ # build outputs (future)
+```
+
+**Why R2:**
+- $0.015/GB/mo (basically free)
+- Cloudflare integration (same network as workers)
+- Enables horizontal scaling (shared storage)
+
+**Implementation:**
+- [ ] R2 bucket setup
+- [ ] Log streaming to R2 (append chunks during job)
+- [ ] Log retrieval from R2 (web UI, CLI)
+- [ ] Retention policy (30 days free tier, configurable for paid)
+- [ ] Migration: existing SQLite logs → R2
+
+---
+
+## Then: MVP 1.7 - Build Cache
+
+**The killer feature.** Fast builds are the #1 thing that makes CI good.
+
+Cache layers in R2, shared across builds. Think "docker layer caching as a service."
+
+```yaml
+# .cinch.yaml
+cache:
+  - node_modules/
+  - ~/.cache/go-build/
+  - target/
+```
+
+**Implementation:**
+- [ ] Cache manifest format
+- [ ] Upload cache layers to R2 after build
+- [ ] Download cache layers before build
+- [ ] LRU eviction when quota exceeded
+- [ ] Cache hit/miss metrics in UI
+
+**Storage pricing (design now, implement with Stripe):**
+- 10GB free
+- $10/mo per 100GB additional
+
+---
+
+## Then: MVP 1.8 - PR/MR Support
 
 Currently push-only. PRs are table stakes for real adoption.
 
@@ -166,7 +123,7 @@ Currently push-only. PRs are table stakes for real adoption.
 
 ---
 
-## Then: MVP 1.7 - Stripe Integration
+## Then: MVP 1.9 - Stripe Integration
 
 **Pricing:** Public repos free, private repos $5/seat/month, self-hosted free.
 
@@ -175,20 +132,45 @@ Currently push-only. PRs are table stakes for real adoption.
 - [ ] Public vs private repo detection
 - [ ] Payment prompt during onboarding (private repo selected → pay first)
 - [ ] Billing page in web UI
+- [ ] Storage quota billing (for cache overage)
 
 ---
 
-## Then: MVP 1.8 - Distinctive Badge Design
+## Future: Scale & Polish
 
-**Problem:** Shields.io badges are invisible - everyone uses them. Cinch badges should be recognizable.
+### Postgres + Multi-Node (when needed)
 
-- [ ] Design distinctive badge style (shape, colors, typography)
-- [ ] Implement custom SVG rendering
-- [ ] Remove shields.io redirect, serve SVG directly
+Current single-node SQLite handles ~100 concurrent jobs. When you need HA or more:
 
----
+- [ ] Postgres storage backend (interface already abstracted)
+- [ ] Postgres NOTIFY for cross-node job dispatch
+- [ ] `fly scale count 3`
 
-## Future: Parallel Commands
+### Worker TUI (nice to have)
+
+The bubbletea TUI for `cinch worker` - makes running a worker feel alive. Deferred because daemon covers the core need.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  CINCH WORKER                              ehrlich@macbook  │
+├─────────────────────────────────────────────────────────────┤
+│  ● CONNECTED to cinch.sh                    3 repos         │
+│  ┌─ CURRENT BUILD ────────────────────────────────────────┐ │
+│  │  owner/repo @ main (abc1234)                           │ │
+│  │  ████████████░░░░░░░░░░░░░░░░░  38%  2m 14s            │ │
+│  └────────────────────────────────────────────────────────┘ │
+│  [q] quit  [l] logs  [r] retry                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- [ ] bubbletea TUI for `cinch worker` attach mode
+- [ ] Real-time log streaming in TUI
+- [ ] Recent jobs list (last 5-10)
+- [ ] Progress estimation from log patterns
+- [ ] Keyboard navigation (view full logs, quit, etc.)
+- [ ] Retry from TUI (`r` key on failed build)
+
+### Parallel Builds
 
 ```yaml
 # Array = parallel jobs (no DAG)
@@ -200,6 +182,22 @@ build:
 
 Array items fan out as independent parallel jobs. No DAG, no workflow DSL.
 
+### Artifacts
+
+Native artifact storage (beyond `cinch release` which pushes to forge releases). Only useful after parallel builds exist (cross-job artifact sharing).
+
+- [ ] `cinch artifact upload dist/*`
+- [ ] Artifact download in subsequent jobs
+- [ ] Artifact browser in web UI
+
+### Distinctive Badge Design
+
+**Problem:** Shields.io badges are invisible - everyone uses them.
+
+- [ ] Design distinctive badge style (shape, colors, typography)
+- [ ] Implement custom SVG rendering
+- [ ] Remove shields.io redirect, serve SVG directly
+
 ---
 
 ## Backlog
@@ -209,15 +207,12 @@ Array items fan out as independent parallel jobs. No DAG, no workflow DSL.
 - [ ] Loading skeletons
 - [ ] Real Settings page (tokens, repos)
 - [ ] Badge repo selector (generate badge markdown)
+- [ ] Retry from web UI (button on failed job)
+- [ ] Remote worker shutdown (web UI → graceful stop signal)
 
 ### CLI Polish
 - [ ] `cinch status` - check job status from CLI
 - [ ] `cinch logs -f` - stream logs from CLI
-
-### Scale
-- [ ] Worker labels and routing
-- [ ] Fan-out to multiple workers
-- [ ] Postgres storage backend
 
 ### Known Issues
 - [ ] Worker should check for docker/podman on startup (fail fast)
@@ -274,6 +269,11 @@ Multi-forge support complete. Cinch hosted on GitHub, GitLab, and Codeberg simul
 - ✅ Real-time log streaming
 - ✅ Deployed to Fly.io
 
+### Tech Debt (2026-01-28)
+
+- ✅ Break up web/src/App.tsx - Split into components/pages (2200 lines → 184 + modules)
+- ✅ Non-TTY mode for worker output (`[worker]`/`[job]` prefixes, no ANSI decoration)
+
 ---
 
 ## Architecture Reference
@@ -299,4 +299,31 @@ CINCH_FORGE_TOKEN=xxx           # Always set
 // 2. Add type constant in internal/forge/forge.go
 // 3. Add to factory switch statement
 // 4. Register in cmd/cinch/main.go
+```
+
+### Scaling Architecture (Future)
+
+```
+                    ┌─────────────────┐
+                    │   Cloudflare    │
+                    │   (CDN + R2)    │
+                    └────────┬────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+        ┌─────▼─────┐  ┌─────▼─────┐  ┌─────▼─────┐
+        │  Fly Node │  │  Fly Node │  │  Fly Node │
+        │  (web/ws) │  │  (web/ws) │  │  (web/ws) │
+        └─────┬─────┘  └─────┬─────┘  └─────┬─────┘
+              │              │              │
+              └──────────────┼──────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │    Postgres     │
+                    │  (jobs, repos)  │
+                    └─────────────────┘
+
+Workers connect via websocket to any Fly node.
+Jobs dispatched via Postgres NOTIFY.
+Logs/cache stored in R2.
 ```
