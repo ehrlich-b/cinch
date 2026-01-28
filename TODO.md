@@ -4,27 +4,47 @@
 
 ---
 
-## Current: MVP 1.7 - PR/MR Support
+## Current: MVP 1.8 - Worker Trust Model
 
 ---
 
-**Table stakes.** Can't gate merges on CI without this. Currently push-only.
+**SECURITY CRITICAL.** Fork PRs currently dispatch to maintainer's worker = backdoor.
 
-PRs are forge-level events (not git events). Different webhook type from push/tag.
+See `design/12-worker-trust-model.md` for full design.
 
-- [x] GitHub Pull Request events (`pull_request`)
-- [x] GitLab Merge Request events (`merge_request`)
-- [x] Forgejo/Gitea Pull Request events (`pull_request`)
-- [x] Status checks on PR head commit
-- [x] PR fields in Job struct (pr_number, pr_base_branch)
-- [x] API returns PR info
-- [x] Web UI displays PR info (shows "PR #123" instead of just branch)
+### Core Concept
 
-**Design decision:** `build:` runs on PR events (no separate `pr:` trigger).
+Two worker modes:
+- **Personal (default)**: Only runs YOUR code (your pushes, your PRs)
+- **Shared (`--shared`)**: Runs collaborator code, defers to personal workers
+
+Fork PRs run on the **contributor's** machine, not the maintainer's.
+
+### Implementation
+
+- [ ] Add author/author_id to Job struct
+- [ ] Add trust_level (owner/collaborator/external) computed from forge API
+- [ ] Add worker mode (personal/team) to registration
+- [ ] Dispatch: personal workers only get author's jobs
+- [ ] Dispatch: shared workers defer to author's personal worker if online
+- [ ] Fork PRs: new `pending_contributor` status
+- [ ] Fork PRs: status message with `cinch worker -s` instructions
+- [ ] Web UI: approval flow for "run on shared worker"
+- [ ] CLI: `cinch worker --shared` flag
+- [ ] CLI: show pending PRs you authored
+
+### Dispatch Priority
+
+```
+1. Author's personal worker online → dispatch there
+2. Team worker online, author is collaborator → dispatch there
+3. Fork PR, no author worker → hold as "pending_contributor"
+4. Maintainer approves → dispatch to shared worker
+```
 
 ---
 
-## Then: MVP 1.8 - Polish & Retry
+## Then: MVP 1.9 - Polish & Retry
 
 - [ ] Retry failed jobs from web UI
 - [ ] `cinch status` - check job status from CLI
@@ -33,7 +53,7 @@ PRs are forge-level events (not git events). Different webhook type from push/ta
 
 ---
 
-## Then: MVP 1.9 - Stripe Integration
+## Then: MVP 1.10 - Stripe Integration
 
 **Pricing:** Public repos free, private repos $5/seat/month, self-hosted free.
 
@@ -188,6 +208,11 @@ Native artifact storage (beyond `cinch release` which pushes to forge releases).
 
 ## Backlog
 
+### Documentation
+- [ ] Branch protection setup guide (GitHub rulesets require typing "cinch" as check name - not auto-discovered)
+- [ ] GitLab/Forgejo equivalent merge protection setup
+- [ ] Troubleshooting: "why isn't my PR gated?"
+
 ### Web UI Polish
 - [ ] Light/dark theme toggle
 - [ ] Loading skeletons
@@ -216,6 +241,19 @@ Native artifact storage (beyond `cinch release` which pushes to forge releases).
 ---
 
 ## Done
+
+### MVP 1.7 - PR/MR Support (2026-01-28)
+
+PR/MR events trigger builds, status checks gate merges.
+
+- ✅ GitHub Pull Request events (`pull_request`)
+- ✅ GitLab Merge Request events (`merge_request`)
+- ✅ Forgejo/Gitea Pull Request events (`pull_request`)
+- ✅ Status checks on PR head commit
+- ✅ PR fields in Job struct (pr_number, pr_base_branch)
+- ✅ API returns PR info
+- ✅ Web UI displays PR info (shows "PR #123" instead of just branch)
+- ✅ Webhook subscriptions include PR events for new repos
 
 ### MVP 1.6 - Logs → R2 (2026-01-28)
 
