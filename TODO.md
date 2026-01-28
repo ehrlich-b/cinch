@@ -59,18 +59,61 @@ Currently push-only. PRs are table stakes for real adoption.
 
 ## 2.x - Edge Architecture
 
-Move client-facing traffic to Cloudflare edge, reduce Fly egress costs.
+Move client-facing traffic to Cloudflare edge, eliminate Fly egress costs.
 
-### Cloudflare Worker Proxy
-- [ ] Worker in front of Fly origin
-- [ ] Presigned URLs for direct R2 log reads
-- [ ] Edge caching for API responses
-- [ ] Custom domain on Cloudflare
+### a.cinch.sh - Artifact/Storage Worker
 
-### Direct R2 Access
-- [ ] Workers upload logs directly to R2 (presigned PUT URLs)
-- [ ] UI fetches logs directly from R2 (presigned GET URLs)
-- [ ] Server becomes orchestration-only (no log data flows through it)
+Single Cloudflare Worker at `a.cinch.sh` fronting all R2 storage. Fly handles auth only.
+
+```
+Client (JWT)
+    │
+    ▼
+a.cinch.sh (Cloudflare Worker)
+    │
+    ├── ACL check: GET cinch.fly.dev/api/acl?resource=/logs/j_xxx
+    │              (tiny request, Fly validates JWT + permissions)
+    │
+    └── If 200: fetch from R2, stream to client (free egress)
+        If 403: return forbidden
+```
+
+**Routes:**
+```
+a.cinch.sh/logs/{job_id}/final.log   → R2: logs/{job_id}/final.log
+a.cinch.sh/cache/{repo}/{hash}       → R2: cache/{repo}/{hash}
+a.cinch.sh/artifacts/{job_id}/{name} → R2: artifacts/{job_id}/{name}
+```
+
+**Implementation:**
+- [ ] Create `a.cinch.sh` subdomain on Cloudflare
+- [ ] Worker: extract JWT from Authorization header
+- [ ] Worker: ACL check to Fly origin (forward JWT)
+- [ ] Worker: on 200, fetch from R2 and stream response
+- [ ] Worker: cache ACL responses for 60s (reduce Fly calls)
+- [ ] Fly: `/api/acl` endpoint - validate JWT, check resource access
+
+**ACL endpoint (Fly):**
+```go
+GET /api/acl?resource=/logs/j_xxx
+Authorization: Bearer <cinch-jwt>
+
+// Check: does this user have access to this job's repo?
+// Return: 200 OK or 403 Forbidden
+```
+
+**Cost savings:**
+- Log reads: 0 Fly egress (was 100%)
+- Cache downloads: 0 Fly egress
+- Artifact downloads: 0 Fly egress
+- Only ACL checks hit Fly (~100 bytes each)
+
+### Direct Uploads (Future)
+
+For writes, workers/CLI could upload directly to R2 with presigned URLs:
+- [ ] Server generates presigned PUT URL
+- [ ] Client uploads directly to R2
+- [ ] Server never sees the data
 
 ---
 
