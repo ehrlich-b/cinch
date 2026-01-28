@@ -429,3 +429,8 @@ dockerfile: docker/Dockerfile.ci
 		t.Errorf("expected dockerfile 'docker/Dockerfile.ci', got %q", cfg.Dockerfile)
 	}
 }
+
+func TestPRSupportVerification(t *testing.T) {
+	// This test intentionally fails to verify PR gating works
+	t.Fatal("PR support verification: this build should be blocked from merging")
+}
