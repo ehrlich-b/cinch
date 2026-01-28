@@ -71,7 +71,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Debug("webhook received", "forge", matchedForge.Name())
 
-	// We need to read the body but also need to pass the request to ParsePush
+	// We need to read the body but also need to pass the request to parsers
 	// which will read it again. So we need to buffer and restore.
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -81,11 +81,20 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = io.NopCloser(strings.NewReader(string(body)))
 
-	// Try to parse without verification first to get the repo
+	// Try to parse as PR first, then push
 	// We'll verify signature after we look up the webhook secret
+	prEvent, prErr := matchedForge.ParsePullRequest(r, "")
+	if prErr == nil {
+		// Handle PR event
+		h.handlePullRequest(w, r, body, matchedForge, prEvent)
+		return
+	}
+
+	// Not a PR, try push
+	r.Body = io.NopCloser(strings.NewReader(string(body)))
 	event, err := matchedForge.ParsePush(r, "")
 	if err != nil {
-		h.log.Warn("failed to parse webhook", "forge", matchedForge.Name(), "error", err)
+		h.log.Warn("failed to parse webhook", "forge", matchedForge.Name(), "error", err, "pr_error", prErr)
 		// Some errors are expected (like branch deletions)
 		if strings.Contains(err.Error(), "deletion") {
 			w.WriteHeader(http.StatusOK)
@@ -174,6 +183,106 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 	fmt.Fprintf(w, `{"job_id": %q}`, job.ID)
+}
+
+// handlePullRequest handles PR/MR webhook events.
+func (h *WebhookHandler) handlePullRequest(w http.ResponseWriter, r *http.Request, body []byte, matchedForge forge.Forge, prEvent *forge.PullRequestEvent) {
+	ctx := r.Context()
+
+	// Look up the repo to get the webhook secret
+	repo, err := h.storage.GetRepoByCloneURL(ctx, prEvent.Repo.CloneURL)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			h.log.Warn("repo not configured", "clone_url", prEvent.Repo.CloneURL)
+			http.Error(w, "repo not configured", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get repo", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Sync private flag if it changed
+	if repo.Private != prEvent.Repo.Private {
+		if err := h.storage.UpdateRepoPrivate(ctx, repo.ID, prEvent.Repo.Private); err != nil {
+			h.log.Warn("failed to update repo private flag", "error", err)
+		} else {
+			h.log.Info("repo private flag updated", "repo", prEvent.Repo.FullName(), "private", prEvent.Repo.Private)
+			repo.Private = prEvent.Repo.Private
+		}
+	}
+
+	// Now verify signature with the stored secret
+	if repo.WebhookSecret != "" {
+		r.Body = io.NopCloser(strings.NewReader(string(body)))
+		_, err = matchedForge.ParsePullRequest(r, repo.WebhookSecret)
+		if err != nil {
+			h.log.Warn("webhook signature verification failed", "repo", prEvent.Repo.FullName(), "error", err)
+			http.Error(w, "signature verification failed", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	// Create job for PR
+	job, err := h.createPRJob(ctx, repo, prEvent)
+	if err != nil {
+		h.log.Error("failed to create job", "error", err)
+		http.Error(w, "failed to create job", http.StatusInternalServerError)
+		return
+	}
+
+	h.log.Info("PR job created",
+		"job_id", job.ID,
+		"repo", prEvent.Repo.FullName(),
+		"pr", prEvent.Number,
+		"branch", prEvent.HeadBranch,
+		"commit", prEvent.Commit[:8],
+	)
+
+	// Post pending status
+	if err := h.postStatus(ctx, matchedForge, repo, prEvent.Commit, job.ID, forge.StatusPending, "Build queued"); err != nil {
+		h.log.Warn("failed to post pending status", "error", err)
+	}
+
+	// PRs always run the build command (not release)
+	command := repo.Build
+
+	// Queue job for dispatch
+	h.dispatcher.Enqueue(&QueuedJob{
+		Job:      job,
+		Repo:     repo,
+		Forge:    matchedForge,
+		CloneURL: prEvent.Repo.CloneURL,
+		Ref:      "refs/pull/" + fmt.Sprintf("%d", prEvent.Number) + "/head", // PR ref format
+		Branch:   prEvent.HeadBranch,
+		Config: protocol.JobConfig{
+			Command: command,
+		},
+		CloneToken: repo.ForgeToken,
+	})
+
+	w.WriteHeader(http.StatusAccepted)
+	fmt.Fprintf(w, `{"job_id": %q}`, job.ID)
+}
+
+func (h *WebhookHandler) createPRJob(ctx context.Context, repo *storage.Repo, event *forge.PullRequestEvent) (*storage.Job, error) {
+	prNum := event.Number
+	job := &storage.Job{
+		ID:           generateJobID(),
+		RepoID:       repo.ID,
+		Commit:       event.Commit,
+		Branch:       event.HeadBranch,
+		PRNumber:     &prNum,
+		PRBaseBranch: event.BaseBranch,
+		Status:       storage.JobStatusPending,
+		CreatedAt:    time.Now(),
+	}
+
+	if err := h.storage.CreateJob(ctx, job); err != nil {
+		return nil, err
+	}
+
+	return job, nil
 }
 
 func (h *WebhookHandler) createJob(ctx context.Context, repo *storage.Repo, event *forge.PushEvent) (*storage.Job, error) {

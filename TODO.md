@@ -4,43 +4,32 @@
 
 ---
 
-## Current: MVP 1.7 - Build Cache
+## Current: MVP 1.7 - PR/MR Support
 
 ---
 
-**The killer feature.** Fast builds are the #1 thing that makes CI good.
+**Table stakes.** Can't gate merges on CI without this. Currently push-only.
 
-Cache layers in R2, shared across builds. Think "docker layer caching as a service."
+PRs are forge-level events (not git events). Different webhook type from push/tag.
 
-```yaml
-# .cinch.yaml
-cache:
-  - node_modules/
-  - ~/.cache/go-build/
-  - target/
-```
+- [x] GitHub Pull Request events (`pull_request`)
+- [x] GitLab Merge Request events (`merge_request`)
+- [x] Forgejo/Gitea Pull Request events (`pull_request`)
+- [x] Status checks on PR head commit
+- [x] PR fields in Job struct (pr_number, pr_base_branch)
+- [x] API returns PR info
+- [x] Web UI displays PR info (shows "PR #123" instead of just branch)
 
-**Implementation:**
-- [ ] Cache manifest format
-- [ ] Upload cache layers to R2 after build
-- [ ] Download cache layers before build
-- [ ] LRU eviction when quota exceeded
-- [ ] Cache hit/miss metrics in UI
-
-**Storage pricing (design now, implement with Stripe):**
-- 10GB free
-- $10/mo per 100GB additional
+**Design decision:** `build:` runs on PR events (no separate `pr:` trigger).
 
 ---
 
-## Then: MVP 1.8 - PR/MR Support
+## Then: MVP 1.8 - Polish & Retry
 
-Currently push-only. PRs are table stakes for real adoption.
-
-- [ ] GitHub Pull Request events
-- [ ] GitLab Merge Request events
-- [ ] Forgejo/Gitea Pull Request events
-- [ ] Status checks on PR head commit
+- [ ] Retry failed jobs from web UI
+- [ ] `cinch status` - check job status from CLI
+- [ ] `cinch logs -f` - stream logs from CLI
+- [ ] Worker list in web UI
 
 ---
 
@@ -118,6 +107,22 @@ For writes, workers/CLI could upload directly to R2 with presigned URLs:
 ---
 
 ## Future: Scale & Polish
+
+### Build Cache (nice-to-have)
+
+Cache layers in R2, shared across builds. Makes builds faster, but doesn't block adoption.
+
+```yaml
+cache:
+  - node_modules/
+  - ~/.cache/go-build/
+  - target/
+```
+
+- [ ] Cache manifest format
+- [ ] Upload/download cache layers to R2
+- [ ] LRU eviction when quota exceeded
+- [ ] Cache hit/miss metrics in UI
 
 ### Postgres + Multi-Node (when needed)
 

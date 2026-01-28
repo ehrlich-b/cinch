@@ -79,7 +79,13 @@ export function JobDetailPage({ jobId, onBack }: Props) {
           <div className="job-meta">
             <span><StatusIcon status={status || job.status} /></span>
             <span>{job.repo}</span>
-            <span>{job.branch}</span>
+            <span>
+              {job.pr_number ? (
+                <span title={`${job.branch} → ${job.pr_base_branch}`}>
+                  PR #{job.pr_number}
+                </span>
+              ) : job.branch}
+            </span>
             <span className="mono">{job.commit?.slice(0, 7)}</span>
             <span className="text-muted">{relativeTime(job.created_at)}</span>
           </div>

@@ -124,6 +124,8 @@ func (h *GitHubAppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch eventType {
 	case "push":
 		h.handlePush(w, r, body)
+	case "pull_request":
+		h.handlePullRequest(w, r, body)
 	case "installation":
 		h.handleInstallation(w, r, body)
 	case "installation_repositories":
@@ -289,6 +291,146 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 		Ref:            event.Ref,
 		Branch:         branch,
 		Tag:            tag,
+		CloneToken:     cloneToken,
+		InstallationID: installationID,
+	}
+	h.dispatcher.Enqueue(queuedJob)
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"job_id": job.ID})
+}
+
+// handlePullRequest handles GitHub pull_request webhook events.
+func (h *GitHubAppHandler) handlePullRequest(w http.ResponseWriter, r *http.Request, body []byte) {
+	var event struct {
+		Action      string `json:"action"`
+		PullRequest struct {
+			Number int    `json:"number"`
+			Title  string `json:"title"`
+			Head   struct {
+				SHA string `json:"sha"`
+				Ref string `json:"ref"`
+			} `json:"head"`
+			Base struct {
+				Ref string `json:"ref"`
+			} `json:"base"`
+		} `json:"pull_request"`
+		Repository struct {
+			FullName string `json:"full_name"`
+			CloneURL string `json:"clone_url"`
+			HTMLURL  string `json:"html_url"`
+			Private  bool   `json:"private"`
+		} `json:"repository"`
+		Installation struct {
+			ID int64 `json:"id"`
+		} `json:"installation"`
+	}
+
+	if err := json.Unmarshal(body, &event); err != nil {
+		h.log.Error("failed to parse pull_request event", "error", err)
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	// Only build on actionable events
+	switch event.Action {
+	case "opened", "synchronize", "reopened":
+		// These trigger builds
+	default:
+		h.log.Debug("ignoring PR action", "action", event.Action)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	commit := event.PullRequest.Head.SHA
+	prNum := event.PullRequest.Number
+
+	ctx := r.Context()
+
+	// Find or create repo
+	repo, err := h.storage.GetRepoByCloneURL(ctx, event.Repository.CloneURL)
+	if err != nil {
+		// Auto-create repo
+		parts := strings.SplitN(event.Repository.FullName, "/", 2)
+		if len(parts) != 2 {
+			h.log.Error("invalid repo name", "full_name", event.Repository.FullName)
+			http.Error(w, "invalid repo name", http.StatusBadRequest)
+			return
+		}
+
+		repo = &storage.Repo{
+			ID:            fmt.Sprintf("r_%d", time.Now().UnixNano()),
+			ForgeType:     storage.ForgeTypeGitHub,
+			Owner:         parts[0],
+			Name:          parts[1],
+			CloneURL:      event.Repository.CloneURL,
+			HTMLURL:       event.Repository.HTMLURL,
+			WebhookSecret: "",
+			CreatedAt:     time.Now(),
+		}
+
+		if err := h.storage.CreateRepo(ctx, repo); err != nil {
+			h.log.Error("failed to create repo", "error", err)
+			http.Error(w, "failed to create repo", http.StatusInternalServerError)
+			return
+		}
+		h.log.Info("auto-created repo", "repo", event.Repository.FullName)
+	}
+
+	// Create job
+	installationID := event.Installation.ID
+	job := &storage.Job{
+		ID:             fmt.Sprintf("j_%d", time.Now().UnixNano()),
+		RepoID:         repo.ID,
+		Commit:         commit,
+		Branch:         event.PullRequest.Head.Ref,
+		PRNumber:       &prNum,
+		PRBaseBranch:   event.PullRequest.Base.Ref,
+		Status:         storage.JobStatusPending,
+		InstallationID: &installationID,
+		CreatedAt:      time.Now(),
+	}
+
+	if err := h.storage.CreateJob(ctx, job); err != nil {
+		h.log.Error("failed to create job", "error", err)
+		http.Error(w, "failed to create job", http.StatusInternalServerError)
+		return
+	}
+
+	h.log.Info("PR job created",
+		"job_id", job.ID,
+		"repo", event.Repository.FullName,
+		"pr", prNum,
+		"commit", commit[:8],
+	)
+
+	// Create GitHub Check Run
+	checkRunID, err := h.CreateCheckRun(repo, commit, job.ID, installationID)
+	if err != nil {
+		h.log.Warn("failed to create check run", "error", err)
+	} else {
+		if err := h.storage.UpdateJobCheckRunID(ctx, job.ID, checkRunID); err != nil {
+			h.log.Warn("failed to save check run ID", "error", err)
+		}
+		job.CheckRunID = &checkRunID
+	}
+
+	// Get installation token
+	var cloneToken string
+	token, err := h.GetInstallationToken(installationID)
+	if err != nil {
+		h.log.Warn("failed to get installation token", "error", err)
+	} else {
+		cloneToken = token
+	}
+
+	// Enqueue job - PRs always use build command
+	queuedJob := &QueuedJob{
+		Job:            job,
+		Repo:           repo,
+		CloneURL:       repo.CloneURL,
+		Ref:            fmt.Sprintf("refs/pull/%d/head", prNum),
+		Branch:         event.PullRequest.Head.Ref,
 		CloneToken:     cloneToken,
 		InstallationID: installationID,
 	}

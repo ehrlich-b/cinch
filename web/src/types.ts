@@ -62,6 +62,8 @@ export interface Job {
   id: string
   repo: string
   branch: string
+  pr_number?: number
+  pr_base_branch?: string
   commit: string
   status: string
   duration?: number

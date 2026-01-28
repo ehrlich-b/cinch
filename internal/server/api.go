@@ -157,32 +157,36 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // --- Jobs ---
 
 type jobResponse struct {
-	ID         string     `json:"id"`
-	RepoID     string     `json:"repo_id"`
-	Repo       string     `json:"repo"` // repo name for frontend display
-	Commit     string     `json:"commit"`
-	Branch     string     `json:"branch"`
-	Status     string     `json:"status"`
-	Duration   *int64     `json:"duration,omitempty"` // duration in ms
-	ExitCode   *int       `json:"exit_code,omitempty"`
-	WorkerID   *string    `json:"worker_id,omitempty"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
+	ID           string     `json:"id"`
+	RepoID       string     `json:"repo_id"`
+	Repo         string     `json:"repo"` // repo name for frontend display
+	Commit       string     `json:"commit"`
+	Branch       string     `json:"branch"`
+	PRNumber     *int       `json:"pr_number,omitempty"`
+	PRBaseBranch string     `json:"pr_base_branch,omitempty"`
+	Status       string     `json:"status"`
+	Duration     *int64     `json:"duration,omitempty"` // duration in ms
+	ExitCode     *int       `json:"exit_code,omitempty"`
+	WorkerID     *string    `json:"worker_id,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 func jobToResponse(j *storage.Job) jobResponse {
 	resp := jobResponse{
-		ID:         j.ID,
-		RepoID:     j.RepoID,
-		Commit:     j.Commit,
-		Branch:     j.Branch,
-		Status:     string(j.Status),
-		ExitCode:   j.ExitCode,
-		WorkerID:   j.WorkerID,
-		StartedAt:  j.StartedAt,
-		FinishedAt: j.FinishedAt,
-		CreatedAt:  j.CreatedAt,
+		ID:           j.ID,
+		RepoID:       j.RepoID,
+		Commit:       j.Commit,
+		Branch:       j.Branch,
+		PRNumber:     j.PRNumber,
+		PRBaseBranch: j.PRBaseBranch,
+		Status:       string(j.Status),
+		ExitCode:     j.ExitCode,
+		WorkerID:     j.WorkerID,
+		StartedAt:    j.StartedAt,
+		FinishedAt:   j.FinishedAt,
+		CreatedAt:    j.CreatedAt,
 	}
 	// Calculate duration if job finished
 	if j.StartedAt != nil && j.FinishedAt != nil {

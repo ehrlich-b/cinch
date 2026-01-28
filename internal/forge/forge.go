@@ -19,6 +19,10 @@ type Forge interface {
 	// Returns an error if signature verification fails.
 	ParsePush(r *http.Request, secret string) (*PushEvent, error)
 
+	// ParsePullRequest parses a pull request webhook and verifies the signature.
+	// Returns an error if signature verification fails or event type is not a PR.
+	ParsePullRequest(r *http.Request, secret string) (*PullRequestEvent, error)
+
 	// PostStatus posts a commit status to the forge.
 	PostStatus(ctx context.Context, repo *Repo, commit string, status *Status) error
 
@@ -36,6 +40,19 @@ type PushEvent struct {
 	Branch string // Branch name (empty for tag pushes)
 	Tag    string // Tag name (empty for branch pushes)
 	Sender string // Username who pushed
+}
+
+// PullRequestEvent represents a pull request webhook event.
+type PullRequestEvent struct {
+	Repo       *Repo
+	Number     int    // PR number
+	Action     string // opened, synchronize, reopened, closed
+	Commit     string // SHA of the head commit (PR branch tip)
+	HeadBranch string // Source branch name
+	BaseBranch string // Target branch name
+	Title      string // PR title
+	Sender     string // Username who triggered the event
+	IsFork     bool   // True if PR is from a fork
 }
 
 // Repo represents a git repository.
