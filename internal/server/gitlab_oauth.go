@@ -665,6 +665,7 @@ func (h *GitLabOAuthHandler) createWebhook(token *gitlabOAuthToken, projectID in
 	data.Set("token", secret)
 	data.Set("push_events", "true")
 	data.Set("tag_push_events", "true")
+	data.Set("merge_requests_events", "true")
 	data.Set("enable_ssl_verification", "true")
 
 	req, err := http.NewRequest("POST",

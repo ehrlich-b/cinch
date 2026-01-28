@@ -1225,7 +1225,7 @@ Examples:
 After adding, configure the webhook in your forge:
   - URL: shown in output
   - Secret: shown in output (or token for GitLab)
-  - Events: push`,
+  - Events: push, pull_request (or merge_request for GitLab)`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRepoAdd(args[0], forgeType, forgeURL, forgeToken)
@@ -1463,7 +1463,7 @@ func runManualRepoAdd(serverCfg cli.ServerConfig, repoPath, forgeType, forgeURL,
 		fmt.Println("Configure webhook in GitLab:")
 		fmt.Printf("  URL: %s\n", webhookURL)
 		fmt.Printf("  Secret token: %s\n", result.WebhookSecret)
-		fmt.Println("  Trigger: Push events, Tag push events")
+		fmt.Println("  Trigger: Push events, Tag push events, Merge request events")
 		if forgeToken == "" {
 			fmt.Println()
 			fmt.Println("Note: For status updates, create a Project Access Token with 'api' scope:")
@@ -1475,13 +1475,13 @@ func runManualRepoAdd(serverCfg cli.ServerConfig, repoPath, forgeType, forgeURL,
 		fmt.Printf("  URL: %s\n", webhookURL)
 		fmt.Printf("  Secret: %s\n", result.WebhookSecret)
 		fmt.Println("  Content type: application/json")
-		fmt.Println("  Events: push")
+		fmt.Println("  Events: push, pull_request")
 	default:
 		fmt.Printf("Configure webhook in %s:\n", forgeType)
 		fmt.Printf("  URL: %s\n", webhookURL)
 		fmt.Printf("  Secret: %s\n", result.WebhookSecret)
 		fmt.Println("  Content type: application/json")
-		fmt.Println("  Events: push")
+		fmt.Println("  Events: push, pull_request")
 	}
 
 	return nil

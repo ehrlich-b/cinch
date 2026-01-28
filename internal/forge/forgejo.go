@@ -204,6 +204,77 @@ func (f *Forgejo) CloneToken(ctx context.Context, repo *Repo) (string, time.Time
 	return f.Token, time.Now().Add(24 * time.Hour), nil
 }
 
+// ParsePullRequest parses a Forgejo/Gitea pull_request webhook.
+func (f *Forgejo) ParsePullRequest(r *http.Request, secret string) (*PullRequestEvent, error) {
+	// Check event type (try both headers)
+	event := r.Header.Get("X-Forgejo-Event")
+	if event == "" {
+		event = r.Header.Get("X-Gitea-Event")
+	}
+	if event != "pull_request" {
+		return nil, fmt.Errorf("unexpected event type: %s", event)
+	}
+
+	// Read body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	// Verify signature
+	if secret != "" {
+		sig := r.Header.Get("X-Forgejo-Signature")
+		if sig == "" {
+			sig = r.Header.Get("X-Gitea-Signature")
+		}
+		if err := f.verifySignature(body, sig, secret); err != nil {
+			return nil, err
+		}
+	}
+
+	// Parse payload
+	var payload forgejoPRPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("parse payload: %w", err)
+	}
+
+	// Only trigger on actionable events
+	switch payload.Action {
+	case "opened", "synchronized", "reopened":
+		// These are the events we want to build
+	default:
+		return nil, fmt.Errorf("ignoring PR action: %s", payload.Action)
+	}
+
+	// Determine forge type
+	forgeType := "forgejo"
+	if f.IsGitea {
+		forgeType = "gitea"
+	}
+
+	// Check if this is from a fork
+	isFork := payload.PullRequest.Head.Repo.FullName != payload.Repository.FullName
+
+	return &PullRequestEvent{
+		Repo: &Repo{
+			ForgeType: forgeType,
+			Owner:     payload.Repository.Owner.Username,
+			Name:      payload.Repository.Name,
+			CloneURL:  payload.Repository.CloneURL,
+			HTMLURL:   payload.Repository.HTMLURL,
+			Private:   payload.Repository.Private,
+		},
+		Number:     payload.PullRequest.Number,
+		Action:     payload.Action,
+		Commit:     payload.PullRequest.Head.SHA,
+		HeadBranch: payload.PullRequest.Head.Ref,
+		BaseBranch: payload.PullRequest.Base.Ref,
+		Title:      payload.PullRequest.Title,
+		Sender:     payload.Sender.Username,
+		IsFork:     isFork,
+	}, nil
+}
+
 // Forgejo/Gitea webhook payload types
 
 type forgejoPushPayload struct {
@@ -230,4 +301,35 @@ type forgejoStatusPayload struct {
 	Context     string `json:"context"`
 	Description string `json:"description,omitempty"`
 	TargetURL   string `json:"target_url,omitempty"`
+}
+
+type forgejoPRPayload struct {
+	Action      string `json:"action"`
+	PullRequest struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Head   struct {
+			SHA  string `json:"sha"`
+			Ref  string `json:"ref"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+		Base struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+	} `json:"pull_request"`
+	Repository struct {
+		Name     string `json:"name"`
+		FullName string `json:"full_name"`
+		Private  bool   `json:"private"`
+		HTMLURL  string `json:"html_url"`
+		CloneURL string `json:"clone_url"`
+		Owner    struct {
+			Username string `json:"username"`
+		} `json:"owner"`
+	} `json:"repository"`
+	Sender struct {
+		Username string `json:"username"`
+	} `json:"sender"`
 }

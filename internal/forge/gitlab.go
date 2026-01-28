@@ -217,6 +217,74 @@ func (g *GitLab) CloneToken(ctx context.Context, repo *Repo) (string, time.Time,
 	return token, time.Now().Add(1 * time.Hour), nil
 }
 
+// ParsePullRequest parses a GitLab merge_request webhook.
+func (g *GitLab) ParsePullRequest(r *http.Request, secret string) (*PullRequestEvent, error) {
+	// Check event type
+	event := r.Header.Get("X-Gitlab-Event")
+	if event != "Merge Request Hook" {
+		return nil, fmt.Errorf("unexpected event type: %s", event)
+	}
+
+	// Read body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	// Verify token (GitLab uses simple token comparison, not HMAC)
+	if secret != "" {
+		token := r.Header.Get("X-Gitlab-Token")
+		if token != secret {
+			return nil, errors.New("token mismatch")
+		}
+	}
+
+	// Parse payload
+	var payload gitlabMRPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("parse payload: %w", err)
+	}
+
+	// Only trigger on actionable events
+	switch payload.ObjectAttributes.Action {
+	case "open", "reopen", "update":
+		// These are the events we want to build
+	default:
+		return nil, fmt.Errorf("ignoring MR action: %s", payload.ObjectAttributes.Action)
+	}
+
+	// Extract owner from path_with_namespace
+	owner := payload.Project.Namespace
+	if payload.Project.PathWithNamespace != "" {
+		parts := strings.SplitN(payload.Project.PathWithNamespace, "/", 2)
+		if len(parts) > 0 {
+			owner = parts[0]
+		}
+	}
+
+	// Check if this is from a fork
+	isFork := payload.ObjectAttributes.SourceProjectID != payload.ObjectAttributes.TargetProjectID
+
+	return &PullRequestEvent{
+		Repo: &Repo{
+			ForgeType: "gitlab",
+			Owner:     owner,
+			Name:      payload.Project.Name,
+			CloneURL:  payload.Project.GitHTTPURL,
+			HTMLURL:   payload.Project.WebURL,
+			Private:   payload.Project.VisibilityLevel != 20,
+		},
+		Number:     payload.ObjectAttributes.IID,
+		Action:     payload.ObjectAttributes.Action,
+		Commit:     payload.ObjectAttributes.LastCommit.ID,
+		HeadBranch: payload.ObjectAttributes.SourceBranch,
+		BaseBranch: payload.ObjectAttributes.TargetBranch,
+		Title:      payload.ObjectAttributes.Title,
+		Sender:     payload.User.Username,
+		IsFork:     isFork,
+	}, nil
+}
+
 // GitLab webhook payload types
 
 type gitlabPushPayload struct {
@@ -240,6 +308,33 @@ type gitlabStatusPayload struct {
 	Context     string `json:"name"` // GitLab uses "name" for status context
 	Description string `json:"description,omitempty"`
 	TargetURL   string `json:"target_url,omitempty"`
+}
+
+type gitlabMRPayload struct {
+	ObjectAttributes struct {
+		IID             int    `json:"iid"` // MR number within project
+		Action          string `json:"action"`
+		Title           string `json:"title"`
+		SourceBranch    string `json:"source_branch"`
+		TargetBranch    string `json:"target_branch"`
+		SourceProjectID int    `json:"source_project_id"`
+		TargetProjectID int    `json:"target_project_id"`
+		LastCommit      struct {
+			ID string `json:"id"` // Commit SHA
+		} `json:"last_commit"`
+	} `json:"object_attributes"`
+	Project struct {
+		ID                int    `json:"id"`
+		Name              string `json:"name"`
+		Namespace         string `json:"namespace"`
+		PathWithNamespace string `json:"path_with_namespace"`
+		WebURL            string `json:"web_url"`
+		GitHTTPURL        string `json:"git_http_url"`
+		VisibilityLevel   int    `json:"visibility_level"`
+	} `json:"project"`
+	User struct {
+		Username string `json:"username"`
+	} `json:"user"`
 }
 
 // gitlabOAuthCredentials matches the JSON stored in repo.ForgeToken for OAuth fallback.

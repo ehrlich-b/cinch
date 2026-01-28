@@ -88,6 +88,8 @@ type Job struct {
 	Commit         string
 	Branch         string // Branch name (empty for tags)
 	Tag            string // Tag name (empty for branches)
+	PRNumber       *int   // Pull request number (nil for push events)
+	PRBaseBranch   string // PR target branch (empty for push events)
 	Status         JobStatus
 	ExitCode       *int
 	WorkerID       *string

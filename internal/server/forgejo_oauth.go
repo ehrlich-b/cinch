@@ -589,7 +589,7 @@ func (h *ForgejoOAuthHandler) createWebhook(token *forgejoOAuthToken, owner, nam
 	payload := map[string]any{
 		"type":   "forgejo",
 		"active": true,
-		"events": []string{"push"},
+		"events": []string{"push", "pull_request"},
 		"config": map[string]string{
 			"url":          webhookURL,
 			"content_type": "json",

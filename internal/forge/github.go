@@ -182,6 +182,65 @@ func (g *GitHub) CloneToken(ctx context.Context, repo *Repo) (string, time.Time,
 	return g.Token, time.Now().Add(time.Hour), nil
 }
 
+// ParsePullRequest parses a GitHub pull_request webhook.
+func (g *GitHub) ParsePullRequest(r *http.Request, secret string) (*PullRequestEvent, error) {
+	// Check event type
+	event := r.Header.Get("X-GitHub-Event")
+	if event != "pull_request" {
+		return nil, fmt.Errorf("unexpected event type: %s", event)
+	}
+
+	// Read body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	// Verify signature
+	if secret != "" {
+		sig := r.Header.Get("X-Hub-Signature-256")
+		if err := g.verifySignature(body, sig, secret); err != nil {
+			return nil, err
+		}
+	}
+
+	// Parse payload
+	var payload githubPRPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("parse payload: %w", err)
+	}
+
+	// Only trigger on actionable events
+	switch payload.Action {
+	case "opened", "synchronize", "reopened":
+		// These are the events we want to build
+	default:
+		return nil, fmt.Errorf("ignoring PR action: %s", payload.Action)
+	}
+
+	// Check if this is from a fork
+	isFork := payload.PullRequest.Head.Repo.FullName != payload.Repository.FullName
+
+	return &PullRequestEvent{
+		Repo: &Repo{
+			ForgeType: "github",
+			Owner:     payload.Repository.Owner.Login,
+			Name:      payload.Repository.Name,
+			CloneURL:  payload.Repository.CloneURL,
+			HTMLURL:   payload.Repository.HTMLURL,
+			Private:   payload.Repository.Private,
+		},
+		Number:     payload.PullRequest.Number,
+		Action:     payload.Action,
+		Commit:     payload.PullRequest.Head.SHA,
+		HeadBranch: payload.PullRequest.Head.Ref,
+		BaseBranch: payload.PullRequest.Base.Ref,
+		Title:      payload.PullRequest.Title,
+		Sender:     payload.Sender.Login,
+		IsFork:     isFork,
+	}, nil
+}
+
 // GitHub webhook payload types
 
 type githubPushPayload struct {
@@ -209,4 +268,35 @@ type githubStatusPayload struct {
 	Context     string `json:"context"`
 	Description string `json:"description,omitempty"`
 	TargetURL   string `json:"target_url,omitempty"`
+}
+
+type githubPRPayload struct {
+	Action      string `json:"action"`
+	PullRequest struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Head   struct {
+			SHA  string `json:"sha"`
+			Ref  string `json:"ref"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+		Base struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+	} `json:"pull_request"`
+	Repository struct {
+		Name     string `json:"name"`
+		FullName string `json:"full_name"`
+		Private  bool   `json:"private"`
+		HTMLURL  string `json:"html_url"`
+		CloneURL string `json:"clone_url"`
+		Owner    struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repository"`
+	Sender struct {
+		Login string `json:"login"`
+	} `json:"sender"`
 }

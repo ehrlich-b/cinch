@@ -118,7 +118,13 @@ export function RepoJobsPage({ repoPath, onSelectJob, onBack }: Props) {
             {jobs.map(job => (
               <tr key={job.id} onClick={() => onSelectJob(job.id)} className="clickable">
                 <td><StatusIcon status={job.status} /></td>
-                <td>{job.branch}</td>
+                <td>
+                  {job.pr_number ? (
+                    <span title={`${job.branch} → ${job.pr_base_branch}`}>
+                      PR #{job.pr_number}
+                    </span>
+                  ) : job.branch}
+                </td>
                 <td className="mono">{job.commit?.slice(0, 7)}</td>
                 <td>{formatDuration(job.duration)}</td>
                 <td className="text-muted">{relativeTime(job.created_at)}</td>
