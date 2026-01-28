@@ -31,12 +31,28 @@ const (
 
 // WorkerConfig holds configuration for a worker.
 type WorkerConfig struct {
-	ServerURL string
-	Token     string
-	Labels    []string
-	Docker    bool
-	Hostname  string
-	Verbose   bool // Show job output in terminal (default: only banners)
+	ServerURL   string
+	Token       string
+	Labels      []string
+	Docker      bool
+	Hostname    string
+	Verbose     bool   // Show job output in terminal (default: only banners)
+	Concurrency int    // Number of concurrent jobs (default 1)
+	SocketPath  string // Unix socket path for daemon mode
+}
+
+// JobInfo holds information about a running job.
+type JobInfo struct {
+	ID        string
+	Repo      string
+	Branch    string
+	Tag       string
+	Commit    string
+	Command   string
+	Mode      string
+	Forge     string
+	StartedAt time.Time
+	Cancel    context.CancelFunc
 }
 
 // Worker connects to the server and executes jobs.
@@ -51,7 +67,7 @@ type Worker struct {
 
 	// Active jobs
 	jobsLock   sync.Mutex
-	activeJobs map[string]context.CancelFunc
+	activeJobs map[string]*JobInfo
 
 	// Control
 	ctx    context.Context
@@ -62,6 +78,16 @@ type Worker struct {
 	OnJobStart    func(jobID string)
 	OnJobComplete func(jobID string, exitCode int, duration time.Duration)
 	OnJobError    func(jobID string, phase, err string)
+
+	// Event broadcasting for daemon mode
+	eventBroadcaster EventBroadcaster
+}
+
+// EventBroadcaster receives job events for streaming to clients.
+type EventBroadcaster interface {
+	BroadcastJobStarted(jobID, repo, branch, tag, commit, command, mode, forge string)
+	BroadcastLogChunk(jobID, stream string, data []byte)
+	BroadcastJobCompleted(jobID string, exitCode int, durationMs int64)
 }
 
 // NewWorker creates a new worker.
@@ -72,15 +98,57 @@ func NewWorker(cfg WorkerConfig, log *slog.Logger) *Worker {
 	if cfg.Hostname == "" {
 		cfg.Hostname, _ = os.Hostname()
 	}
+	if cfg.Concurrency <= 0 {
+		cfg.Concurrency = 1
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Worker{
 		config:     cfg,
 		log:        log,
-		activeJobs: make(map[string]context.CancelFunc),
+		activeJobs: make(map[string]*JobInfo),
 		ctx:        ctx,
 		cancel:     cancel,
 	}
+}
+
+// SetEventBroadcaster sets the event broadcaster for daemon mode.
+func (w *Worker) SetEventBroadcaster(eb EventBroadcaster) {
+	w.eventBroadcaster = eb
+}
+
+// GetRunningJobs returns information about all currently running jobs.
+func (w *Worker) GetRunningJobs() []*JobInfo {
+	w.jobsLock.Lock()
+	defer w.jobsLock.Unlock()
+
+	jobs := make([]*JobInfo, 0, len(w.activeJobs))
+	for _, info := range w.activeJobs {
+		jobs = append(jobs, info)
+	}
+	return jobs
+}
+
+// OldestRunningJob returns the ID of the oldest running job, or empty string if none.
+func (w *Worker) OldestRunningJob() string {
+	w.jobsLock.Lock()
+	defer w.jobsLock.Unlock()
+
+	var oldest *JobInfo
+	for _, info := range w.activeJobs {
+		if oldest == nil || info.StartedAt.Before(oldest.StartedAt) {
+			oldest = info
+		}
+	}
+	if oldest == nil {
+		return ""
+	}
+	return oldest.ID
+}
+
+// Concurrency returns the worker's concurrency limit.
+func (w *Worker) Concurrency() int {
+	return w.config.Concurrency
 }
 
 // Start connects to the server and begins processing jobs.
@@ -247,8 +315,9 @@ func (w *Worker) sendRegister() error {
 		Capabilities: protocol.Capabilities{
 			Docker: w.config.Docker,
 		},
-		Version:  workerVersion,
-		Hostname: w.config.Hostname,
+		Version:     workerVersion,
+		Hostname:    w.config.Hostname,
+		Concurrency: w.config.Concurrency,
 	}
 
 	return w.send(protocol.TypeRegister, reg)
@@ -346,14 +415,14 @@ func (w *Worker) handleJobAssign(payload []byte) {
 		return
 	}
 
-	// Check capacity - one worker, one job
+	// Check capacity
 	w.jobsLock.Lock()
-	if len(w.activeJobs) > 0 {
+	if len(w.activeJobs) >= w.config.Concurrency {
 		w.jobsLock.Unlock()
-		w.log.Warn("already running a job, rejecting", "job_id", assign.JobID)
+		w.log.Warn("at capacity, rejecting", "job_id", assign.JobID, "current", len(w.activeJobs), "max", w.config.Concurrency)
 		if err := w.send(protocol.TypeJobReject, protocol.JobReject{
 			JobID:  assign.JobID,
-			Reason: "worker busy",
+			Reason: "worker at capacity",
 		}); err != nil {
 			w.log.Warn("failed to send JOB_REJECT", "job_id", assign.JobID, "error", err)
 		}
@@ -362,7 +431,19 @@ func (w *Worker) handleJobAssign(payload []byte) {
 
 	// Create cancellable context for this job
 	jobCtx, jobCancel := context.WithCancel(w.ctx)
-	w.activeJobs[assign.JobID] = jobCancel
+
+	// Create job info
+	jobInfo := &JobInfo{
+		ID:        assign.JobID,
+		Repo:      assign.Repo.CloneURL,
+		Branch:    assign.Repo.Branch,
+		Tag:       assign.Repo.Tag,
+		Commit:    assign.Repo.Commit,
+		Forge:     assign.Repo.ForgeType,
+		StartedAt: time.Now(),
+		Cancel:    jobCancel,
+	}
+	w.activeJobs[assign.JobID] = jobInfo
 	w.jobsLock.Unlock()
 
 	// Acknowledge
@@ -370,10 +451,10 @@ func (w *Worker) handleJobAssign(payload []byte) {
 		w.log.Warn("failed to send JOB_ACK", "job_id", assign.JobID, "error", err)
 	}
 
-	w.log.Info("job assigned", "job_id", assign.JobID)
+	w.log.Info("job assigned", "job_id", assign.JobID, "active", len(w.activeJobs), "max", w.config.Concurrency)
 
 	// Execute job in goroutine
-	go w.executeJob(jobCtx, assign)
+	go w.executeJob(jobCtx, assign, jobInfo)
 }
 
 // handleJobCancel processes a job cancellation.
@@ -385,8 +466,8 @@ func (w *Worker) handleJobCancel(payload []byte) {
 	}
 
 	w.jobsLock.Lock()
-	if cancelFn, ok := w.activeJobs[cancel.JobID]; ok {
-		cancelFn()
+	if jobInfo, ok := w.activeJobs[cancel.JobID]; ok {
+		jobInfo.Cancel()
 		delete(w.activeJobs, cancel.JobID)
 	}
 	w.jobsLock.Unlock()
@@ -395,7 +476,7 @@ func (w *Worker) handleJobCancel(payload []byte) {
 }
 
 // executeJob runs a job and reports results.
-func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
+func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign, jobInfo *JobInfo) {
 	jobID := assign.JobID
 	start := time.Now()
 	term := NewTerminal(os.Stdout)
@@ -454,6 +535,10 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	streamer := NewLogStreamer(jobID, func(jobID, stream, data string) {
 		if err := w.send(protocol.TypeLogChunk, protocol.NewLogChunk(jobID, stream, data)); err != nil {
 			w.log.Warn("failed to send log chunk", "job_id", jobID, "error", err)
+		}
+		// Also broadcast to daemon clients
+		if w.eventBroadcaster != nil {
+			w.eventBroadcaster.BroadcastLogChunk(jobID, stream, []byte(data))
 		}
 	})
 
@@ -518,16 +603,27 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 		if source.Type == "bare-metal" {
 			// Config says bare-metal
 			execMode = "bare-metal"
-			term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode, assign.Repo.ForgeType)
-			exitCode, runErr = w.runBareMetal(ctx, command, workDir, env, stdout, stderr)
 		} else {
 			// Run in container
 			execMode = fmt.Sprintf("container: %s", source.Type)
 			if source.Image != "" {
 				execMode = fmt.Sprintf("container: %s", source.Image)
 			}
-			term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode, assign.Repo.ForgeType)
+		}
 
+		// Update job info and print start banner
+		jobInfo.Command = command
+		jobInfo.Mode = execMode
+		term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode, assign.Repo.ForgeType)
+
+		// Broadcast job start to daemon clients
+		if w.eventBroadcaster != nil {
+			w.eventBroadcaster.BroadcastJobStarted(jobID, assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode, assign.Repo.ForgeType)
+		}
+
+		if source.Type == "bare-metal" {
+			exitCode, runErr = w.runBareMetal(ctx, command, workDir, env, stdout, stderr)
+		} else {
 			w.log.Info("executing job",
 				"job_id", jobID,
 				"repo", assign.Repo.CloneURL,
@@ -543,7 +639,16 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	} else {
 		// Bare-metal mode
 		execMode = "bare-metal"
+
+		// Update job info and print start banner
+		jobInfo.Command = command
+		jobInfo.Mode = execMode
 		term.PrintJobStart(assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode, assign.Repo.ForgeType)
+
+		// Broadcast job start to daemon clients
+		if w.eventBroadcaster != nil {
+			w.eventBroadcaster.BroadcastJobStarted(jobID, assign.Repo.CloneURL, assign.Repo.Branch, assign.Repo.Tag, assign.Repo.Commit, command, execMode, assign.Repo.ForgeType)
+		}
 
 		w.log.Info("executing job",
 			"job_id", jobID,
@@ -577,6 +682,11 @@ func (w *Worker) executeJob(ctx context.Context, assign protocol.JobAssign) {
 	// Report completion
 	if err := w.send(protocol.TypeJobComplete, protocol.NewJobComplete(jobID, exitCode, duration)); err != nil {
 		w.log.Warn("failed to send JOB_COMPLETE", "job_id", jobID, "error", err)
+	}
+
+	// Broadcast to daemon clients
+	if w.eventBroadcaster != nil {
+		w.eventBroadcaster.BroadcastJobCompleted(jobID, exitCode, duration.Milliseconds())
 	}
 
 	if w.OnJobComplete != nil {

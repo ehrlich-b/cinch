@@ -155,6 +155,7 @@ type Register struct {
 	Capabilities Capabilities `json:"capabilities"`
 	Version      string       `json:"version"`
 	Hostname     string       `json:"hostname,omitempty"`
+	Concurrency  int          `json:"concurrency,omitempty"` // Max concurrent jobs (default 1)
 }
 
 // JobAck acknowledges receipt of job assignment.
