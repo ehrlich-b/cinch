@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -11,16 +12,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ehrlich-b/cinch/internal/logstore"
 	"github.com/ehrlich-b/cinch/internal/storage"
 	"golang.org/x/crypto/sha3"
 )
 
 // APIHandler handles HTTP API requests.
 type APIHandler struct {
-	storage storage.Storage
-	hub     *Hub
-	auth    *AuthHandler
-	log     *slog.Logger
+	storage  storage.Storage
+	logStore logstore.LogStore
+	hub      *Hub
+	auth     *AuthHandler
+	log      *slog.Logger
 }
 
 // NewAPIHandler creates a new API handler.
@@ -34,6 +37,11 @@ func NewAPIHandler(store storage.Storage, hub *Hub, auth *AuthHandler, log *slog
 		auth:    auth,
 		log:     log,
 	}
+}
+
+// SetLogStore sets the log store for retrieving job logs.
+func (h *APIHandler) SetLogStore(ls logstore.LogStore) {
+	h.logStore = ls
 }
 
 // ServeHTTP routes API requests.
@@ -241,17 +249,52 @@ func (h *APIHandler) getJob(w http.ResponseWriter, r *http.Request, jobID string
 }
 
 func (h *APIHandler) getJobLogs(w http.ResponseWriter, r *http.Request, jobID string) {
+	type logResponse struct {
+		Stream    string    `json:"stream"`
+		Data      string    `json:"data"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+
+	// Use logStore if available
+	if h.logStore != nil {
+		reader, err := h.logStore.GetLogs(r.Context(), jobID)
+		if err != nil {
+			h.log.Error("failed to get logs", "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		defer reader.Close()
+
+		// Read NDJSON and convert to response format
+		var resp []logResponse
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			var entry logstore.LogEntry
+			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+				continue
+			}
+			resp = append(resp, logResponse{
+				Stream:    entry.Stream,
+				Data:      entry.Data,
+				CreatedAt: entry.Time,
+			})
+		}
+		if err := scanner.Err(); err != nil {
+			h.log.Error("failed to read logs", "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		h.writeJSON(w, resp)
+		return
+	}
+
+	// Fallback to direct storage access
 	logs, err := h.storage.GetLogs(r.Context(), jobID)
 	if err != nil {
 		h.log.Error("failed to get logs", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
-	}
-
-	type logResponse struct {
-		Stream    string    `json:"stream"`
-		Data      string    `json:"data"`
-		CreatedAt time.Time `json:"created_at"`
 	}
 
 	resp := make([]logResponse, len(logs))

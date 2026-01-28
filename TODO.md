@@ -4,61 +4,7 @@
 
 ---
 
-## Current: MVP 1.5 - Daemon
-
-**Goal:** `cinch daemon install && cinch daemon start` - your Mac/Linux box is now a CI runner.
-
-### `cinch daemon` - Dead Simple Background Worker
-
-```bash
-cinch login
-cinch daemon install   # creates user-level service, no sudo
-cinch daemon start     # starts it
-# Done. Your Mac/Linux box is now a CI runner.
-```
-
-| Platform | User-level daemon | Location | No sudo? |
-|----------|------------------|----------|----------|
-| macOS | launchd agent | `~/Library/LaunchAgents/` | ✅ |
-| Linux | systemd user service | `~/.config/systemd/user/` | ✅ |
-
-**Commands:**
-```bash
-cinch daemon install    # Write service file, enable on boot
-cinch daemon start      # Start the worker daemon
-cinch daemon stop       # Stop the worker daemon
-cinch daemon status     # Is it running? Last job?
-cinch daemon uninstall  # Remove service file
-cinch daemon logs       # Tail the daemon logs
-```
-
-**Parallelism:** Run more worker processes. No code-level concurrency.
-
-```bash
-cinch daemon start              # Starts daemon with 1 worker
-cinch daemon start -n 4         # Starts daemon with 4 worker processes
-cinch daemon scale 2            # Adjust running workers (add/remove)
-cinch daemon status             # Show all worker processes
-```
-
-Each worker process makes its own websocket connection to cinch.sh. The daemon is just a process supervisor.
-
-**Implementation:**
-- [ ] Daemon harness with multi-worker support (`-n` flag)
-- [ ] `cinch daemon scale N` to adjust worker count
-- [ ] launchd plist generation for macOS
-- [ ] systemd unit generation for Linux
-- [ ] `cinch daemon logs` - tail daemon output
-- [ ] Worker list in web UI (see all your connected workers)
-
-**Open questions:**
-- [ ] What about Windows? (Probably just "run in terminal" for now)
-- [ ] Docker-in-Docker on Mac? (Docker Desktop socket passthrough)
-- [ ] Should `cinch daemon install` also run `cinch login` if not logged in?
-
----
-
-## Then: MVP 1.6 - Logs → R2
+## Current: MVP 1.6 - Logs → R2
 
 **Problem:** Logs are in SQLite. That's a timebomb - log blobs grow unbounded.
 
@@ -209,6 +155,11 @@ Native artifact storage (beyond `cinch release` which pushes to forge releases).
 - [ ] Badge repo selector (generate badge markdown)
 - [ ] Retry from web UI (button on failed job)
 - [ ] Remote worker shutdown (web UI → graceful stop signal)
+- [ ] Worker list in web UI (see all connected workers)
+
+### Daemon Polish
+- [ ] `cinch daemon scale N` to adjust running worker count
+- [ ] Windows support (probably just "run in terminal" for now)
 
 ### CLI Polish
 - [ ] `cinch status` - check job status from CLI
@@ -225,6 +176,20 @@ Native artifact storage (beyond `cinch release` which pushes to forge releases).
 ---
 
 ## Done
+
+### MVP 1.5 - Daemon (2026-01-28)
+
+Background worker daemon with internal parallelism via Unix socket.
+
+- ✅ `cinch daemon start/stop/status/logs` commands
+- ✅ `cinch daemon install/uninstall` for service management
+- ✅ launchd plist generation for macOS
+- ✅ systemd unit generation for Linux
+- ✅ Internal parallelism (`-n 4` = 4 concurrent job slots)
+- ✅ `cinch worker` connects to daemon, streams job events
+- ✅ `cinch worker -s` standalone mode (temp daemon + viewer)
+- ✅ Graceful shutdown with job quiescing
+- ✅ `cinch install --with-daemon` option
 
 ### MVP 1.4 - Forge Expansion (2026-01-27)
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -9,14 +10,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ehrlich-b/cinch/internal/logstore"
 	"github.com/ehrlich-b/cinch/internal/storage"
 	"github.com/gorilla/websocket"
 )
 
 // LogStreamHandler handles WebSocket connections for log streaming to UI clients.
 type LogStreamHandler struct {
-	storage storage.Storage
-	log     *slog.Logger
+	storage  storage.Storage
+	logStore logstore.LogStore
+	log      *slog.Logger
 
 	// Subscriptions: jobID -> set of connections
 	mu          sync.RWMutex
@@ -33,6 +36,11 @@ func NewLogStreamHandler(store storage.Storage, log *slog.Logger) *LogStreamHand
 		log:         log,
 		subscribers: make(map[string]map[*websocket.Conn]bool),
 	}
+}
+
+// SetLogStore sets the log store for retrieving historical logs.
+func (h *LogStreamHandler) SetLogStore(ls logstore.LogStore) {
+	h.logStore = ls
 }
 
 // ServeHTTP handles log stream WebSocket requests.
@@ -95,6 +103,35 @@ func (h *LogStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // sendExistingLogs sends all existing logs for a job.
 func (h *LogStreamHandler) sendExistingLogs(conn *websocket.Conn, jobID string) error {
+	// Use logStore if available
+	if h.logStore != nil {
+		reader, err := h.logStore.GetLogs(context.Background(), jobID)
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+
+		// Read NDJSON and send each entry
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			var entry logstore.LogEntry
+			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+				continue
+			}
+			msg := logMessage{
+				Type:   "log",
+				Stream: entry.Stream,
+				Data:   entry.Data,
+				Time:   entry.Time,
+			}
+			if err := conn.WriteJSON(msg); err != nil {
+				return err
+			}
+		}
+		return scanner.Err()
+	}
+
+	// Fallback to direct storage access
 	logs, err := h.storage.GetLogs(context.Background(), jobID)
 	if err != nil {
 		return err

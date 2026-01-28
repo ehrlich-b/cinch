@@ -23,6 +23,7 @@ import (
 	"github.com/ehrlich-b/cinch/internal/config"
 	"github.com/ehrlich-b/cinch/internal/daemon"
 	"github.com/ehrlich-b/cinch/internal/forge"
+	"github.com/ehrlich-b/cinch/internal/logstore"
 	"github.com/ehrlich-b/cinch/internal/server"
 	"github.com/ehrlich-b/cinch/internal/storage"
 	"github.com/ehrlich-b/cinch/internal/worker"
@@ -141,6 +142,27 @@ func runServer(cmd *cobra.Command, args []string) error {
 		log.Warn("GitHub OAuth not configured - auth disabled")
 	}
 
+	// Create log store (R2 in production, SQLite in development)
+	var logStore logstore.LogStore
+	r2Config := logstore.R2Config{
+		AccountID:       os.Getenv("CINCH_R2_ACCOUNT_ID"),
+		AccessKeyID:     os.Getenv("CINCH_R2_ACCESS_KEY_ID"),
+		SecretAccessKey: os.Getenv("CINCH_R2_SECRET_ACCESS_KEY"),
+		Bucket:          os.Getenv("CINCH_R2_BUCKET"),
+	}
+	if r2Config.AccountID != "" && r2Config.Bucket != "" {
+		var err error
+		logStore, err = logstore.NewR2LogStore(r2Config, log)
+		if err != nil {
+			return fmt.Errorf("create R2 log store: %w", err)
+		}
+		defer logStore.Close()
+		log.Info("using R2 for log storage", "bucket", r2Config.Bucket)
+	} else {
+		logStore = logstore.NewSQLiteLogStore(store)
+		log.Info("using SQLite for log storage")
+	}
+
 	// Create components
 	hub := server.NewHub()
 	wsHandler := server.NewWSHandler(hub, store, log)
@@ -190,11 +212,14 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Wire up dependencies
 	wsHandler.SetStatusPoster(webhookHandler)
 	wsHandler.SetLogBroadcaster(logStreamHandler)
+	wsHandler.SetLogStore(logStore)
 	wsHandler.SetJWTValidator(authHandler)
 	wsHandler.SetGitHubApp(githubAppHandler)
 	wsHandler.SetWorkerNotifier(dispatcher)
 	webhookHandler.SetGitHubApp(githubAppHandler)
 	dispatcher.SetGitHubApp(githubAppHandler)
+	logStreamHandler.SetLogStore(logStore)
+	apiHandler.SetLogStore(logStore)
 
 	// Register forges (for webhook identification)
 	webhookHandler.RegisterForge(&forge.GitHub{})

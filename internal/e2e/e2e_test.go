@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ehrlich-b/cinch/internal/forge"
+	"github.com/ehrlich-b/cinch/internal/logstore"
 	"github.com/ehrlich-b/cinch/internal/protocol"
 	"github.com/ehrlich-b/cinch/internal/server"
 	"github.com/ehrlich-b/cinch/internal/storage"
@@ -94,6 +95,9 @@ func TestE2EFullPipeline(t *testing.T) {
 		t.Fatalf("CreateRepo failed: %v", err)
 	}
 
+	// Create log store (SQLite-backed for tests)
+	logStore := logstore.NewSQLiteLogStore(store)
+
 	// Create server components
 	hub := server.NewHub()
 	wsHandler := server.NewWSHandler(hub, store, log)
@@ -104,7 +108,9 @@ func TestE2EFullPipeline(t *testing.T) {
 	// Wire up dependencies
 	wsHandler.SetStatusPoster(&mockStatusPoster{t: t})
 	wsHandler.SetLogBroadcaster(logStreamHandler)
+	wsHandler.SetLogStore(logStore)
 	wsHandler.SetWorkerNotifier(dispatcher)
+	logStreamHandler.SetLogStore(logStore)
 
 	// Register GitHub forge
 	webhookHandler.RegisterForge(&forge.GitHub{})

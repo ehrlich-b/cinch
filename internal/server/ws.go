@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ehrlich-b/cinch/internal/logstore"
 	"github.com/ehrlich-b/cinch/internal/protocol"
 	"github.com/ehrlich-b/cinch/internal/storage"
 	"github.com/gorilla/websocket"
@@ -67,6 +68,7 @@ type WorkerAvailableNotifier interface {
 type WSHandler struct {
 	hub            *Hub
 	storage        storage.Storage
+	logStore       logstore.LogStore
 	log            *slog.Logger
 	statusPoster   StatusPoster
 	logBroadcaster LogBroadcaster
@@ -110,6 +112,11 @@ func (h *WSHandler) SetGitHubApp(app *GitHubAppHandler) {
 // SetWorkerNotifier sets the notifier to call when a worker becomes available.
 func (h *WSHandler) SetWorkerNotifier(n WorkerAvailableNotifier) {
 	h.workerNotifier = n
+}
+
+// SetLogStore sets the log store for persisting job logs.
+func (h *WSHandler) SetLogStore(ls logstore.LogStore) {
+	h.logStore = ls
 }
 
 // ServeHTTP handles WebSocket upgrade requests.
@@ -436,8 +443,10 @@ func (h *WSHandler) handleLogChunk(worker *WorkerConn, payload []byte) {
 	}
 
 	ctx := context.Background()
-	if err := h.storage.AppendLog(ctx, chunk.JobID, chunk.Stream, chunk.Data); err != nil {
-		h.log.Error("failed to append log", "job_id", chunk.JobID, "error", err)
+	if h.logStore != nil {
+		if err := h.logStore.AppendChunk(ctx, chunk.JobID, chunk.Stream, []byte(chunk.Data)); err != nil {
+			h.log.Error("failed to append log", "job_id", chunk.JobID, "error", err)
+		}
 	}
 
 	// Broadcast to UI clients
@@ -477,6 +486,13 @@ func (h *WSHandler) handleJobComplete(worker *WorkerConn, payload []byte) {
 	if h.statusPoster != nil {
 		if err := h.statusPoster.PostJobStatus(ctx, complete.JobID, forgeState, description); err != nil {
 			h.log.Warn("failed to post status to forge", "job_id", complete.JobID, "error", err)
+		}
+	}
+
+	// Finalize logs (flush buffers, concatenate chunks)
+	if h.logStore != nil {
+		if err := h.logStore.Finalize(ctx, complete.JobID); err != nil {
+			h.log.Warn("failed to finalize logs", "job_id", complete.JobID, "error", err)
 		}
 	}
 
@@ -536,6 +552,13 @@ func (h *WSHandler) handleJobError(worker *WorkerConn, payload []byte) {
 		}
 		if err := h.statusPoster.PostJobStatus(ctx, jobErr.JobID, "error", description); err != nil {
 			h.log.Warn("failed to post status to forge", "job_id", jobErr.JobID, "error", err)
+		}
+	}
+
+	// Finalize logs (flush buffers)
+	if h.logStore != nil {
+		if err := h.logStore.Finalize(ctx, jobErr.JobID); err != nil {
+			h.log.Warn("failed to finalize logs", "job_id", jobErr.JobID, "error", err)
 		}
 	}
 
