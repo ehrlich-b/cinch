@@ -8,13 +8,15 @@ import (
 
 // Message types for server → worker communication
 const (
-	TypeAuthOK     = "AUTH_OK"
-	TypeAuthFail   = "AUTH_FAIL"
-	TypeRegistered = "REGISTERED"
-	TypeJobAssign  = "JOB_ASSIGN"
-	TypeJobCancel  = "JOB_CANCEL"
-	TypePong       = "PONG"
-	TypeAck        = "ACK"
+	TypeAuthOK      = "AUTH_OK"
+	TypeAuthFail    = "AUTH_FAIL"
+	TypeRegistered  = "REGISTERED"
+	TypeJobAssign   = "JOB_ASSIGN"
+	TypeJobCancel   = "JOB_CANCEL"
+	TypePong        = "PONG"
+	TypeAck         = "ACK"
+	TypeWorkerDrain = "WORKER_DRAIN" // Graceful shutdown
+	TypeWorkerKill  = "WORKER_KILL"  // Force disconnect
 )
 
 // Message types for worker → server communication
@@ -140,6 +142,17 @@ type Pong struct {
 // Ack is a generic acknowledgment.
 type Ack struct {
 	Ref string `json:"ref"`
+}
+
+// WorkerDrain requests graceful worker shutdown.
+type WorkerDrain struct {
+	Reason       string `json:"reason,omitempty"`
+	DrainTimeout int    `json:"drain_timeout"` // Seconds to wait for jobs
+}
+
+// WorkerKill requests immediate worker disconnect.
+type WorkerKill struct {
+	Reason string `json:"reason,omitempty"`
 }
 
 // --- Worker → Server Messages ---

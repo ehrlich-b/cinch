@@ -54,10 +54,22 @@ func (w *WorkerConn) HasLabel(label string) bool {
 	return false
 }
 
+// WorkerEventCallback is the function signature for worker event callbacks.
+type WorkerEventCallback func(*WorkerConn)
+
+// WorkerJobEventCallback is the function signature for job event callbacks.
+type WorkerJobEventCallback func(workerID, jobID string)
+
 // Hub manages connected workers.
 type Hub struct {
 	mu      sync.RWMutex
 	workers map[string]*WorkerConn
+
+	// Event callbacks for UI streaming
+	onWorkerConnected    WorkerEventCallback
+	onWorkerDisconnected func(workerID string)
+	onWorkerJobStarted   WorkerJobEventCallback
+	onWorkerJobFinished  WorkerJobEventCallback
 }
 
 // NewHub creates a new Hub.
@@ -67,21 +79,46 @@ func NewHub() *Hub {
 	}
 }
 
+// SetEventCallbacks configures callbacks for worker events.
+func (h *Hub) SetEventCallbacks(
+	onConnected WorkerEventCallback,
+	onDisconnected func(workerID string),
+	onJobStarted WorkerJobEventCallback,
+	onJobFinished WorkerJobEventCallback,
+) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onWorkerConnected = onConnected
+	h.onWorkerDisconnected = onDisconnected
+	h.onWorkerJobStarted = onJobStarted
+	h.onWorkerJobFinished = onJobFinished
+}
+
 // Register adds a worker to the hub.
 func (h *Hub) Register(worker *WorkerConn) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	worker.LastPing = time.Now()
 	h.workers[worker.ID] = worker
+	callback := h.onWorkerConnected
+	h.mu.Unlock()
+
+	if callback != nil {
+		callback(worker)
+	}
 }
 
 // Unregister removes a worker from the hub.
 func (h *Hub) Unregister(workerID string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if w, ok := h.workers[workerID]; ok {
 		close(w.Send)
 		delete(h.workers, workerID)
+	}
+	callback := h.onWorkerDisconnected
+	h.mu.Unlock()
+
+	if callback != nil {
+		callback(workerID)
 	}
 }
 
@@ -256,16 +293,20 @@ func (h *Hub) matchesLabels(w *WorkerConn, required []string) bool {
 // AddActiveJob marks a job as active on a worker.
 func (h *Hub) AddActiveJob(workerID, jobID string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if w, ok := h.workers[workerID]; ok {
 		w.ActiveJobs = append(w.ActiveJobs, jobID)
+	}
+	callback := h.onWorkerJobStarted
+	h.mu.Unlock()
+
+	if callback != nil {
+		callback(workerID, jobID)
 	}
 }
 
 // RemoveActiveJob removes a job from a worker's active list.
 func (h *Hub) RemoveActiveJob(workerID, jobID string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if w, ok := h.workers[workerID]; ok {
 		for i, id := range w.ActiveJobs {
 			if id == jobID {
@@ -273,6 +314,12 @@ func (h *Hub) RemoveActiveJob(workerID, jobID string) {
 				break
 			}
 		}
+	}
+	callback := h.onWorkerJobFinished
+	h.mu.Unlock()
+
+	if callback != nil {
+		callback(workerID, jobID)
 	}
 }
 

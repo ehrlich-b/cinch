@@ -16,6 +16,7 @@ type Storage interface {
 	CreateJob(ctx context.Context, job *Job) error
 	GetJob(ctx context.Context, id string) (*Job, error)
 	ListJobs(ctx context.Context, filter JobFilter) ([]*Job, error)
+	ListJobsByWorker(ctx context.Context, workerID string, limit int) ([]*Job, error)
 	UpdateJobStatus(ctx context.Context, id string, status JobStatus, exitCode *int) error
 	UpdateJobWorker(ctx context.Context, jobID, workerID string) error
 	UpdateJobCheckRunID(ctx context.Context, id string, checkRunID int64) error

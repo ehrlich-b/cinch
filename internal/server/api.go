@@ -25,6 +25,7 @@ type APIHandler struct {
 	auth       *AuthHandler
 	dispatcher *Dispatcher
 	githubApp  *GitHubAppHandler
+	wsHandler  *WSHandler
 	log        *slog.Logger
 }
 
@@ -54,6 +55,11 @@ func (h *APIHandler) SetDispatcher(d *Dispatcher) {
 // SetGitHubApp sets the GitHub App handler for installation token regeneration.
 func (h *APIHandler) SetGitHubApp(app *GitHubAppHandler) {
 	h.githubApp = app
+}
+
+// SetWSHandler sets the WebSocket handler for worker control.
+func (h *APIHandler) SetWSHandler(ws *WSHandler) {
+	h.wsHandler = ws
 }
 
 // ServeHTTP routes API requests.
@@ -91,6 +97,27 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Workers
 	case path == "/workers" && r.Method == http.MethodGet:
 		h.listWorkers(w, r)
+	case strings.HasPrefix(path, "/workers/") && strings.HasSuffix(path, "/jobs"):
+		workerID := strings.TrimSuffix(strings.TrimPrefix(path, "/workers/"), "/jobs")
+		if r.Method == http.MethodGet {
+			h.listWorkerJobs(w, r, workerID)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	case strings.HasPrefix(path, "/workers/") && strings.HasSuffix(path, "/drain"):
+		workerID := strings.TrimSuffix(strings.TrimPrefix(path, "/workers/"), "/drain")
+		if r.Method == http.MethodPost {
+			h.drainWorker(w, r, workerID)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	case strings.HasPrefix(path, "/workers/") && strings.HasSuffix(path, "/disconnect"):
+		workerID := strings.TrimSuffix(strings.TrimPrefix(path, "/workers/"), "/disconnect")
+		if r.Method == http.MethodPost {
+			h.disconnectWorker(w, r, workerID)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 
 	// Repos
 	case path == "/repos" && r.Method == http.MethodGet:
@@ -487,7 +514,11 @@ func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string
 type workerResponse struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
+	Hostname  string    `json:"hostname,omitempty"`
 	Labels    []string  `json:"labels"`
+	Mode      string    `json:"mode"`
+	OwnerName string    `json:"owner_name,omitempty"`
+	Version   string    `json:"version,omitempty"`
 	Status    string    `json:"status"`
 	LastSeen  time.Time `json:"last_seen"`
 	CreatedAt time.Time `json:"created_at"`
@@ -514,6 +545,7 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 			Status:    string(wk.Status),
 			LastSeen:  wk.LastSeen,
 			CreatedAt: wk.CreatedAt,
+			Mode:      "personal", // Default
 		}
 
 		// Add live info from hub if connected
@@ -521,6 +553,12 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 			if conn := h.hub.Get(wk.ID); conn != nil {
 				resp[i].Connected = true
 				resp[i].ActiveJobs = conn.ActiveJobs
+				resp[i].Hostname = conn.Hostname
+				resp[i].Version = conn.Version
+				resp[i].OwnerName = conn.OwnerName
+				if conn.Mode != "" {
+					resp[i].Mode = string(conn.Mode)
+				}
 				if len(conn.ActiveJobs) > 0 {
 					resp[i].CurrentJob = &conn.ActiveJobs[0]
 				}
@@ -529,6 +567,134 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeJSON(w, map[string]any{"workers": resp})
+}
+
+// listWorkerJobs returns recent jobs for a specific worker.
+func (h *APIHandler) listWorkerJobs(w http.ResponseWriter, r *http.Request, workerID string) {
+	q := r.URL.Query()
+	limit := 10
+	if l := q.Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 50 {
+			limit = n
+		}
+	}
+
+	jobs, err := h.storage.ListJobsByWorker(r.Context(), workerID, limit)
+	if err != nil {
+		h.log.Error("failed to list worker jobs", "worker_id", workerID, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := make([]jobResponse, len(jobs))
+	for i, j := range jobs {
+		resp[i] = jobToResponse(j)
+		if repo, err := h.storage.GetRepo(r.Context(), j.RepoID); err == nil {
+			resp[i].Repo = repo.Owner + "/" + repo.Name
+		}
+	}
+
+	h.writeJSON(w, map[string]any{"jobs": resp})
+}
+
+// drainWorker sends a drain request to a worker (graceful shutdown).
+func (h *APIHandler) drainWorker(w http.ResponseWriter, r *http.Request, workerID string) {
+	// Check auth
+	username := h.auth.GetUser(r)
+	if username == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Get worker from hub
+	worker := h.hub.Get(workerID)
+	if worker == nil {
+		http.Error(w, "worker not found or not connected", http.StatusNotFound)
+		return
+	}
+
+	// Check permission - only shared worker owner can control
+	if worker.Mode != "shared" {
+		http.Error(w, "only shared workers can be remotely controlled", http.StatusForbidden)
+		return
+	}
+	if worker.OwnerName != username {
+		http.Error(w, "only the worker owner can control this worker", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Timeout int    `json:"timeout"`
+		Reason  string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Use defaults if no body
+		req.Timeout = 300 // 5 minutes default
+	}
+
+	// Send drain command
+	if h.wsHandler == nil {
+		http.Error(w, "worker control not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := h.wsHandler.SendDrain(workerID, req.Timeout, req.Reason); err != nil {
+		h.log.Error("failed to send drain", "worker_id", workerID, "error", err)
+		http.Error(w, "failed to send drain command", http.StatusInternalServerError)
+		return
+	}
+
+	h.log.Info("worker drain requested", "worker_id", workerID, "by", username, "timeout", req.Timeout)
+	h.writeJSON(w, map[string]any{"ok": true, "message": "drain command sent"})
+}
+
+// disconnectWorker sends a kill request to a worker (force disconnect).
+func (h *APIHandler) disconnectWorker(w http.ResponseWriter, r *http.Request, workerID string) {
+	// Check auth
+	username := h.auth.GetUser(r)
+	if username == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Get worker from hub
+	worker := h.hub.Get(workerID)
+	if worker == nil {
+		http.Error(w, "worker not found or not connected", http.StatusNotFound)
+		return
+	}
+
+	// Check permission - only shared worker owner can control
+	if worker.Mode != "shared" {
+		http.Error(w, "only shared workers can be remotely controlled", http.StatusForbidden)
+		return
+	}
+	if worker.OwnerName != username {
+		http.Error(w, "only the worker owner can control this worker", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req) // Ignore error, reason is optional
+
+	// Send kill command
+	if h.wsHandler == nil {
+		http.Error(w, "worker control not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := h.wsHandler.SendKill(workerID, req.Reason); err != nil {
+		h.log.Error("failed to send kill", "worker_id", workerID, "error", err)
+		http.Error(w, "failed to send disconnect command", http.StatusInternalServerError)
+		return
+	}
+
+	h.log.Info("worker disconnect requested", "worker_id", workerID, "by", username)
+	h.writeJSON(w, map[string]any{"ok": true, "message": "disconnect command sent"})
 }
 
 // --- Repos ---

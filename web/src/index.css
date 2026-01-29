@@ -2093,3 +2093,101 @@ img.forge-icon.github {
   border-radius: 4px;
   margin-left: 0.5rem;
 }
+
+/* Worker list */
+.workers table th:first-child,
+.workers table td:first-child {
+  width: 60px;
+  text-align: center;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.status-dot.connected {
+  background: var(--success);
+}
+
+.status-dot.disconnected {
+  background: var(--text-muted);
+}
+
+.worker-name {
+  font-weight: 500;
+}
+
+.worker-version {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  margin-left: 0.5rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.badge.mode-personal {
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+}
+
+.badge.mode-shared {
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+}
+
+.job-link {
+  font-family: ui-monospace, 'SF Mono', Monaco, monospace;
+  font-size: 0.8rem;
+}
+
+.idle {
+  color: var(--text-muted);
+}
+
+.worker-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.btn-small {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.btn.btn-danger {
+  border-color: var(--failure);
+  color: var(--failure);
+}
+
+.btn.btn-danger:hover {
+  background: rgba(248, 81, 73, 0.1);
+}
