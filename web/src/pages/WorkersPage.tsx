@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Link } from 'react-router-dom'
 import { ErrorState } from '../components/ErrorState'
 import type { Worker, WorkerEvent } from '../types'
 
@@ -219,9 +218,9 @@ export function WorkersPage() {
               <td>{worker.labels?.join(', ') || '-'}</td>
               <td>
                 {worker.currentJob ? (
-                  <Link to={`/jobs/${worker.currentJob}`} className="job-link">
+                  <a href={`/jobs/${worker.currentJob}`} className="job-link">
                     {worker.currentJob}
-                  </Link>
+                  </a>
                 ) : (
                   <span className="idle">idle</span>
                 )}
