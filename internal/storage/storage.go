@@ -79,7 +79,7 @@ const (
 	JobStatusSuccess            JobStatus = "success"
 	JobStatusFailed             JobStatus = "failed"
 	JobStatusCancelled          JobStatus = "cancelled"
-	JobStatusError              JobStatus = "error"                // infrastructure error
+	JobStatusError              JobStatus = "error"               // infrastructure error
 	JobStatusPendingContributor JobStatus = "pending_contributor" // fork PR awaiting contributor CI
 )
 

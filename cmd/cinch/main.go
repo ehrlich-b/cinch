@@ -220,6 +220,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 	dispatcher.SetGitHubApp(githubAppHandler)
 	logStreamHandler.SetLogStore(logStore)
 	apiHandler.SetLogStore(logStore)
+	apiHandler.SetDispatcher(dispatcher)
+	apiHandler.SetGitHubApp(githubAppHandler)
 
 	// Register forges (for webhook identification)
 	webhookHandler.RegisterForge(&forge.GitHub{})
