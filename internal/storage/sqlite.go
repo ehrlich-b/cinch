@@ -277,6 +277,36 @@ func (s *SQLiteStorage) ListJobs(ctx context.Context, filter JobFilter) ([]*Job,
 	return jobs, rows.Err()
 }
 
+func (s *SQLiteStorage) ListJobsByWorker(ctx context.Context, workerID string, limit int) ([]*Job, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	query := `SELECT id, repo_id, commit_sha, branch, tag, pr_number, pr_base_branch, status, exit_code, worker_id,
+	                 installation_id, check_run_id, started_at, finished_at, created_at,
+	                 author, trust_level, is_fork, approved_by, approved_at
+	          FROM jobs WHERE worker_id = ? ORDER BY created_at DESC LIMIT ?`
+
+	rows, err := s.db.QueryContext(ctx, query, workerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []*Job
+	for rows.Next() {
+		job := &Job{}
+		if err := rows.Scan(&job.ID, &job.RepoID, &job.Commit, &job.Branch, &job.Tag, &job.PRNumber, &job.PRBaseBranch,
+			&job.Status, &job.ExitCode, &job.WorkerID, &job.InstallationID, &job.CheckRunID, &job.StartedAt,
+			&job.FinishedAt, &job.CreatedAt,
+			&job.Author, &job.TrustLevel, &job.IsFork, &job.ApprovedBy, &job.ApprovedAt); err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
 func (s *SQLiteStorage) UpdateJobStatus(ctx context.Context, id string, status JobStatus, exitCode *int) error {
 	var err error
 	now := time.Now()

@@ -638,3 +638,40 @@ func (h *WSHandler) CancelJob(workerID string, cancel protocol.JobCancel) error 
 	worker.Send <- msg
 	return nil
 }
+
+// SendDrain sends a drain request to a worker (graceful shutdown).
+func (h *WSHandler) SendDrain(workerID string, timeout int, reason string) error {
+	worker := h.hub.Get(workerID)
+	if worker == nil {
+		return ErrWorkerNotFound
+	}
+
+	msg, err := protocol.Encode(protocol.TypeWorkerDrain, protocol.WorkerDrain{
+		Reason:       reason,
+		DrainTimeout: timeout,
+	})
+	if err != nil {
+		return err
+	}
+
+	worker.Send <- msg
+	return nil
+}
+
+// SendKill sends a kill request to a worker (force disconnect).
+func (h *WSHandler) SendKill(workerID string, reason string) error {
+	worker := h.hub.Get(workerID)
+	if worker == nil {
+		return ErrWorkerNotFound
+	}
+
+	msg, err := protocol.Encode(protocol.TypeWorkerKill, protocol.WorkerKill{
+		Reason: reason,
+	})
+	if err != nil {
+		return err
+	}
+
+	worker.Send <- msg
+	return nil
+}

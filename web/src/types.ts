@@ -75,9 +75,23 @@ export interface Job {
 export interface Worker {
   id: string
   name: string
+  hostname?: string
   labels: string[]
+  mode: 'personal' | 'shared'
+  owner_name?: string
+  version?: string
   status: string
+  connected: boolean
+  active_jobs: string[]
   currentJob?: string
+  last_seen: string
+}
+
+export interface WorkerEvent {
+  type: 'connected' | 'disconnected' | 'job_started' | 'job_finished'
+  worker_id: string
+  worker?: Worker
+  job_id?: string
 }
 
 export interface LogEntry {

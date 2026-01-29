@@ -171,6 +171,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	apiHandler := server.NewAPIHandler(store, hub, authHandler, log)
 	logStreamHandler := server.NewLogStreamHandler(store, log)
 	badgeHandler := server.NewBadgeHandler(store, log, baseURL)
+	workerStreamHandler := server.NewWorkerStreamHandler(hub, log)
 
 	// Create GitHub App handler
 	githubAppConfig := server.GitHubAppConfig{
@@ -222,6 +223,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	apiHandler.SetLogStore(logStore)
 	apiHandler.SetDispatcher(dispatcher)
 	apiHandler.SetGitHubApp(githubAppHandler)
+	apiHandler.SetWSHandler(wsHandler)
 
 	// Register forges (for webhook identification)
 	webhookHandler.RegisterForge(&forge.GitHub{})
@@ -337,6 +339,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// WebSocket for UI log streaming - public for now
 	mux.HandleFunc("/ws/logs/", logStreamHandler.ServeHTTP)
+
+	// WebSocket for UI worker streaming - public for now
+	mux.Handle("/ws/workers", workerStreamHandler)
 
 	// Install script for curl | sh
 	mux.HandleFunc("/install.sh", server.InstallScriptHandler)

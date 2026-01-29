@@ -438,6 +438,10 @@ func (w *Worker) handleMessage(msg []byte) {
 		w.handleJobAssign(payload)
 	case protocol.TypeJobCancel:
 		w.handleJobCancel(payload)
+	case protocol.TypeWorkerDrain:
+		w.handleWorkerDrain(payload)
+	case protocol.TypeWorkerKill:
+		w.handleWorkerKill(payload)
 	case protocol.TypePong:
 		// Ignore pong
 	case protocol.TypeAck:
@@ -524,6 +528,56 @@ func (w *Worker) handleJobCancel(payload []byte) {
 	w.jobsLock.Unlock()
 
 	w.log.Info("job cancelled", "job_id", cancel.JobID, "reason", cancel.Reason)
+}
+
+// handleWorkerDrain handles a drain request (graceful shutdown).
+func (w *Worker) handleWorkerDrain(payload []byte) {
+	drain, err := protocol.DecodePayload[protocol.WorkerDrain](payload)
+	if err != nil {
+		w.log.Warn("failed to decode WORKER_DRAIN", "error", err)
+		return
+	}
+
+	timeout := time.Duration(drain.DrainTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+
+	w.log.Info("drain requested", "reason", drain.Reason, "timeout", timeout)
+
+	// Start drain in goroutine so we can continue processing messages
+	go func() {
+		term := NewTerminal(os.Stdout)
+		term.PrintShutdown()
+
+		// Drain waits for active jobs to complete
+		w.Drain(timeout)
+
+		// Disconnect
+		w.cancel()
+	}()
+}
+
+// handleWorkerKill handles a kill request (force disconnect).
+func (w *Worker) handleWorkerKill(payload []byte) {
+	kill, err := protocol.DecodePayload[protocol.WorkerKill](payload)
+	if err != nil {
+		w.log.Warn("failed to decode WORKER_KILL", "error", err)
+		return
+	}
+
+	w.log.Info("kill requested", "reason", kill.Reason)
+
+	// Cancel all running jobs
+	w.jobsLock.Lock()
+	for jobID, jobInfo := range w.activeJobs {
+		w.log.Info("cancelling job due to kill", "job_id", jobID)
+		jobInfo.Cancel()
+	}
+	w.jobsLock.Unlock()
+
+	// Disconnect immediately
+	w.cancel()
 }
 
 // executeJob runs a job and reports results.
