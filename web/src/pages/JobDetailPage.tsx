@@ -7,14 +7,17 @@ import type { Job, LogEntry } from '../types'
 interface Props {
   jobId: string
   onBack: () => void
+  onSelectJob?: (jobId: string) => void
 }
 
-export function JobDetailPage({ jobId, onBack }: Props) {
+export function JobDetailPage({ jobId, onBack, onSelectJob }: Props) {
   const [job, setJob] = useState<Job | null>(null)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [status, setStatus] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [wsError, setWsError] = useState<string | null>(null)
+  const [runLoading, setRunLoading] = useState(false)
+  const [runError, setRunError] = useState<string | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
 
@@ -28,6 +31,31 @@ export function JobDetailPage({ jobId, onBack }: Props) {
       .then(data => setJob(data))
       .catch(e => setError(e.message || 'Failed to load job'))
   }
+
+  const handleRun = async () => {
+    setRunLoading(true)
+    setRunError(null)
+    try {
+      const response = await fetch(`/api/jobs/${jobId}/run`, { method: 'POST' })
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || `Failed to run job (${response.status})`)
+      }
+      const data = await response.json()
+      // Navigate to the new job (or same job if it was pending_contributor)
+      if (onSelectJob && data.job_id) {
+        onSelectJob(data.job_id)
+      }
+    } catch (e: unknown) {
+      setRunError(e instanceof Error ? e.message : 'Failed to run job')
+    } finally {
+      setRunLoading(false)
+    }
+  }
+
+  // Determine if job can be run/retried
+  const canRun = job && ['failed', 'success', 'error', 'cancelled', 'pending_contributor'].includes(status || job.status)
+  const runButtonLabel = (status || job?.status) === 'pending_contributor' ? 'Run' : 'Retry'
 
   useEffect(() => {
     fetchJob()
@@ -88,8 +116,19 @@ export function JobDetailPage({ jobId, onBack }: Props) {
             </span>
             <span className="mono">{job.commit?.slice(0, 7)}</span>
             <span className="text-muted">{relativeTime(job.created_at)}</span>
+            {canRun && (
+              <button
+                onClick={handleRun}
+                disabled={runLoading}
+                className="run-btn"
+                title={runButtonLabel === 'Run' ? 'Approve and run on shared worker' : 'Retry this job'}
+              >
+                {runLoading ? '...' : runButtonLabel}
+              </button>
+            )}
           </div>
         )}
+        {runError && <div className="run-error">{runError}</div>}
       </div>
       {wsError && <div className="ws-error">{wsError}</div>}
       <div className="log-viewer">

@@ -19,11 +19,13 @@ import (
 
 // APIHandler handles HTTP API requests.
 type APIHandler struct {
-	storage  storage.Storage
-	logStore logstore.LogStore
-	hub      *Hub
-	auth     *AuthHandler
-	log      *slog.Logger
+	storage    storage.Storage
+	logStore   logstore.LogStore
+	hub        *Hub
+	auth       *AuthHandler
+	dispatcher *Dispatcher
+	githubApp  *GitHubAppHandler
+	log        *slog.Logger
 }
 
 // NewAPIHandler creates a new API handler.
@@ -44,6 +46,16 @@ func (h *APIHandler) SetLogStore(ls logstore.LogStore) {
 	h.logStore = ls
 }
 
+// SetDispatcher sets the dispatcher for job re-running.
+func (h *APIHandler) SetDispatcher(d *Dispatcher) {
+	h.dispatcher = d
+}
+
+// SetGitHubApp sets the GitHub App handler for installation token regeneration.
+func (h *APIHandler) SetGitHubApp(app *GitHubAppHandler) {
+	h.githubApp = app
+}
+
 // ServeHTTP routes API requests.
 func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api")
@@ -58,6 +70,13 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jobID := strings.TrimSuffix(strings.TrimPrefix(path, "/jobs/"), "/logs")
 		if r.Method == http.MethodGet {
 			h.getJobLogs(w, r, jobID)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	case strings.HasPrefix(path, "/jobs/") && strings.HasSuffix(path, "/run"):
+		jobID := strings.TrimSuffix(strings.TrimPrefix(path, "/jobs/"), "/run")
+		if r.Method == http.MethodPost {
+			h.runJob(w, r, jobID)
 		} else {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -311,6 +330,154 @@ func (h *APIHandler) getJobLogs(w http.ResponseWriter, r *http.Request, jobID st
 	}
 
 	h.writeJSON(w, resp)
+}
+
+// runJob handles POST /api/jobs/{id}/run
+// For failed/success/error/cancelled jobs: creates a new job with same params (retry)
+// For pending_contributor jobs: approves and queues the existing job
+func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string) {
+	ctx := r.Context()
+
+	// Check auth
+	username := h.auth.GetUser(r)
+	if username == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Get original job
+	job, err := h.storage.GetJob(ctx, jobID)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "job not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get job", "job_id", jobID, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Get repo
+	repo, err := h.storage.GetRepo(ctx, job.RepoID)
+	if err != nil {
+		h.log.Error("failed to get repo", "repo_id", job.RepoID, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Check dispatcher is available
+	if h.dispatcher == nil {
+		http.Error(w, "job dispatch not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var newJobID string
+
+	switch job.Status {
+	case storage.JobStatusPendingContributor:
+		// Approve and queue the existing job
+		if err := h.storage.ApproveJob(ctx, jobID, username); err != nil {
+			h.log.Error("failed to approve job", "job_id", jobID, "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		// Reload job with updated status
+		job, _ = h.storage.GetJob(ctx, jobID)
+		newJobID = jobID
+
+		h.log.Info("job approved", "job_id", jobID, "approved_by", username)
+
+	case storage.JobStatusFailed, storage.JobStatusSuccess, storage.JobStatusError, storage.JobStatusCancelled:
+		// Create a new job (retry)
+		newJob := &storage.Job{
+			ID:             fmt.Sprintf("j_%d", time.Now().UnixNano()),
+			RepoID:         job.RepoID,
+			Commit:         job.Commit,
+			Branch:         job.Branch,
+			Tag:            job.Tag,
+			PRNumber:       job.PRNumber,
+			PRBaseBranch:   job.PRBaseBranch,
+			Status:         storage.JobStatusPending,
+			InstallationID: job.InstallationID,
+			CreatedAt:      time.Now(),
+			Author:         username, // Current user is the one retrying
+			TrustLevel:     storage.TrustCollaborator,
+			IsFork:         false, // Retries aren't from forks
+		}
+
+		if err := h.storage.CreateJob(ctx, newJob); err != nil {
+			h.log.Error("failed to create retry job", "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		job = newJob
+		newJobID = newJob.ID
+
+		h.log.Info("job retry created", "job_id", newJobID, "original_job_id", jobID, "user", username)
+
+	case storage.JobStatusPending, storage.JobStatusQueued, storage.JobStatusRunning:
+		http.Error(w, "job already in progress", http.StatusConflict)
+		return
+
+	default:
+		http.Error(w, "job cannot be run", http.StatusBadRequest)
+		return
+	}
+
+	// Build clone token
+	var cloneToken string
+	var installationID int64
+
+	if job.InstallationID != nil && h.githubApp != nil && h.githubApp.IsConfigured() {
+		// GitHub App job - get fresh token
+		installationID = *job.InstallationID
+		token, err := h.githubApp.GetInstallationToken(installationID)
+		if err != nil {
+			h.log.Error("failed to get installation token", "job_id", newJobID, "error", err)
+			http.Error(w, "failed to get clone token", http.StatusInternalServerError)
+			return
+		}
+		cloneToken = token
+	} else {
+		// Non-GitHub App - use stored forge token
+		cloneToken = repo.ForgeToken
+	}
+
+	// Construct ref from branch or tag
+	var ref string
+	if job.PRNumber != nil {
+		ref = fmt.Sprintf("refs/pull/%d/head", *job.PRNumber)
+	} else if job.Tag != "" {
+		ref = "refs/tags/" + job.Tag
+	} else if job.Branch != "" {
+		ref = "refs/heads/" + job.Branch
+	} else {
+		h.log.Error("job has no branch or tag", "job_id", newJobID)
+		http.Error(w, "job has no branch or tag", http.StatusBadRequest)
+		return
+	}
+
+	// Queue the job
+	queuedJob := &QueuedJob{
+		Job:            job,
+		Repo:           repo,
+		CloneURL:       repo.CloneURL,
+		Ref:            ref,
+		Branch:         job.Branch,
+		Tag:            job.Tag,
+		CloneToken:     cloneToken,
+		InstallationID: installationID,
+		// Config is empty - worker reads .cinch.yaml after clone
+	}
+
+	h.dispatcher.Enqueue(queuedJob)
+
+	h.log.Info("job queued for run", "job_id", newJobID)
+
+	w.WriteHeader(http.StatusCreated)
+	h.writeJSON(w, map[string]string{"job_id": newJobID})
 }
 
 // --- Workers ---

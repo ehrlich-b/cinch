@@ -160,7 +160,7 @@ export function App() {
       </header>
       <main>
         {page === 'jobs' && !selectedJob && <JobsPage onSelectJob={(id) => navigate('jobs', id)} />}
-        {page === 'jobs' && selectedJob && <JobDetailPage jobId={selectedJob} onBack={() => navigate('jobs')} />}
+        {page === 'jobs' && selectedJob && <JobDetailPage jobId={selectedJob} onBack={() => navigate('jobs')} onSelectJob={(id) => navigate('jobs', id)} />}
         {page === 'repo-jobs' && selectedRepoPath && (
           <RepoJobsPage
             repoPath={selectedRepoPath}

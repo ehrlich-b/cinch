@@ -29,10 +29,9 @@ Fork PRs run on the **contributor's** machine, not the maintainer's.
 - [x] Dispatch: shared workers defer to author's personal worker if online
 - [x] Fork PRs: new `pending_contributor` status
 - [x] Fork PRs: status message with `cinch worker -s` instructions
-- [ ] Web UI: approval flow for "run on shared worker"
+- [x] Web UI: Retry/Run button (approves pending_contributor, retries failed)
 - [x] CLI: `cinch worker --shared` flag
-- [ ] CLI: show pending PRs you authored
-- [ ] API: job approval endpoint
+- [x] API: `POST /api/jobs/{id}/run` endpoint (unified retry + approval)
 
 ### Dispatch Priority
 
@@ -45,9 +44,9 @@ Fork PRs run on the **contributor's** machine, not the maintainer's.
 
 ---
 
-## Then: MVP 1.9 - Polish & Retry
+## Then: MVP 1.9 - Polish
 
-- [ ] Retry failed jobs from web UI
+- [x] Retry failed jobs from web UI (done in 1.8)
 - [ ] `cinch status` - check job status from CLI
 - [ ] `cinch logs -f` - stream logs from CLI
 - [ ] Worker list in web UI
