@@ -3,6 +3,9 @@ package server
 import (
 	"sync"
 	"time"
+
+	"github.com/ehrlich-b/cinch/internal/protocol"
+	"github.com/ehrlich-b/cinch/internal/storage"
 )
 
 // WorkerConn represents a connected worker.
@@ -12,6 +15,11 @@ type WorkerConn struct {
 	Capabilities Capabilities
 	Hostname     string
 	Version      string
+
+	// Worker trust model
+	Mode      protocol.WorkerMode // personal or shared
+	OwnerID   string              // User ID of the worker's owner
+	OwnerName string              // Username of the worker's owner
 
 	// Connection state
 	ActiveJobs []string
@@ -134,12 +142,105 @@ func (h *Hub) FindAvailable(labels []string) []*WorkerConn {
 
 // SelectWorker returns the best available worker for the given labels.
 // Returns nil if no worker is available.
+// Deprecated: Use SelectWorkerForJob for trust-aware dispatch.
 func (h *Hub) SelectWorker(labels []string) *WorkerConn {
 	available := h.FindAvailable(labels)
 	if len(available) == 0 {
 		return nil
 	}
 	return available[0]
+}
+
+// SelectWorkerForJob returns the best available worker for a job, considering trust model.
+// Priority:
+// 1. Author's personal worker (if online)
+// 2. Shared worker (if author is collaborator/owner and no personal worker)
+// 3. nil (for fork PRs without author's worker, or if no worker available)
+func (h *Hub) SelectWorkerForJob(labels []string, job *storage.Job) *WorkerConn {
+	available := h.FindAvailable(labels)
+	if len(available) == 0 {
+		return nil
+	}
+
+	// Legacy mode: if job has no author info, use simple label-based selection
+	// This maintains backward compatibility with jobs created before trust model
+	if job.Author == "" {
+		return available[0]
+	}
+
+	// First, try to find author's personal worker
+	for _, w := range available {
+		if (w.Mode == "" || w.Mode == protocol.ModePersonal) && w.OwnerName == job.Author {
+			return w
+		}
+	}
+
+	// For fork PRs from external contributors, only author's personal worker can run
+	// (unless explicitly approved)
+	if job.IsFork && job.TrustLevel == storage.TrustExternal && job.ApprovedBy == nil {
+		return nil // Must wait for author's worker or approval
+	}
+
+	// For collaborators/owners, check if author has a personal worker online
+	// If so, defer to their worker
+	if h.hasPersonalWorkerOnline(job.Author) {
+		return nil // Defer to author's personal worker
+	}
+
+	// Find a shared worker that can run this job
+	for _, w := range available {
+		if w.Mode == protocol.ModeShared {
+			return w
+		}
+	}
+
+	// Fallback to any personal worker with empty owner (legacy workers)
+	for _, w := range available {
+		if w.Mode == "" || w.Mode == protocol.ModePersonal {
+			if w.OwnerName == "" {
+				// If OwnerName is empty (legacy worker), allow it
+				return w
+			}
+		}
+	}
+
+	return nil
+}
+
+// hasPersonalWorkerOnline returns true if the given user has a personal worker online.
+func (h *Hub) hasPersonalWorkerOnline(username string) bool {
+	for _, w := range h.workers {
+		if (w.Mode == "" || w.Mode == protocol.ModePersonal) && w.OwnerName == username {
+			return true
+		}
+	}
+	return false
+}
+
+// CanWorkerRunJob checks if a specific worker can run a job based on trust model.
+func (h *Hub) CanWorkerRunJob(w *WorkerConn, job *storage.Job) bool {
+	// Personal worker: only author's own code
+	if w.Mode == "" || w.Mode == protocol.ModePersonal {
+		return job.Author == w.OwnerName || w.OwnerName == ""
+	}
+
+	// Shared worker
+	if w.Mode == protocol.ModeShared {
+		// Check trust level
+		switch job.TrustLevel {
+		case storage.TrustOwner, storage.TrustCollaborator:
+			// Check if author has their own worker online - defer to them
+			if h.hasPersonalWorkerOnline(job.Author) {
+				return false
+			}
+			return true
+		case storage.TrustExternal:
+			// External PRs must be explicitly approved
+			return job.ApprovedBy != nil
+		}
+	}
+
+	return false
 }
 
 // matchesLabels returns true if the worker has all the required labels.

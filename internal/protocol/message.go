@@ -149,6 +149,16 @@ type Capabilities struct {
 	Docker bool `json:"docker,omitempty"`
 }
 
+// WorkerMode determines which jobs a worker will accept.
+type WorkerMode string
+
+const (
+	// ModePersonal (default) - only runs jobs authored by the worker's owner
+	ModePersonal WorkerMode = "personal"
+	// ModeShared - runs jobs from any collaborator, defers to author's personal worker if online
+	ModeShared WorkerMode = "shared"
+)
+
 // Register is sent after AUTH_OK to register worker.
 type Register struct {
 	Labels       []string     `json:"labels,omitempty"`
@@ -156,6 +166,9 @@ type Register struct {
 	Version      string       `json:"version"`
 	Hostname     string       `json:"hostname,omitempty"`
 	Concurrency  int          `json:"concurrency,omitempty"` // Max concurrent jobs (default 1)
+	Mode         WorkerMode   `json:"mode,omitempty"`        // personal (default) or shared
+	OwnerID      string       `json:"owner_id,omitempty"`    // User ID of the worker's owner
+	OwnerName    string       `json:"owner_name,omitempty"`  // Username of the worker's owner
 }
 
 // JobAck acknowledges receipt of job assignment.

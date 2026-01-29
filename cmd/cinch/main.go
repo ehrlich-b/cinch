@@ -426,15 +426,21 @@ func workerCmd() *cobra.Command {
 
 The daemon must be running (via 'cinch daemon start') or use -s for standalone mode.
 
+Worker modes:
+  personal (default): Only runs YOUR code (your pushes, your PRs)
+  shared:             Runs collaborator code, defers to their personal workers
+
 Examples:
   cinch worker                 # connect to daemon, watch jobs
   cinch worker -v              # include full build logs
   cinch worker --job j_abc123  # follow specific job
-  cinch worker -s              # standalone: temp daemon + viewer`,
+  cinch worker -s              # standalone: temp daemon + viewer
+  cinch worker -s --shared     # shared mode: run team collaborator code`,
 		RunE: runWorker,
 	}
 	cmd.Flags().BoolP("verbose", "v", false, "Show full job logs")
 	cmd.Flags().BoolP("standalone", "s", false, "Standalone mode: spawn temp daemon")
+	cmd.Flags().Bool("shared", false, "Shared mode: run collaborator code (default: personal mode)")
 	cmd.Flags().String("job", "", "Follow specific job ID")
 	cmd.Flags().String("socket", "", "Daemon socket path")
 	cmd.Flags().StringSlice("labels", nil, "Worker labels (standalone mode only)")
@@ -444,6 +450,7 @@ Examples:
 func runWorker(cmd *cobra.Command, args []string) error {
 	verbose, _ := cmd.Flags().GetBool("verbose")
 	standalone, _ := cmd.Flags().GetBool("standalone")
+	shared, _ := cmd.Flags().GetBool("shared")
 	jobID, _ := cmd.Flags().GetString("job")
 	socketPath, _ := cmd.Flags().GetString("socket")
 
@@ -454,7 +461,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	// Standalone mode: spawn a temp daemon with concurrency=1
 	if standalone {
 		labels, _ := cmd.Flags().GetStringSlice("labels")
-		return runStandaloneWorker(verbose, labels)
+		return runStandaloneWorker(verbose, labels, shared)
 	}
 
 	// Check if daemon is running
@@ -550,7 +557,7 @@ func runDaemonClient(socketPath, jobID string, verbose bool) error {
 }
 
 // runStandaloneWorker spawns a temporary daemon and attaches to it.
-func runStandaloneWorker(verbose bool, labels []string) error {
+func runStandaloneWorker(verbose bool, labels []string, shared bool) error {
 	term := worker.NewTerminal(os.Stdout)
 
 	// Create temp socket path
@@ -579,6 +586,9 @@ func runStandaloneWorker(verbose bool, labels []string) error {
 	args := []string{"daemon", "run",
 		"-n", "1", // concurrency=1 so only one job to follow
 		"--socket", socketPath,
+	}
+	if shared {
+		args = append(args, "--shared")
 	}
 	if len(labels) > 0 {
 		args = append(args, "--labels", strings.Join(labels, ","))
@@ -859,6 +869,7 @@ func daemonRunCmd() *cobra.Command {
 			concurrency, _ := cmd.Flags().GetInt("concurrency")
 			socketPath, _ := cmd.Flags().GetString("socket")
 			verbose, _ := cmd.Flags().GetBool("verbose")
+			shared, _ := cmd.Flags().GetBool("shared")
 			labels, _ := cmd.Flags().GetStringSlice("labels")
 
 			// Load credentials
@@ -884,6 +895,7 @@ func daemonRunCmd() *cobra.Command {
 				cfg.SocketPath = socketPath
 			}
 			cfg.Verbose = verbose
+			cfg.Shared = shared
 
 			return cli.RunDaemon(cfg, serverURL, serverCfg.Token, labels)
 		},
@@ -894,6 +906,7 @@ func daemonRunCmd() *cobra.Command {
 	cmd.Flags().String("socket", cfg.SocketPath, "Unix socket path")
 	cmd.Flags().StringSlice("labels", nil, "Worker labels")
 	cmd.Flags().BoolP("verbose", "v", false, "Verbose logging")
+	cmd.Flags().Bool("shared", false, "Shared mode: run collaborator code")
 
 	return cmd
 }

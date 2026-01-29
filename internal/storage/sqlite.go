@@ -146,6 +146,14 @@ func (s *SQLiteStorage) migrate() error {
 	// Index for efficient forge/owner/name lookups
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_repos_forge_owner_name ON repos(forge_type, owner, name)")
 
+	// Worker trust model: add author tracking to jobs
+	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN author TEXT NOT NULL DEFAULT ''")
+	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN trust_level TEXT NOT NULL DEFAULT 'collaborator'")
+	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN is_fork INTEGER NOT NULL DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN approved_by TEXT")
+	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN approved_at DATETIME")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_jobs_author ON jobs(author)")
+
 	// Drop UNIQUE constraint on users.name (email is the identity, not username)
 	// SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the table
 	if s.hasUniqueConstraintOnUsersName() {
@@ -189,9 +197,10 @@ func (s *SQLiteStorage) Close() error {
 
 func (s *SQLiteStorage) CreateJob(ctx context.Context, job *Job) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO jobs (id, repo_id, commit_sha, branch, tag, pr_number, pr_base_branch, status, installation_id, check_run_id, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		job.ID, job.RepoID, job.Commit, job.Branch, job.Tag, job.PRNumber, job.PRBaseBranch, job.Status, job.InstallationID, job.CheckRunID, job.CreatedAt)
+		`INSERT INTO jobs (id, repo_id, commit_sha, branch, tag, pr_number, pr_base_branch, status, installation_id, check_run_id, created_at, author, trust_level, is_fork, approved_by, approved_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		job.ID, job.RepoID, job.Commit, job.Branch, job.Tag, job.PRNumber, job.PRBaseBranch, job.Status, job.InstallationID, job.CheckRunID, job.CreatedAt,
+		job.Author, job.TrustLevel, job.IsFork, job.ApprovedBy, job.ApprovedAt)
 	return err
 }
 
@@ -199,10 +208,12 @@ func (s *SQLiteStorage) GetJob(ctx context.Context, id string) (*Job, error) {
 	job := &Job{}
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, repo_id, commit_sha, branch, tag, pr_number, pr_base_branch, status, exit_code, worker_id,
-		        installation_id, check_run_id, started_at, finished_at, created_at
+		        installation_id, check_run_id, started_at, finished_at, created_at,
+		        author, trust_level, is_fork, approved_by, approved_at
 		 FROM jobs WHERE id = ?`, id).Scan(
 		&job.ID, &job.RepoID, &job.Commit, &job.Branch, &job.Tag, &job.PRNumber, &job.PRBaseBranch, &job.Status,
-		&job.ExitCode, &job.WorkerID, &job.InstallationID, &job.CheckRunID, &job.StartedAt, &job.FinishedAt, &job.CreatedAt)
+		&job.ExitCode, &job.WorkerID, &job.InstallationID, &job.CheckRunID, &job.StartedAt, &job.FinishedAt, &job.CreatedAt,
+		&job.Author, &job.TrustLevel, &job.IsFork, &job.ApprovedBy, &job.ApprovedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -218,7 +229,8 @@ func (s *SQLiteStorage) UpdateJobCheckRunID(ctx context.Context, id string, chec
 
 func (s *SQLiteStorage) ListJobs(ctx context.Context, filter JobFilter) ([]*Job, error) {
 	query := `SELECT id, repo_id, commit_sha, branch, tag, pr_number, pr_base_branch, status, exit_code, worker_id,
-	                 installation_id, check_run_id, started_at, finished_at, created_at FROM jobs WHERE 1=1`
+	                 installation_id, check_run_id, started_at, finished_at, created_at,
+	                 author, trust_level, is_fork, approved_by, approved_at FROM jobs WHERE 1=1`
 	args := []any{}
 
 	if filter.RepoID != "" {
@@ -256,7 +268,8 @@ func (s *SQLiteStorage) ListJobs(ctx context.Context, filter JobFilter) ([]*Job,
 		job := &Job{}
 		if err := rows.Scan(&job.ID, &job.RepoID, &job.Commit, &job.Branch, &job.Tag, &job.PRNumber, &job.PRBaseBranch,
 			&job.Status, &job.ExitCode, &job.WorkerID, &job.InstallationID, &job.CheckRunID, &job.StartedAt,
-			&job.FinishedAt, &job.CreatedAt); err != nil {
+			&job.FinishedAt, &job.CreatedAt,
+			&job.Author, &job.TrustLevel, &job.IsFork, &job.ApprovedBy, &job.ApprovedAt); err != nil {
 			return nil, err
 		}
 		jobs = append(jobs, job)
@@ -289,6 +302,13 @@ func (s *SQLiteStorage) UpdateJobWorker(ctx context.Context, jobID, workerID str
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE jobs SET worker_id = ? WHERE id = ?`,
 		workerID, jobID)
+	return err
+}
+
+func (s *SQLiteStorage) ApproveJob(ctx context.Context, jobID, approvedBy string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE jobs SET approved_by = ?, approved_at = ?, status = ? WHERE id = ? AND status = ?`,
+		approvedBy, time.Now(), JobStatusPending, jobID, JobStatusPendingContributor)
 	return err
 }
 

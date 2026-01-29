@@ -25,6 +25,8 @@ type DaemonConfig struct {
 	SocketPath  string
 	LogFile     string
 	Verbose     bool
+	Shared      bool   // Shared mode: run collaborator code
+	OwnerName   string // Username of worker owner
 }
 
 // DefaultDaemonConfig returns the default daemon configuration.
@@ -71,6 +73,8 @@ func RunDaemon(cfg DaemonConfig, serverURL, token string, labels []string) error
 		Docker:      true,
 		Concurrency: cfg.Concurrency,
 		SocketPath:  cfg.SocketPath,
+		Shared:      cfg.Shared,
+		OwnerName:   cfg.OwnerName,
 	}
 	w := worker.NewWorker(workerCfg, log)
 
@@ -91,7 +95,11 @@ func RunDaemon(cfg DaemonConfig, serverURL, token string, labels []string) error
 		return fmt.Errorf("start worker: %w", err)
 	}
 
-	log.Info("daemon running", "concurrency", cfg.Concurrency, "socket", cfg.SocketPath)
+	mode := "personal"
+	if cfg.Shared {
+		mode = "shared"
+	}
+	log.Info("daemon running", "concurrency", cfg.Concurrency, "socket", cfg.SocketPath, "mode", mode)
 
 	// Wait for interrupt
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -124,6 +132,9 @@ func StartDaemon(cfg DaemonConfig, serverURL, token string, labels []string) err
 	}
 	if cfg.Verbose {
 		args = append(args, "-v")
+	}
+	if cfg.Shared {
+		args = append(args, "--shared")
 	}
 	if len(labels) > 0 {
 		args = append(args, "--labels", strings.Join(labels, ","))

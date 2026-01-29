@@ -322,6 +322,22 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 	worker.Hostname = reg.Hostname
 	worker.Version = reg.Version
 
+	// Set worker mode (default to personal if not specified)
+	worker.Mode = reg.Mode
+	if worker.Mode == "" {
+		worker.Mode = protocol.ModePersonal
+	}
+
+	// Set owner info from registration or extract from worker ID
+	worker.OwnerID = reg.OwnerID
+	worker.OwnerName = reg.OwnerName
+
+	// If owner info not in registration, try to extract from worker ID
+	// Worker IDs for JWT-authenticated workers are "user:email@example.com"
+	if worker.OwnerName == "" && len(worker.ID) > 5 && worker.ID[:5] == "user:" {
+		worker.OwnerName = worker.ID[5:] // Use email as owner name
+	}
+
 	// Ensure worker exists in database (for FK constraint)
 	ctx := context.Background()
 	_, err = h.storage.GetWorker(ctx, worker.ID)
@@ -352,6 +368,8 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 		"worker_id", worker.ID,
 		"labels", worker.Labels,
 		"hostname", worker.Hostname,
+		"mode", worker.Mode,
+		"owner", worker.OwnerName,
 	)
 
 	// Send REGISTERED

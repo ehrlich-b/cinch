@@ -19,6 +19,7 @@ type Storage interface {
 	UpdateJobStatus(ctx context.Context, id string, status JobStatus, exitCode *int) error
 	UpdateJobWorker(ctx context.Context, jobID, workerID string) error
 	UpdateJobCheckRunID(ctx context.Context, id string, checkRunID int64) error
+	ApproveJob(ctx context.Context, jobID, approvedBy string) error
 
 	// Workers
 	CreateWorker(ctx context.Context, worker *Worker) error
@@ -72,13 +73,23 @@ type Storage interface {
 type JobStatus string
 
 const (
-	JobStatusPending   JobStatus = "pending"
-	JobStatusQueued    JobStatus = "queued"
-	JobStatusRunning   JobStatus = "running"
-	JobStatusSuccess   JobStatus = "success"
-	JobStatusFailed    JobStatus = "failed"
-	JobStatusCancelled JobStatus = "cancelled"
-	JobStatusError     JobStatus = "error" // infrastructure error
+	JobStatusPending            JobStatus = "pending"
+	JobStatusQueued             JobStatus = "queued"
+	JobStatusRunning            JobStatus = "running"
+	JobStatusSuccess            JobStatus = "success"
+	JobStatusFailed             JobStatus = "failed"
+	JobStatusCancelled          JobStatus = "cancelled"
+	JobStatusError              JobStatus = "error"                // infrastructure error
+	JobStatusPendingContributor JobStatus = "pending_contributor" // fork PR awaiting contributor CI
+)
+
+// TrustLevel indicates the relationship between job author and repo.
+type TrustLevel string
+
+const (
+	TrustOwner        TrustLevel = "owner"        // Repo owner
+	TrustCollaborator TrustLevel = "collaborator" // Has write access
+	TrustExternal     TrustLevel = "external"     // Fork PR, no write access
 )
 
 // Job represents a CI job.
@@ -98,6 +109,15 @@ type Job struct {
 	StartedAt      *time.Time
 	FinishedAt     *time.Time
 	CreatedAt      time.Time
+
+	// Author tracking for worker trust model
+	Author     string     // Username who authored the code
+	TrustLevel TrustLevel // owner, collaborator, or external
+	IsFork     bool       // True if PR is from a fork
+
+	// Approval for external PRs
+	ApprovedBy *string    // Username who approved shared worker execution
+	ApprovedAt *time.Time // When approval was granted
 }
 
 // JobFilter for listing jobs.

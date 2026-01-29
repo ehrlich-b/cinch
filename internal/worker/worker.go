@@ -39,6 +39,8 @@ type WorkerConfig struct {
 	Verbose     bool   // Show job output in terminal (default: only banners)
 	Concurrency int    // Number of concurrent jobs (default 1)
 	SocketPath  string // Unix socket path for daemon mode
+	Shared      bool   // Shared mode: run collaborator code (default: personal mode)
+	OwnerName   string // Username of worker owner (for trust model)
 }
 
 // JobInfo holds information about a running job.
@@ -341,6 +343,11 @@ func (w *Worker) reconnect() error {
 
 // sendRegister sends registration message.
 func (w *Worker) sendRegister() error {
+	mode := protocol.ModePersonal
+	if w.config.Shared {
+		mode = protocol.ModeShared
+	}
+
 	reg := protocol.Register{
 		Labels: w.config.Labels,
 		Capabilities: protocol.Capabilities{
@@ -349,6 +356,8 @@ func (w *Worker) sendRegister() error {
 		Version:     workerVersion,
 		Hostname:    w.config.Hostname,
 		Concurrency: w.config.Concurrency,
+		Mode:        mode,
+		OwnerName:   w.config.OwnerName,
 	}
 
 	return w.send(protocol.TypeRegister, reg)
