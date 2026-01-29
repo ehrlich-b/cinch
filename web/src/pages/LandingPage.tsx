@@ -83,7 +83,7 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
           <div className="features-grid-landing">
             <div className="feature-card">
               <h3>Multi-Forge</h3>
-              <p>GitHub, GitLab, Forgejo, Gitea, Bitbucket. One worker, any forge. Stop learning vendor-specific YAML.</p>
+              <p>GitHub, GitLab, Codeberg. One worker, any forge. Self-hosted Forgejo and GitLab too.</p>
             </div>
             <div className="feature-card">
               <h3>Your Hardware</h3>

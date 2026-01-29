@@ -9,7 +9,7 @@ CI that's a cinch. One config. Every forge. Your hardware.
 Cinch is a radically simple CI system:
 - Control plane receives webhooks, dispatches jobs, posts status checks
 - Workers run on your hardware, execute ONE command, stream logs back
-- Multi-forge: GitHub, GitLab, Forgejo, Gitea, Bitbucket
+- Multi-forge: GitHub, GitLab, Codeberg (plus self-hosted Forgejo/GitLab)
 
 **Philosophy:** Your Makefile is the pipeline. The exact `make build` you run locally—that's your CI.
 

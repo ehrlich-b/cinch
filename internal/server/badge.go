@@ -72,7 +72,7 @@ func (h *BadgeHandler) serveJSON(w http.ResponseWriter, r *http.Request) {
 	// Build shields.io endpoint response
 	resp := ShieldsEndpoint{
 		SchemaVersion: 1,
-		Label:         "build",
+		Label:         "cinch",
 		Message:       status,
 		Color:         statusToColor(status),
 	}
@@ -97,10 +97,32 @@ func (h *BadgeHandler) redirectToShields(w http.ResponseWriter, r *http.Request)
 		jsonURL += "?branch=" + url.QueryEscape(branch)
 	}
 
-	// Build shields.io URL
-	shieldsURL := fmt.Sprintf("https://img.shields.io/endpoint?url=%s&style=flat", url.QueryEscape(jsonURL))
+	// Determine logo based on forge
+	logo := forgeToLogo(forge)
+
+	// Build shields.io URL with cinch branding
+	shieldsURL := fmt.Sprintf("https://img.shields.io/endpoint?url=%s&label=cinch&logo=%s&style=flat",
+		url.QueryEscape(jsonURL), logo)
 
 	http.Redirect(w, r, shieldsURL, http.StatusFound)
+}
+
+// forgeToLogo returns the shields.io logo name for a forge.
+func forgeToLogo(forge string) string {
+	switch {
+	case strings.Contains(forge, "github"):
+		return "github"
+	case strings.Contains(forge, "gitlab"):
+		return "gitlab"
+	case strings.Contains(forge, "codeberg"):
+		return "codeberg"
+	case strings.Contains(forge, "gitea"):
+		return "gitea"
+	case strings.Contains(forge, "forgejo"):
+		return "forgejo"
+	default:
+		return ""
+	}
 }
 
 // parsePath extracts forge, owner, repo from paths like /prefix/{forge}/{owner}/{repo}.suffix

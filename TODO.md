@@ -88,6 +88,27 @@ Fork PRs run on the **contributor's** machine, not the maintainer's.
 
 ---
 
+## Then: MVP 1.11 - Security Review & Polish
+
+- [ ] Security audit of worker trust model implementation
+- [ ] Review webhook signature validation across forges
+- [ ] Audit token storage and transmission
+- [ ] Review container isolation (escape vectors)
+- [ ] Web UI refresh (visual polish pass)
+- [ ] Distinctive badge design (see badge-exploration.md)
+
+---
+
+## Then: MVP 1.12 - Fly Multi-Node
+
+Simple horizontal scaling via Fly - no architectural changes, just make sure it works.
+
+- [ ] Test `fly scale count 2` with SQLite (litefs or single-writer)
+- [ ] Verify WebSocket connections survive node failures
+- [ ] Document scaling playbook
+
+---
+
 ## 2.x - Edge Architecture
 
 Move client-facing traffic to Cloudflare edge, eliminate Fly egress costs.
@@ -148,11 +169,19 @@ For writes, workers/CLI could upload directly to R2 with presigned URLs:
 
 ---
 
-## Future: Scale & Polish
+## 2.x - Features
 
-### Build Cache (nice-to-have)
+### Artifacts
 
-Cache layers in R2, shared across builds. Makes builds faster, but doesn't block adoption.
+Native artifact storage (beyond `cinch release` which pushes to forge releases).
+
+- [ ] `cinch artifact upload dist/*`
+- [ ] Artifact download in subsequent jobs
+- [ ] Artifact browser in web UI
+
+### Build Cache
+
+Cache layers in R2, shared across builds.
 
 ```yaml
 cache:
@@ -166,38 +195,6 @@ cache:
 - [ ] LRU eviction when quota exceeded
 - [ ] Cache hit/miss metrics in UI
 
-### Postgres + Multi-Node (when needed)
-
-Current single-node SQLite handles ~100 concurrent jobs. When you need HA or more:
-
-- [ ] Postgres storage backend (interface already abstracted)
-- [ ] Postgres NOTIFY for cross-node job dispatch
-- [ ] `fly scale count 3`
-
-### Worker TUI (nice to have)
-
-The bubbletea TUI for `cinch worker` - makes running a worker feel alive. Deferred because daemon covers the core need.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  CINCH WORKER                              ehrlich@macbook  │
-├─────────────────────────────────────────────────────────────┤
-│  ● CONNECTED to cinch.sh                    3 repos         │
-│  ┌─ CURRENT BUILD ────────────────────────────────────────┐ │
-│  │  owner/repo @ main (abc1234)                           │ │
-│  │  ████████████░░░░░░░░░░░░░░░░░  38%  2m 14s            │ │
-│  └────────────────────────────────────────────────────────┘ │
-│  [q] quit  [l] logs  [r] retry                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-- [ ] bubbletea TUI for `cinch worker` attach mode
-- [ ] Real-time log streaming in TUI
-- [ ] Recent jobs list (last 5-10)
-- [ ] Progress estimation from log patterns
-- [ ] Keyboard navigation (view full logs, quit, etc.)
-- [ ] Retry from TUI (`r` key on failed build)
-
 ### Parallel Builds
 
 ```yaml
@@ -210,21 +207,21 @@ build:
 
 Array items fan out as independent parallel jobs. No DAG, no workflow DSL.
 
-### Artifacts
+### Worker TUI
 
-Native artifact storage (beyond `cinch release` which pushes to forge releases). Only useful after parallel builds exist (cross-job artifact sharing).
+The bubbletea TUI for `cinch worker` - makes running a worker feel alive.
 
-- [ ] `cinch artifact upload dist/*`
-- [ ] Artifact download in subsequent jobs
-- [ ] Artifact browser in web UI
+- [ ] bubbletea TUI for `cinch worker` attach mode
+- [ ] Real-time log streaming in TUI
+- [ ] Recent jobs list (last 5-10)
+- [ ] Keyboard navigation
 
-### Distinctive Badge Design
+### Postgres (if needed)
 
-**Problem:** Shields.io badges are invisible - everyone uses them.
+If SQLite + LiteFS can't handle scale:
 
-- [ ] Design distinctive badge style (shape, colors, typography)
-- [ ] Implement custom SVG rendering
-- [ ] Remove shields.io redirect, serve SVG directly
+- [ ] Postgres storage backend (interface already abstracted)
+- [ ] Postgres NOTIFY for cross-node job dispatch
 
 ---
 
