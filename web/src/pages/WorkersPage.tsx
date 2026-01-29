@@ -207,7 +207,7 @@ export function WorkersPage() {
               <td>
                 <span className="worker-name">{worker.name || worker.hostname || worker.id}</span>
                 {worker.version && (
-                  <span className="worker-version">v{worker.version}</span>
+                  <span className="worker-version"> v{worker.version}</span>
                 )}
               </td>
               <td>
@@ -227,7 +227,7 @@ export function WorkersPage() {
                 )}
               </td>
               <td>
-                {worker.connected && worker.mode === 'shared' && (
+                {worker.connected && (
                   <div className="worker-actions">
                     <button
                       className="btn btn-small"

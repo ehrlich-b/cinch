@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ehrlich-b/cinch/internal/logstore"
@@ -322,6 +323,12 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 	worker.Hostname = reg.Hostname
 	worker.Version = reg.Version
 
+	// For user-authenticated workers, include hostname in ID to allow multiple machines
+	// Worker IDs like "user:email" become "user:email:hostname"
+	if len(worker.ID) > 5 && worker.ID[:5] == "user:" && worker.Hostname != "" {
+		worker.ID = worker.ID + ":" + worker.Hostname
+	}
+
 	// Set worker mode (default to personal if not specified)
 	worker.Mode = reg.Mode
 	if worker.Mode == "" {
@@ -333,17 +340,23 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 	worker.OwnerName = reg.OwnerName
 
 	// If owner info not in registration, try to extract from worker ID
-	// Worker IDs for JWT-authenticated workers are "user:email@example.com"
+	// Worker IDs for JWT-authenticated workers are "user:email:hostname"
 	if worker.OwnerName == "" && len(worker.ID) > 5 && worker.ID[:5] == "user:" {
-		worker.OwnerName = worker.ID[5:] // Use email as owner name
+		// Extract email from "user:email:hostname" format
+		rest := worker.ID[5:]
+		if idx := strings.LastIndex(rest, ":"); idx > 0 {
+			worker.OwnerName = rest[:idx] // Get email part before hostname
+		} else {
+			worker.OwnerName = rest // Fallback for old format without hostname
+		}
 	}
 
 	// Ensure worker exists in database (for FK constraint)
 	ctx := context.Background()
-	_, err = h.storage.GetWorker(ctx, worker.ID)
+	dbWorker, err := h.storage.GetWorker(ctx, worker.ID)
 	if err != nil {
 		// Create worker record
-		dbWorker := &storage.Worker{
+		dbWorker = &storage.Worker{
 			ID:        worker.ID,
 			Name:      worker.Hostname,
 			Labels:    worker.Labels,
@@ -360,6 +373,9 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 		_ = h.storage.UpdateWorkerStatus(ctx, worker.ID, storage.WorkerStatusOnline)
 		_ = h.storage.UpdateWorkerLastSeen(ctx, worker.ID)
 	}
+
+	// Use database name for display (preserves original name from first registration)
+	worker.Name = dbWorker.Name
 
 	// Register with hub
 	h.hub.Register(worker)
