@@ -189,6 +189,12 @@ func (d *Dispatcher) Stop() {
 
 // Enqueue adds a job to the queue.
 func (d *Dispatcher) Enqueue(job *QueuedJob) {
+	// Don't queue pending_contributor jobs - they wait for author's worker or approval
+	if job.Job.Status == storage.JobStatusPendingContributor {
+		d.log.Info("job awaiting contributor CI", "job_id", job.Job.ID, "author", job.Job.Author)
+		return
+	}
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -207,7 +213,7 @@ func (d *Dispatcher) Enqueue(job *QueuedJob) {
 	default:
 	}
 
-	d.log.Info("job enqueued", "job_id", job.Job.ID, "labels", job.Labels)
+	d.log.Info("job enqueued", "job_id", job.Job.ID, "labels", job.Labels, "author", job.Job.Author)
 }
 
 // dispatchLoop continuously attempts to assign queued jobs to workers.
@@ -249,7 +255,13 @@ func (d *Dispatcher) tryDispatch() {
 // tryAssign attempts to assign a job to an available worker.
 // Returns true if successful.
 func (d *Dispatcher) tryAssign(qj *QueuedJob) bool {
-	worker := d.hub.SelectWorker(qj.Labels)
+	// Don't dispatch pending_contributor jobs - they wait for author's worker or approval
+	if qj.Job.Status == storage.JobStatusPendingContributor {
+		return false
+	}
+
+	// Use trust-aware worker selection
+	worker := d.hub.SelectWorkerForJob(qj.Labels, qj.Job)
 	if worker == nil {
 		return false
 	}

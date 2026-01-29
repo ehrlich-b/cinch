@@ -152,6 +152,8 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"repo", event.Repo.FullName(),
 		"branch", event.Branch,
 		"commit", event.Commit[:8],
+		"author", event.Sender,
+		"trust_level", job.TrustLevel,
 	)
 
 	// Post pending status
@@ -237,10 +239,17 @@ func (h *WebhookHandler) handlePullRequest(w http.ResponseWriter, r *http.Reques
 		"pr", prEvent.Number,
 		"branch", prEvent.HeadBranch,
 		"commit", prEvent.Commit[:8],
+		"author", prEvent.Sender,
+		"is_fork", prEvent.IsFork,
+		"trust_level", job.TrustLevel,
 	)
 
-	// Post pending status
-	if err := h.postStatus(ctx, matchedForge, repo, prEvent.Commit, job.ID, forge.StatusPending, "Build queued"); err != nil {
+	// Post pending status - different message for fork PRs awaiting contributor CI
+	statusMsg := "Build queued"
+	if job.Status == storage.JobStatusPendingContributor {
+		statusMsg = "Awaiting contributor CI - run `cinch worker -s` to provide results"
+	}
+	if err := h.postStatus(ctx, matchedForge, repo, prEvent.Commit, job.ID, forge.StatusPending, statusMsg); err != nil {
 		h.log.Warn("failed to post pending status", "error", err)
 	}
 
@@ -267,6 +276,16 @@ func (h *WebhookHandler) handlePullRequest(w http.ResponseWriter, r *http.Reques
 
 func (h *WebhookHandler) createPRJob(ctx context.Context, repo *storage.Repo, event *forge.PullRequestEvent) (*storage.Job, error) {
 	prNum := event.Number
+
+	// Determine trust level for PR author
+	trustLevel := h.determinePRTrustLevel(repo, event)
+
+	// Fork PRs from external contributors start in pending_contributor status
+	status := storage.JobStatusPending
+	if event.IsFork && trustLevel == storage.TrustExternal {
+		status = storage.JobStatusPendingContributor
+	}
+
 	job := &storage.Job{
 		ID:           generateJobID(),
 		RepoID:       repo.ID,
@@ -274,8 +293,11 @@ func (h *WebhookHandler) createPRJob(ctx context.Context, repo *storage.Repo, ev
 		Branch:       event.HeadBranch,
 		PRNumber:     &prNum,
 		PRBaseBranch: event.BaseBranch,
-		Status:       storage.JobStatusPending,
+		Status:       status,
 		CreatedAt:    time.Now(),
+		Author:       event.Sender,
+		TrustLevel:   trustLevel,
+		IsFork:       event.IsFork,
 	}
 
 	if err := h.storage.CreateJob(ctx, job); err != nil {
@@ -285,15 +307,39 @@ func (h *WebhookHandler) createPRJob(ctx context.Context, repo *storage.Repo, ev
 	return job, nil
 }
 
+// determinePRTrustLevel determines the trust level for a PR author.
+// For now, we treat fork PRs as external and same-repo PRs as collaborator.
+// TODO: Query forge API to check actual collaborator status.
+func (h *WebhookHandler) determinePRTrustLevel(repo *storage.Repo, event *forge.PullRequestEvent) storage.TrustLevel {
+	// Fork PRs are always treated as external (even if from a collaborator)
+	if event.IsFork {
+		return storage.TrustExternal
+	}
+
+	// Same-repo PRs from the owner
+	if event.Sender == repo.Owner {
+		return storage.TrustOwner
+	}
+
+	// Same-repo PRs from non-owners are collaborators (they have push access)
+	return storage.TrustCollaborator
+}
+
 func (h *WebhookHandler) createJob(ctx context.Context, repo *storage.Repo, event *forge.PushEvent) (*storage.Job, error) {
+	// Determine trust level for push author
+	trustLevel := h.determinePushTrustLevel(repo, event)
+
 	job := &storage.Job{
-		ID:        generateJobID(),
-		RepoID:    repo.ID,
-		Commit:    event.Commit,
-		Branch:    event.Branch,
-		Tag:       event.Tag,
-		Status:    storage.JobStatusPending,
-		CreatedAt: time.Now(),
+		ID:         generateJobID(),
+		RepoID:     repo.ID,
+		Commit:     event.Commit,
+		Branch:     event.Branch,
+		Tag:        event.Tag,
+		Status:     storage.JobStatusPending,
+		CreatedAt:  time.Now(),
+		Author:     event.Sender,
+		TrustLevel: trustLevel,
+		IsFork:     false, // Push events are never from forks
 	}
 
 	if err := h.storage.CreateJob(ctx, job); err != nil {
@@ -301,6 +347,16 @@ func (h *WebhookHandler) createJob(ctx context.Context, repo *storage.Repo, even
 	}
 
 	return job, nil
+}
+
+// determinePushTrustLevel determines the trust level for a push author.
+// Anyone who can push to the repo is at least a collaborator.
+func (h *WebhookHandler) determinePushTrustLevel(repo *storage.Repo, event *forge.PushEvent) storage.TrustLevel {
+	if event.Sender == repo.Owner {
+		return storage.TrustOwner
+	}
+	// If they can push, they're a collaborator
+	return storage.TrustCollaborator
 }
 
 func (h *WebhookHandler) postStatus(ctx context.Context, f forge.Forge, repo *storage.Repo, commit, jobID string, state forge.StatusState, description string) error {

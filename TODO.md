@@ -22,16 +22,17 @@ Fork PRs run on the **contributor's** machine, not the maintainer's.
 
 ### Implementation
 
-- [ ] Add author/author_id to Job struct
-- [ ] Add trust_level (owner/collaborator/external) computed from forge API
-- [ ] Add worker mode (personal/team) to registration
-- [ ] Dispatch: personal workers only get author's jobs
-- [ ] Dispatch: shared workers defer to author's personal worker if online
-- [ ] Fork PRs: new `pending_contributor` status
-- [ ] Fork PRs: status message with `cinch worker -s` instructions
+- [x] Add author/author_id to Job struct
+- [x] Add trust_level (owner/collaborator/external) computed from forge API
+- [x] Add worker mode (personal/shared) to registration
+- [x] Dispatch: personal workers only get author's jobs
+- [x] Dispatch: shared workers defer to author's personal worker if online
+- [x] Fork PRs: new `pending_contributor` status
+- [x] Fork PRs: status message with `cinch worker -s` instructions
 - [ ] Web UI: approval flow for "run on shared worker"
-- [ ] CLI: `cinch worker --shared` flag
+- [x] CLI: `cinch worker --shared` flag
 - [ ] CLI: show pending PRs you authored
+- [ ] API: job approval endpoint
 
 ### Dispatch Priority
 
