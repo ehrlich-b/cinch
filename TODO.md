@@ -4,7 +4,7 @@
 
 ---
 
-## Current: MVP 1.8 - Worker Trust Model
+## Done: MVP 1.8 - Worker Trust Model
 
 ---
 
@@ -44,12 +44,12 @@ Fork PRs run on the **contributor's** machine, not the maintainer's.
 
 ---
 
-## Then: MVP 1.9 - Polish
+## Current: MVP 1.9 - Polish
 
 - [x] Retry failed jobs from web UI (done in 1.8)
-- [x] `cinch status` - check job status from CLI
-- [x] `cinch logs -f` - stream logs from CLI
-- [ ] Worker list in web UI
+- [x] `cinch status` - check job status from CLI (multi-remote, adaptive prefixes)
+- [x] `cinch logs` / `cinch logs -f` - fetch or stream logs from CLI
+- [ ] Worker list in web UI (basic table exists, needs polish)
 
 ---
 
@@ -227,8 +227,8 @@ Native artifact storage (beyond `cinch release` which pushes to forge releases).
 - [ ] Windows support (probably just "run in terminal" for now)
 
 ### CLI Polish
-- [ ] `cinch status` - check job status from CLI
-- [ ] `cinch logs -f` - stream logs from CLI
+- [x] `cinch status` - check job status from CLI
+- [x] `cinch logs -f` - stream logs from CLI
 
 ### Known Issues
 - [ ] Worker should check for docker/podman on startup (fail fast)
