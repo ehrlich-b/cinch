@@ -52,26 +52,20 @@ Fork PRs run on the **contributor's** machine, not the maintainer's.
 - [x] Worker list in web UI with live updates (WebSocket streaming)
 - [x] Remote worker control (shutdown/disconnect buttons)
 - [x] Unique worker IDs per machine (`user:email:hostname` format)
-- [ ] Worker visibility model (see below)
+- [x] Worker visibility model (see below)
 
 ### Worker Visibility & Control Model
 
-**Current state:** All workers visible to everyone (bug).
+**Done:**
+- Personal workers: Only visible to owner
+- Shared workers: Visible to all authenticated users
+- Control: Only owner can control their shared workers (personal workers can't be remotely controlled)
 
-**Design:**
-- Personal workers: Only visible to owner, only owner can control
-- Shared team workers: Visible to team members
-- Other people's personal workers: Invisible (no reason to see them)
-
-**Why this makes sense:**
-- Personal workers only run YOUR code, so no one else needs to see/control them
-- Shared workers run team code, so team visibility makes sense
-- No one ever needs to kill someone else's personal worker
-
-**TODO:**
-- [ ] Filter `/api/workers` by ownership (personal = owner only, shared = team)
-- [ ] Filter WebSocket `/ws/workers` events same way
-- [ ] Backend authorization: only allow control of your own workers
+**Implementation:**
+- [x] Filter `/api/workers` by ownership (personal = owner only, shared = all)
+- [x] Filter WebSocket `/ws/workers` events same way
+- [x] Backend authorization: only allow control of your own workers (was already done in 1.8)
+- [x] Persist owner_name and mode in workers table
 
 ---
 
