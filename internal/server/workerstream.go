@@ -12,7 +12,7 @@ import (
 
 // WorkerEvent represents an event broadcast to UI clients.
 type WorkerEvent struct {
-	Type     string      `json:"type"`      // connected, disconnected, job_started, job_finished
+	Type     string      `json:"type"` // connected, disconnected, job_started, job_finished
 	WorkerID string      `json:"worker_id"`
 	Worker   *WorkerInfo `json:"worker,omitempty"`
 	JobID    string      `json:"job_id,omitempty"`

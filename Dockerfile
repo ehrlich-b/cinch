@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /cinch ./cmd/cinch
 # -------- runtime stage --------
 FROM --platform=linux/amd64 alpine:3.20
 WORKDIR /app
-RUN apk add --no-cache ca-certificates git
+RUN apk add --no-cache ca-certificates git sqlite
 COPY --from=builder /cinch .
 
 EXPOSE 8080

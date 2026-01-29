@@ -11,6 +11,7 @@ import (
 // WorkerConn represents a connected worker.
 type WorkerConn struct {
 	ID           string
+	Name         string // Display name from database
 	Labels       []string
 	Capabilities Capabilities
 	Hostname     string
