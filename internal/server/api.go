@@ -181,6 +181,7 @@ type jobResponse struct {
 	Repo         string     `json:"repo"` // repo name for frontend display
 	Commit       string     `json:"commit"`
 	Branch       string     `json:"branch"`
+	Tag          string     `json:"tag,omitempty"`
 	PRNumber     *int       `json:"pr_number,omitempty"`
 	PRBaseBranch string     `json:"pr_base_branch,omitempty"`
 	Status       string     `json:"status"`
@@ -198,6 +199,7 @@ func jobToResponse(j *storage.Job) jobResponse {
 		RepoID:       j.RepoID,
 		Commit:       j.Commit,
 		Branch:       j.Branch,
+		Tag:          j.Tag,
 		PRNumber:     j.PRNumber,
 		PRBaseBranch: j.PRBaseBranch,
 		Status:       string(j.Status),
