@@ -154,6 +154,11 @@ func (s *SQLiteStorage) migrate() error {
 	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN approved_at DATETIME")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_jobs_author ON jobs(author)")
 
+	// Worker visibility: add owner tracking to workers
+	_, _ = s.db.Exec("ALTER TABLE workers ADD COLUMN owner_name TEXT NOT NULL DEFAULT ''")
+	_, _ = s.db.Exec("ALTER TABLE workers ADD COLUMN mode TEXT NOT NULL DEFAULT 'personal'")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_workers_owner_name ON workers(owner_name)")
+
 	// Drop UNIQUE constraint on users.name (email is the identity, not username)
 	// SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the table
 	if s.hasUniqueConstraintOnUsersName() {
@@ -346,10 +351,14 @@ func (s *SQLiteStorage) ApproveJob(ctx context.Context, jobID, approvedBy string
 
 func (s *SQLiteStorage) CreateWorker(ctx context.Context, worker *Worker) error {
 	labels := strings.Join(worker.Labels, ",")
+	mode := worker.Mode
+	if mode == "" {
+		mode = "personal"
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO workers (id, name, labels, status, last_seen, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		worker.ID, worker.Name, labels, worker.Status, worker.LastSeen, worker.CreatedAt)
+		`INSERT INTO workers (id, name, labels, status, last_seen, created_at, owner_name, mode)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		worker.ID, worker.Name, labels, worker.Status, worker.LastSeen, worker.CreatedAt, worker.OwnerName, mode)
 	return err
 }
 
@@ -357,9 +366,10 @@ func (s *SQLiteStorage) GetWorker(ctx context.Context, id string) (*Worker, erro
 	worker := &Worker{}
 	var labels string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, labels, status, last_seen, created_at
+		`SELECT id, name, labels, status, last_seen, created_at, owner_name, mode
 		 FROM workers WHERE id = ?`, id).Scan(
-		&worker.ID, &worker.Name, &labels, &worker.Status, &worker.LastSeen, &worker.CreatedAt)
+		&worker.ID, &worker.Name, &labels, &worker.Status, &worker.LastSeen, &worker.CreatedAt,
+		&worker.OwnerName, &worker.Mode)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -374,7 +384,7 @@ func (s *SQLiteStorage) GetWorker(ctx context.Context, id string) (*Worker, erro
 
 func (s *SQLiteStorage) ListWorkers(ctx context.Context) ([]*Worker, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, labels, status, last_seen, created_at FROM workers ORDER BY created_at DESC`)
+		`SELECT id, name, labels, status, last_seen, created_at, owner_name, mode FROM workers ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +395,7 @@ func (s *SQLiteStorage) ListWorkers(ctx context.Context) ([]*Worker, error) {
 		worker := &Worker{}
 		var labels string
 		if err := rows.Scan(&worker.ID, &worker.Name, &labels, &worker.Status,
-			&worker.LastSeen, &worker.CreatedAt); err != nil {
+			&worker.LastSeen, &worker.CreatedAt, &worker.OwnerName, &worker.Mode); err != nil {
 			return nil, err
 		}
 		if labels != "" {
@@ -412,6 +422,16 @@ func (s *SQLiteStorage) UpdateWorkerStatus(ctx context.Context, id string, statu
 
 func (s *SQLiteStorage) DeleteWorker(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM workers WHERE id = ?`, id)
+	return err
+}
+
+func (s *SQLiteStorage) UpdateWorkerOwner(ctx context.Context, id, ownerName, mode string) error {
+	if mode == "" {
+		mode = "personal"
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE workers SET owner_name = ?, mode = ? WHERE id = ?`,
+		ownerName, mode, id)
 	return err
 }
 

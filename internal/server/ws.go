@@ -353,7 +353,7 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 	ctx := context.Background()
 	dbWorker, err := h.storage.GetWorker(ctx, worker.ID)
 	if err != nil {
-		// Create worker record
+		// Create worker record with owner info
 		dbWorker = &storage.Worker{
 			ID:        worker.ID,
 			Name:      worker.Hostname,
@@ -361,15 +361,18 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 			Status:    storage.WorkerStatusOnline,
 			LastSeen:  time.Now(),
 			CreatedAt: time.Now(),
+			OwnerName: worker.OwnerName,
+			Mode:      string(worker.Mode),
 		}
 		if createErr := h.storage.CreateWorker(ctx, dbWorker); createErr != nil {
 			h.log.Warn("failed to create worker record", "worker_id", worker.ID, "error", createErr)
 			// Continue anyway - hub registration still works
 		}
 	} else {
-		// Update existing worker status
+		// Update existing worker status and owner info (in case mode changed)
 		_ = h.storage.UpdateWorkerStatus(ctx, worker.ID, storage.WorkerStatusOnline)
 		_ = h.storage.UpdateWorkerLastSeen(ctx, worker.ID)
+		_ = h.storage.UpdateWorkerOwner(ctx, worker.ID, worker.OwnerName, string(worker.Mode))
 	}
 
 	// Use database name for display (preserves original name from first registration)

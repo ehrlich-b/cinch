@@ -170,7 +170,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	apiHandler := server.NewAPIHandler(store, hub, authHandler, log)
 	logStreamHandler := server.NewLogStreamHandler(store, log)
 	badgeHandler := server.NewBadgeHandler(store, log, baseURL)
-	workerStreamHandler := server.NewWorkerStreamHandler(hub, log)
+	workerStreamHandler := server.NewWorkerStreamHandler(hub, authHandler, log)
 
 	// Create GitHub App handler
 	githubAppConfig := server.GitHubAppConfig{

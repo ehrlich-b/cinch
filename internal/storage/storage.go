@@ -28,6 +28,7 @@ type Storage interface {
 	ListWorkers(ctx context.Context) ([]*Worker, error)
 	UpdateWorkerLastSeen(ctx context.Context, id string) error
 	UpdateWorkerStatus(ctx context.Context, id string, status WorkerStatus) error
+	UpdateWorkerOwner(ctx context.Context, id, ownerName, mode string) error
 	DeleteWorker(ctx context.Context, id string) error
 
 	// Repos
@@ -146,6 +147,9 @@ type Worker struct {
 	Status    WorkerStatus
 	LastSeen  time.Time
 	CreatedAt time.Time
+	// Owner info for visibility filtering
+	OwnerName string // Email of worker owner
+	Mode      string // "personal" or "shared"
 }
 
 // ForgeType represents the type of git forge.

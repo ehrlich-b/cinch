@@ -529,6 +529,9 @@ type workerResponse struct {
 }
 
 func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
+	// Get authenticated user for visibility filtering
+	username := h.auth.GetUser(r)
+
 	workers, err := h.storage.ListWorkers(r.Context())
 	if err != nil {
 		h.log.Error("failed to list workers", "error", err)
@@ -536,34 +539,59 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]workerResponse, len(workers))
-	for i, wk := range workers {
-		resp[i] = workerResponse{
+	var resp []workerResponse
+	for _, wk := range workers {
+		// Get live info from hub if connected (for current owner/mode)
+		var conn *WorkerConn
+		if h.hub != nil {
+			conn = h.hub.Get(wk.ID)
+		}
+
+		// Determine owner and mode (prefer live data, fallback to DB)
+		ownerName := wk.OwnerName
+		mode := wk.Mode
+		if conn != nil {
+			if conn.OwnerName != "" {
+				ownerName = conn.OwnerName
+			}
+			if conn.Mode != "" {
+				mode = string(conn.Mode)
+			}
+		}
+		if mode == "" {
+			mode = "personal"
+		}
+
+		// Visibility filtering:
+		// - Personal workers: only visible to owner
+		// - Shared workers: visible to all authenticated users
+		if mode == "personal" && ownerName != username {
+			continue // Skip - not visible to this user
+		}
+
+		wr := workerResponse{
 			ID:        wk.ID,
 			Name:      wk.Name,
 			Labels:    wk.Labels,
 			Status:    string(wk.Status),
 			LastSeen:  wk.LastSeen,
 			CreatedAt: wk.CreatedAt,
-			Mode:      "personal", // Default
+			Mode:      mode,
+			OwnerName: ownerName,
 		}
 
 		// Add live info from hub if connected
-		if h.hub != nil {
-			if conn := h.hub.Get(wk.ID); conn != nil {
-				resp[i].Connected = true
-				resp[i].ActiveJobs = conn.ActiveJobs
-				resp[i].Hostname = conn.Hostname
-				resp[i].Version = conn.Version
-				resp[i].OwnerName = conn.OwnerName
-				if conn.Mode != "" {
-					resp[i].Mode = string(conn.Mode)
-				}
-				if len(conn.ActiveJobs) > 0 {
-					resp[i].CurrentJob = &conn.ActiveJobs[0]
-				}
+		if conn != nil {
+			wr.Connected = true
+			wr.ActiveJobs = conn.ActiveJobs
+			wr.Hostname = conn.Hostname
+			wr.Version = conn.Version
+			if len(conn.ActiveJobs) > 0 {
+				wr.CurrentJob = &conn.ActiveJobs[0]
 			}
 		}
+
+		resp = append(resp, wr)
 	}
 
 	h.writeJSON(w, map[string]any{"workers": resp})
