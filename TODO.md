@@ -47,8 +47,8 @@ Fork PRs run on the **contributor's** machine, not the maintainer's.
 ## Then: MVP 1.9 - Polish
 
 - [x] Retry failed jobs from web UI (done in 1.8)
-- [ ] `cinch status` - check job status from CLI
-- [ ] `cinch logs -f` - stream logs from CLI
+- [x] `cinch status` - check job status from CLI
+- [x] `cinch logs -f` - stream logs from CLI
 - [ ] Worker list in web UI
 
 ---

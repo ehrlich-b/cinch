@@ -973,27 +973,227 @@ Examples:
 }
 
 func statusCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show build status for current repo",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("status not yet implemented")
-			return nil
-		},
+		RunE:  runStatus,
 	}
+	cmd.Flags().String("server", "https://cinch.sh", "Server URL")
+	cmd.Flags().IntP("history", "n", 1, "Number of commits to show")
+	return cmd
+}
+
+func runStatus(cmd *cobra.Command, args []string) error {
+	serverURL, _ := cmd.Flags().GetString("server")
+	history, _ := cmd.Flags().GetInt("history")
+
+	// Load credentials
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	sc := cfg.GetServerConfig(serverURL)
+	if sc == nil || sc.Token == "" {
+		return fmt.Errorf("not logged in (run 'cinch login' first)")
+	}
+
+	// Fetch more jobs than needed so we can group by commit
+	jobs, err := cli.Status(cli.StatusOptions{
+		ServerURL: serverURL,
+		Token:     sc.Token,
+		Limit:     history * 10, // Fetch extra to account for multiple forges/events per commit
+	})
+	if err != nil {
+		return err
+	}
+
+	if len(jobs) == 0 {
+		fmt.Println("No jobs found for this repository")
+		return nil
+	}
+
+	// Group jobs by commit+ref (a commit can have both branch push and tag push)
+	type commitKey struct {
+		commit string
+		ref    string // branch, tag, or PR
+	}
+	type commitGroup struct {
+		key       commitKey
+		jobs      []cli.JobStatus
+		createdAt time.Time
+		isRelease bool
+		isPR      bool
+		prNumber  int
+	}
+
+	groups := make(map[commitKey]*commitGroup)
+	var order []commitKey
+
+	for _, job := range jobs {
+		// Determine ref type
+		ref := job.Branch
+		isRelease := false
+		isPR := false
+		prNumber := 0
+
+		if job.PRNumber != nil {
+			ref = fmt.Sprintf("PR #%d", *job.PRNumber)
+			isPR = true
+			prNumber = *job.PRNumber
+		} else if job.Tag != "" {
+			ref = job.Tag
+			isRelease = true
+		}
+
+		key := commitKey{commit: job.Commit, ref: ref}
+		if g, ok := groups[key]; ok {
+			g.jobs = append(g.jobs, job)
+		} else {
+			groups[key] = &commitGroup{
+				key:       key,
+				jobs:      []cli.JobStatus{job},
+				createdAt: job.CreatedAt,
+				isRelease: isRelease,
+				isPR:      isPR,
+				prNumber:  prNumber,
+			}
+			order = append(order, key)
+		}
+	}
+
+	// Limit to requested history
+	if len(order) > history {
+		order = order[:history]
+	}
+
+	// Print grouped output
+	for i, key := range order {
+		g := groups[key]
+		commit := g.key.commit
+		if len(commit) > 7 {
+			commit = commit[:7]
+		}
+
+		// Header line
+		eventType := "build"
+		if g.isRelease {
+			eventType = "release"
+		} else if g.isPR {
+			eventType = "pr"
+		}
+
+		fmt.Printf("%s %s %s (%s)\n", commit, g.key.ref, eventType, cli.RelativeTime(g.createdAt))
+
+		// Forge status line(s)
+		// Determine if we need prefixes and what kind
+		needsPrefix := len(g.jobs) > 1
+		sameForge := needsPrefix && allSameForge(g.jobs)
+
+		for _, job := range g.jobs {
+			symbol := cli.StatusSymbol(job.Status)
+
+			duration := ""
+			if job.StartedAt != nil && job.FinishedAt != nil {
+				start, _ := time.Parse(time.RFC3339, *job.StartedAt)
+				end, _ := time.Parse(time.RFC3339, *job.FinishedAt)
+				duration = fmt.Sprintf(" %s", cli.FormatDuration(end.Sub(start)))
+			}
+
+			if !needsPrefix {
+				// Single remote - no prefix
+				fmt.Printf("  %s %s%s\n", symbol, job.Status, duration)
+			} else if sameForge {
+				// Multiple remotes, same forge - show owner
+				fmt.Printf("  %s %s: %s%s\n", symbol, job.Owner, job.Status, duration)
+			} else {
+				// Multiple remotes, different forges - show forge
+				fmt.Printf("  %s %s: %s%s\n", symbol, shortForgeName(job.Forge), job.Status, duration)
+			}
+		}
+
+		if i < len(order)-1 {
+			fmt.Println()
+		}
+	}
+
+	return nil
+}
+
+func shortForgeName(forge string) string {
+	switch forge {
+	case "github.com":
+		return "gh"
+	case "gitlab.com":
+		return "gl"
+	case "codeberg.org":
+		return "cb"
+	default:
+		if len(forge) > 10 {
+			return forge[:10]
+		}
+		return forge
+	}
+}
+
+func allSameForge(jobs []cli.JobStatus) bool {
+	if len(jobs) == 0 {
+		return true
+	}
+	first := jobs[0].Forge
+	for _, j := range jobs[1:] {
+		if j.Forge != first {
+			return false
+		}
+	}
+	return true
 }
 
 func logsCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "logs [job-id]",
+		Use:   "logs <job-id>",
 		Short: "Stream logs from a job",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("logs not yet implemented")
-			return nil
-		},
+		Args:  cobra.ExactArgs(1),
+		RunE:  runLogs,
 	}
-	cmd.Flags().BoolP("follow", "f", false, "Follow log output")
+	cmd.Flags().BoolP("follow", "f", false, "Follow log output (stream live)")
+	cmd.Flags().String("server", "https://cinch.sh", "Server URL")
 	return cmd
+}
+
+func runLogs(cmd *cobra.Command, args []string) error {
+	serverURL, _ := cmd.Flags().GetString("server")
+	follow, _ := cmd.Flags().GetBool("follow")
+	jobID := args[0]
+
+	// Load credentials
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	sc := cfg.GetServerConfig(serverURL)
+	if sc == nil || sc.Token == "" {
+		return fmt.Errorf("not logged in (run 'cinch login' first)")
+	}
+
+	// Handle interrupt
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	return cli.Logs(ctx, cli.LogsOptions{
+		ServerURL: serverURL,
+		Token:     sc.Token,
+		JobID:     jobID,
+		Follow:    follow,
+	}, os.Stdout)
 }
 
 func configCmd() *cobra.Command {
