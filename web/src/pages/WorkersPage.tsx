@@ -207,7 +207,7 @@ export function WorkersPage() {
               <td>
                 <span className="worker-name">{worker.name || worker.hostname || worker.id}</span>
                 {worker.version && (
-                  <span className="worker-version"> v{worker.version}</span>
+                  <span className="worker-version"> {worker.version}</span>
                 )}
               </td>
               <td>
