@@ -13,14 +13,12 @@ import (
 
 	"github.com/ehrlich-b/cinch/internal/config"
 	"github.com/ehrlich-b/cinch/internal/protocol"
+	"github.com/ehrlich-b/cinch/internal/version"
 	"github.com/ehrlich-b/cinch/internal/worker/container"
 	"github.com/gorilla/websocket"
 )
 
 const (
-	// Worker version
-	workerVersion = "0.1.0"
-
 	// Ping interval
 	pingInterval = 30 * time.Second
 
@@ -353,7 +351,7 @@ func (w *Worker) sendRegister() error {
 		Capabilities: protocol.Capabilities{
 			Docker: w.config.Docker,
 		},
-		Version:     workerVersion,
+		Version:     version.Version,
 		Hostname:    w.config.Hostname,
 		Concurrency: w.config.Concurrency,
 		Mode:        mode,
