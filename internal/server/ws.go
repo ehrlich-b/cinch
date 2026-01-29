@@ -12,6 +12,7 @@ import (
 	"github.com/ehrlich-b/cinch/internal/logstore"
 	"github.com/ehrlich-b/cinch/internal/protocol"
 	"github.com/ehrlich-b/cinch/internal/storage"
+	"github.com/ehrlich-b/cinch/internal/version"
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/sha3"
 )
@@ -28,9 +29,6 @@ const (
 
 	// Maximum message size allowed from peer.
 	maxMessageSize = 1 << 20 // 1MB
-
-	// Server version
-	serverVersion = "0.1.0"
 )
 
 var upgrader = websocket.Upgrader{
@@ -157,7 +155,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Send AUTH_OK
 	authOK, err := protocol.Encode(protocol.TypeAuthOK, protocol.AuthOK{
 		WorkerID:      workerID,
-		ServerVersion: serverVersion,
+		ServerVersion: version.Version,
 	})
 	if err != nil {
 		h.log.Error("failed to encode AUTH_OK", "error", err)

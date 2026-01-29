@@ -76,7 +76,7 @@ validate: build-go
 # -----------------------------------------------------------------------------
 
 VERSION := $(CINCH_TAG)
-LDFLAGS := -s -w -X main.version=$(VERSION)
+LDFLAGS := -s -w -X github.com/ehrlich-b/cinch/internal/version.Version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 release: web

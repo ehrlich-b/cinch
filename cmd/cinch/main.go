@@ -26,6 +26,7 @@ import (
 	"github.com/ehrlich-b/cinch/internal/logstore"
 	"github.com/ehrlich-b/cinch/internal/server"
 	"github.com/ehrlich-b/cinch/internal/storage"
+	"github.com/ehrlich-b/cinch/internal/version"
 	"github.com/ehrlich-b/cinch/internal/worker"
 	"github.com/ehrlich-b/cinch/internal/worker/container"
 	"github.com/ehrlich-b/cinch/web"
@@ -40,16 +41,14 @@ func parseAppID(s string) int64 {
 	return id
 }
 
-var version = "dev"
-
 func main() {
 	// Share version with container package for binary download
-	container.SetVersion(version)
+	container.SetVersion(version.Version)
 
 	rootCmd := &cobra.Command{
 		Use:     "cinch",
 		Short:   "CI that's a cinch",
-		Version: version,
+		Version: version.Version,
 	}
 
 	rootCmd.AddCommand(
