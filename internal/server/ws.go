@@ -342,10 +342,22 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 	if worker.OwnerName == "" && len(worker.ID) > 5 && worker.ID[:5] == "user:" {
 		// Extract email from "user:email:hostname" format
 		rest := worker.ID[5:]
+		var email string
 		if idx := strings.LastIndex(rest, ":"); idx > 0 {
-			worker.OwnerName = rest[:idx] // Get email part before hostname
+			email = rest[:idx] // Get email part before hostname
 		} else {
-			worker.OwnerName = rest // Fallback for old format without hostname
+			email = rest // Fallback for old format without hostname
+		}
+
+		// Look up user by email to get their GitHub username
+		// This is critical for the trust model: job.Author is a GitHub username,
+		// so worker.OwnerName must also be the GitHub username to match
+		ctx := context.Background()
+		if user, err := h.storage.GetUserByEmail(ctx, email); err == nil && user != nil {
+			worker.OwnerName = user.Name // GitHub username
+		} else {
+			// Fallback to email if user not found (shouldn't happen for valid tokens)
+			worker.OwnerName = email
 		}
 	}
 
