@@ -58,6 +58,12 @@ export interface Repo {
   latest_job_status?: string
 }
 
+export interface JobAttempt {
+  id: string
+  status: string
+  created_at: string
+}
+
 export interface Job {
   id: string
   repo: string
@@ -70,6 +76,7 @@ export interface Job {
   created_at?: string
   started_at?: string
   finished_at?: string
+  attempts?: JobAttempt[] // Other jobs for same commit
 }
 
 export interface Worker {

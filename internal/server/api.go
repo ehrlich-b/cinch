@@ -220,6 +220,18 @@ type jobResponse struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
+// jobDetailResponse extends jobResponse with sibling attempts
+type jobDetailResponse struct {
+	jobResponse
+	Attempts []jobAttempt `json:"attempts,omitempty"` // Other jobs for same commit
+}
+
+type jobAttempt struct {
+	ID        string    `json:"id"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 func jobToResponse(j *storage.Job) jobResponse {
 	resp := jobResponse{
 		ID:           j.ID,
@@ -286,7 +298,8 @@ func (h *APIHandler) listJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) getJob(w http.ResponseWriter, r *http.Request, jobID string) {
-	job, err := h.storage.GetJob(r.Context(), jobID)
+	ctx := r.Context()
+	job, err := h.storage.GetJob(ctx, jobID)
 	if err != nil {
 		if err == storage.ErrNotFound {
 			http.Error(w, "job not found", http.StatusNotFound)
@@ -297,7 +310,24 @@ func (h *APIHandler) getJob(w http.ResponseWriter, r *http.Request, jobID string
 		return
 	}
 
-	h.writeJSON(w, jobToResponse(job))
+	// Get sibling jobs (other attempts for same commit)
+	resp := jobDetailResponse{
+		jobResponse: jobToResponse(job),
+	}
+
+	siblings, err := h.storage.GetJobSiblings(ctx, job.RepoID, job.Commit, job.ID)
+	if err == nil && len(siblings) > 0 {
+		resp.Attempts = make([]jobAttempt, len(siblings))
+		for i, s := range siblings {
+			resp.Attempts[i] = jobAttempt{
+				ID:        s.ID,
+				Status:    string(s.Status),
+				CreatedAt: s.CreatedAt,
+			}
+		}
+	}
+
+	h.writeJSON(w, resp)
 }
 
 func (h *APIHandler) getJobLogs(w http.ResponseWriter, r *http.Request, jobID string) {

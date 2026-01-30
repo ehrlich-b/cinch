@@ -15,6 +15,7 @@ type Storage interface {
 	// Jobs
 	CreateJob(ctx context.Context, job *Job) error
 	GetJob(ctx context.Context, id string) (*Job, error)
+	GetJobSiblings(ctx context.Context, repoID, commit, excludeJobID string) ([]*Job, error) // Other jobs for same repo+commit
 	ListJobs(ctx context.Context, filter JobFilter) ([]*Job, error)
 	ListJobsByWorker(ctx context.Context, workerID string, limit int) ([]*Job, error)
 	UpdateJobStatus(ctx context.Context, id string, status JobStatus, exitCode *int) error
