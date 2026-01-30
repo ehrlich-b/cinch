@@ -303,13 +303,22 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 // handlePullRequest handles GitHub pull_request webhook events.
 func (h *GitHubAppHandler) handlePullRequest(w http.ResponseWriter, r *http.Request, body []byte) {
 	var event struct {
-		Action      string `json:"action"`
+		Action string `json:"action"`
+		Sender struct {
+			Login string `json:"login"`
+		} `json:"sender"`
 		PullRequest struct {
 			Number int    `json:"number"`
 			Title  string `json:"title"`
-			Head   struct {
-				SHA string `json:"sha"`
-				Ref string `json:"ref"`
+			User   struct {
+				Login string `json:"login"`
+			} `json:"user"`
+			Head struct {
+				SHA  string `json:"sha"`
+				Ref  string `json:"ref"`
+				Repo struct {
+					FullName string `json:"full_name"`
+				} `json:"repo"`
 			} `json:"head"`
 			Base struct {
 				Ref string `json:"ref"`
@@ -320,6 +329,9 @@ func (h *GitHubAppHandler) handlePullRequest(w http.ResponseWriter, r *http.Requ
 			CloneURL string `json:"clone_url"`
 			HTMLURL  string `json:"html_url"`
 			Private  bool   `json:"private"`
+			Owner    struct {
+				Login string `json:"login"`
+			} `json:"owner"`
 		} `json:"repository"`
 		Installation struct {
 			ID int64 `json:"id"`
@@ -377,6 +389,30 @@ func (h *GitHubAppHandler) handlePullRequest(w http.ResponseWriter, r *http.Requ
 		h.log.Info("auto-created repo", "repo", event.Repository.FullName)
 	}
 
+	// Detect fork: compare head repo to base repo
+	isFork := event.PullRequest.Head.Repo.FullName != "" &&
+		event.PullRequest.Head.Repo.FullName != event.Repository.FullName
+
+	// Get PR author
+	author := event.PullRequest.User.Login
+	if author == "" {
+		author = event.Sender.Login
+	}
+
+	// Determine trust level
+	trustLevel := storage.TrustCollaborator
+	if isFork {
+		trustLevel = storage.TrustExternal
+	} else if author == event.Repository.Owner.Login {
+		trustLevel = storage.TrustOwner
+	}
+
+	// Fork PRs from external contributors start in pending_contributor status
+	status := storage.JobStatusPending
+	if isFork && trustLevel == storage.TrustExternal {
+		status = storage.JobStatusPendingContributor
+	}
+
 	// Create job
 	installationID := event.Installation.ID
 	job := &storage.Job{
@@ -386,9 +422,12 @@ func (h *GitHubAppHandler) handlePullRequest(w http.ResponseWriter, r *http.Requ
 		Branch:         event.PullRequest.Head.Ref,
 		PRNumber:       &prNum,
 		PRBaseBranch:   event.PullRequest.Base.Ref,
-		Status:         storage.JobStatusPending,
+		Status:         status,
 		InstallationID: &installationID,
 		CreatedAt:      time.Now(),
+		Author:         author,
+		TrustLevel:     trustLevel,
+		IsFork:         isFork,
 	}
 
 	if err := h.storage.CreateJob(ctx, job); err != nil {
@@ -402,6 +441,9 @@ func (h *GitHubAppHandler) handlePullRequest(w http.ResponseWriter, r *http.Requ
 		"repo", event.Repository.FullName,
 		"pr", prNum,
 		"commit", commit[:8],
+		"author", author,
+		"is_fork", isFork,
+		"trust_level", trustLevel,
 	)
 
 	// Create GitHub Check Run

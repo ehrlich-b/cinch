@@ -1,6 +1,6 @@
 # Cinch TODO
 
-**Last Updated:** 2026-01-29
+**Last Updated:** 2026-01-30
 
 **Goal:** Someone besides me uses this by Sunday (2026-02-02)
 
@@ -9,6 +9,14 @@
 ## Launch Blockers
 
 These must be done before public launch. No exceptions.
+
+### Self-Hosting MVP (MUST)
+
+- [ ] **Filesystem log store default** - logs on disk by default (not SQLite tables)
+- [ ] **Object storage path** - optional S3/R2 log store (self-host friendly config)
+- [ ] **Public webhook ingress guidance** - clear setup + base URL required for webhooks/OAuth
+- [ ] **Secrets (minimal)** - repo-level env secrets injection for jobs
+- [ ] **Labels/worker targeting** - wire `config.Workers` into job dispatch (MVP requirement)
 
 ### Multi-Node Scaling (URGENT)
 
@@ -40,9 +48,13 @@ See `REVIEW.md` for full security audit. Critical issues must be fixed before la
 - [x] **Unrestricted PR approval** - Fixed: only repo owner can approve (TODO: proper collaborator check)
 
 **HIGH (should fix):**
-- [x] **WebSocket origin checks** - Fixed: UI WebSockets now use stricter uiUpgrader with origin checking
+- [x] **WebSocket origin checks** - Fixed: exact host match (not substring), prevents evil-cinch.sh.com bypass
 - [x] **Webhook mutation before signature verify** - Fixed: signature verified before any state changes
-- [x] **Sensitive GET endpoints public** - Fixed: private repo jobs/logs require auth; listJobs filters private repos
+- [x] **Sensitive GET endpoints public** - Fixed: private repo jobs/logs require auth; listJobs/listRepos filter private
+- [x] **Device code weak entropy** - Fixed: now uses 8 alphanumeric chars (32^8 possibilities)
+- [x] **Open redirect via return_to** - Fixed: URL parsing with exact hostname match
+- [x] **listTokens public** - Fixed: now requires authentication
+- [x] **GitHub App missing fork detection** - Fixed: sets IsFork, TrustLevel, Author fields on PR jobs
 
 **MEDIUM (fix soon):**
 - [x] **Forge tokens plaintext** - Fixed: AES-256-GCM encryption using JWT secret. Migration encrypts existing values.
@@ -56,6 +68,8 @@ See `REVIEW.md` for full security audit. Critical issues must be fixed before la
 - [x] **Worker visibility broken** - Fixed 2026-01-29. Unauthenticated users get empty list. Personal workers only visible to owner.
 
 - [ ] **No container config should fail, not default to ubuntu:22.04** - If no image/dockerfile/devcontainer specified, error with helpful message instead of silently using ubuntu:22.04
+
+- [ ] **Container-first clarity** - if Docker missing, fail with explicit "install Docker or set `container: none`"
 
 ---
 
@@ -113,6 +127,9 @@ $5/seat/month. One SKU. No personal/team split, no yearly commitment complexity.
 - [ ] Worker should check for docker/podman on startup (fail fast)
 - [ ] Cache volumes need docs + configurability
 - [ ] Log retention policy (30 days free, configurable paid)
+
+### Pro Features (Post-Launch)
+- [ ] **Artifacts (Pro only)** - 10GB shared quota across logs/cache/images in R2
 
 ---
 

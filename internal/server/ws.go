@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -49,17 +50,27 @@ var uiUpgrader = websocket.Upgrader{
 		if origin == "" {
 			return true // No origin header (same-origin or non-browser)
 		}
-		// Check if origin matches the host
-		host := r.Host
-		// Allow if origin host matches request host
-		// Origin format: https://cinch.sh or http://localhost:8080
-		if strings.Contains(origin, host) {
+
+		// Parse the origin URL to extract the host
+		originURL, err := url.Parse(origin)
+		if err != nil {
+			return false // Invalid origin URL
+		}
+		originHost := originURL.Host
+
+		// Get the request host (may include port)
+		reqHost := r.Host
+
+		// Exact host match required (prevents evil-cinch.sh.com bypass)
+		if originHost == reqHost {
 			return true
 		}
-		// Also allow localhost for dev
-		if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
+
+		// Allow localhost for dev (exact hostname match)
+		if originURL.Hostname() == "localhost" || originURL.Hostname() == "127.0.0.1" {
 			return true
 		}
+
 		return false
 	},
 }
