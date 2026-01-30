@@ -367,11 +367,18 @@ func (h *APIHandler) getJobLogs(w http.ResponseWriter, r *http.Request, jobID st
 func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string) {
 	ctx := r.Context()
 
-	// Check auth
-	username := h.auth.GetUser(r)
-	if username == "" {
+	// Check auth - GetUser returns email
+	email := h.auth.GetUser(r)
+	if email == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	// Look up user to get their GitHub username for the trust model
+	// Job.Author must match Worker.OwnerName (both should be GitHub usernames)
+	username := email // fallback to email if user not found
+	if user, err := h.storage.GetUserByEmail(ctx, email); err == nil && user != nil && user.Name != "" {
+		username = user.Name
 	}
 
 	// Get original job
