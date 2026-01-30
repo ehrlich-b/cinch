@@ -927,14 +927,20 @@ func (h *AuthHandler) handleDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	deviceCodeStr := hex.EncodeToString(deviceCodeBytes)
 
-	// Generate user-friendly code (CINCH-XXXX)
-	userCodeBytes := make([]byte, 2)
+	// Generate user-friendly code (8 alphanumeric chars, 36^8 = 2.8 trillion possibilities)
+	// Uses uppercase letters and digits for easy reading/typing
+	const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // Excludes confusing chars (0/O, 1/I)
+	userCodeBytes := make([]byte, 8)
 	if _, err := rand.Read(userCodeBytes); err != nil {
 		h.log.Error("failed to generate user code", "error", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
-	userCode := fmt.Sprintf("CINCH-%04d", int(userCodeBytes[0])<<8|int(userCodeBytes[1])%10000)
+	userCodeChars := make([]byte, 8)
+	for i := 0; i < 8; i++ {
+		userCodeChars[i] = codeAlphabet[int(userCodeBytes[i])%len(codeAlphabet)]
+	}
+	userCode := string(userCodeChars[:4]) + "-" + string(userCodeChars[4:])
 
 	// Store the device code
 	h.deviceCodesMu.Lock()
@@ -1108,7 +1114,7 @@ input[type="text"]::placeholder { color: #8b949e; }
   %s
   <p>Enter the code shown in your terminal to authorize the CLI.</p>
   <form method="POST">
-    <input type="text" name="code" placeholder="CINCH-0000" value="%s" autocomplete="off" autofocus>
+    <input type="text" name="code" placeholder="ABCD-1234" value="%s" autocomplete="off" autofocus>
     <button type="submit" class="btn">Authorize Device</button>
   </form>
 </div>
@@ -1246,19 +1252,33 @@ func (h *AuthHandler) cleanupExpiredDeviceCodes() {
 // --- Helpers ---
 
 // sanitizeReturnTo validates and sanitizes a return_to URL parameter.
+// Prevents open redirect attacks by validating hostnames exactly.
 func sanitizeReturnTo(returnTo, baseURL string) string {
 	if returnTo == "" {
 		return "/"
 	}
 
-	// Allow relative paths
+	// Allow relative paths (but not protocol-relative URLs like //evil.com)
 	if strings.HasPrefix(returnTo, "/") && !strings.HasPrefix(returnTo, "//") {
 		return returnTo
 	}
 
-	// Allow absolute URLs on our domain
-	if baseURL != "" && strings.HasPrefix(returnTo, baseURL) {
-		return returnTo
+	// For absolute URLs, parse and validate the hostname exactly
+	if baseURL != "" {
+		returnURL, err := url.Parse(returnTo)
+		if err != nil {
+			return "/" // Invalid URL
+		}
+
+		baseURLParsed, err := url.Parse(baseURL)
+		if err != nil {
+			return "/" // Invalid base URL configuration
+		}
+
+		// Exact hostname match required (prevents cinch.sh.evil.com bypass)
+		if returnURL.Host == baseURLParsed.Host {
+			return returnTo
+		}
 	}
 
 	return "/"

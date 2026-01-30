@@ -475,14 +475,31 @@ func TestAPIListTokens(t *testing.T) {
 		CreatedAt: time.Now(),
 	})
 
-	api := NewAPIHandler(store, nil, nil, nil)
+	// Create auth handler with test secret
+	auth := NewAuthHandler(AuthConfig{JWTSecret: "test-secret"}, store, nil)
+	api := NewAPIHandler(store, nil, auth, nil)
 
+	// Test without auth - should be unauthorized
 	req := httptest.NewRequest("GET", "/api/tokens", nil)
 	w := httptest.NewRecorder()
 	api.ServeHTTP(w, req)
 
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+
+	// Test with auth - create a request with auth cookie
+	req = httptest.NewRequest("GET", "/api/tokens", nil)
+	w = httptest.NewRecorder()
+	// Set the auth cookie manually (create a valid JWT)
+	_ = auth.SetAuthCookie(w, "test@example.com")
+	cookie := w.Result().Cookies()[0]
+	req.AddCookie(cookie)
+	w = httptest.NewRecorder()
+	api.ServeHTTP(w, req)
+
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		t.Fatalf("authenticated status = %d, want %d", w.Code, http.StatusOK)
 	}
 
 	var tokens []tokenResponse

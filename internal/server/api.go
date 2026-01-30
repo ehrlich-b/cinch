@@ -984,15 +984,26 @@ func (h *APIHandler) listRepos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check auth for filtering private repos
+	var isAuthenticated bool
+	if h.auth != nil {
+		isAuthenticated = h.auth.GetUser(r) != ""
+	}
+
 	includeStatus := r.URL.Query().Get("include_status") == "true"
 
-	resp := make([]repoResponse, len(repos))
-	for i, repo := range repos {
+	var resp []repoResponse
+	for _, repo := range repos {
+		// Filter: unauthenticated users only see public repos
+		if repo.Private && !isAuthenticated {
+			continue
+		}
+
 		htmlURL := repo.HTMLURL
 		if htmlURL == "" {
 			htmlURL = computeHTMLURL(repo.ForgeType, repo.Owner, repo.Name)
 		}
-		resp[i] = repoResponse{
+		rr := repoResponse{
 			ID:        repo.ID,
 			ForgeType: string(repo.ForgeType),
 			Owner:     repo.Owner,
@@ -1013,9 +1024,11 @@ func (h *APIHandler) listRepos(w http.ResponseWriter, r *http.Request) {
 			})
 			if err == nil && len(jobs) > 0 {
 				status := string(jobs[0].Status)
-				resp[i].LatestJobStatus = &status
+				rr.LatestJobStatus = &status
 			}
 		}
+
+		resp = append(resp, rr)
 	}
 
 	h.writeJSON(w, resp)
@@ -1336,6 +1349,12 @@ type createTokenResponse struct {
 }
 
 func (h *APIHandler) listTokens(w http.ResponseWriter, r *http.Request) {
+	// Require authentication to view tokens
+	if h.auth == nil || h.auth.GetUser(r) == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	tokens, err := h.storage.ListTokens(r.Context())
 	if err != nil {
 		h.log.Error("failed to list tokens", "error", err)

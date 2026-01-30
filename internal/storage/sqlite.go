@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -1073,20 +1074,9 @@ func parseEmailsJSON(s string) []string {
 	if s == "" || s == "[]" {
 		return nil
 	}
-	// Simple JSON array parsing: ["a","b","c"]
-	s = strings.TrimPrefix(s, "[")
-	s = strings.TrimSuffix(s, "]")
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
 	var emails []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		p = strings.Trim(p, "\"")
-		if p != "" {
-			emails = append(emails, p)
-		}
+	if err := json.Unmarshal([]byte(s), &emails); err != nil {
+		return nil
 	}
 	return emails
 }
@@ -1095,11 +1085,11 @@ func formatEmailsJSON(emails []string) string {
 	if len(emails) == 0 {
 		return "[]"
 	}
-	var parts []string
-	for _, e := range emails {
-		parts = append(parts, "\""+e+"\"")
+	b, err := json.Marshal(emails)
+	if err != nil {
+		return "[]"
 	}
-	return "[" + strings.Join(parts, ",") + "]"
+	return string(b)
 }
 
 // --- Logs ---
