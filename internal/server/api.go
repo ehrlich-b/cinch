@@ -588,8 +588,13 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Track which worker IDs we've seen from the database
+	seenIDs := make(map[string]bool)
+
 	var resp []workerResponse
 	for _, wk := range workers {
+		seenIDs[wk.ID] = true
+
 		// Get live info from hub if connected (for current owner/mode)
 		var conn *WorkerConn
 		if h.hub != nil {
@@ -641,6 +646,46 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 		}
 
 		resp = append(resp, wr)
+	}
+
+	// Also include connected workers from hub that aren't in the database
+	// (e.g., worker reconnected from a different machine with different hostname)
+	if h.hub != nil {
+		for _, conn := range h.hub.List() {
+			if seenIDs[conn.ID] {
+				continue // Already included from database
+			}
+
+			mode := string(conn.Mode)
+			if mode == "" {
+				mode = "personal"
+			}
+
+			// Visibility filtering
+			if mode == "personal" && conn.OwnerName != username {
+				continue
+			}
+
+			wr := workerResponse{
+				ID:         conn.ID,
+				Name:       conn.Hostname,
+				Hostname:   conn.Hostname,
+				Labels:     conn.Labels,
+				Status:     "online",
+				LastSeen:   conn.LastPing,
+				CreatedAt:  conn.LastPing, // Use LastPing as approximate creation
+				Mode:       mode,
+				OwnerName:  conn.OwnerName,
+				Version:    conn.Version,
+				Connected:  true,
+				ActiveJobs: conn.ActiveJobs,
+			}
+			if len(conn.ActiveJobs) > 0 {
+				wr.CurrentJob = &conn.ActiveJobs[0]
+			}
+
+			resp = append(resp, wr)
+		}
 	}
 
 	h.writeJSON(w, map[string]any{"workers": resp})
