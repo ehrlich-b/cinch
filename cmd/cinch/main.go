@@ -104,6 +104,13 @@ func runServer(cmd *cobra.Command, args []string) error {
 		baseURL = envBaseURL
 	}
 
+	// WebSocket base URL (optional, defaults to same as BASE_URL)
+	// Used for managed service to separate WS traffic (ws.cinch.sh) from HTTP (cinch.sh)
+	wsBaseURL := os.Getenv("CINCH_WS_BASE_URL")
+	if wsBaseURL == "" {
+		wsBaseURL = baseURL
+	}
+
 	// Set up logger
 	log := slog.Default()
 
@@ -134,6 +141,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		GitHubClientSecret: os.Getenv("CINCH_GITHUB_APP_CLIENT_SECRET"),
 		JWTSecret:          jwtSecret,
 		BaseURL:            baseURL,
+		WsBaseURL:          wsBaseURL,
 	}
 	authHandler := server.NewAuthHandler(authConfig, store, log)
 
@@ -755,11 +763,17 @@ func daemonStartCmd() *cobra.Command {
 				return fmt.Errorf("not logged in - run 'cinch login' first")
 			}
 
-			// Convert HTTP URL to WebSocket URL
-			wsURL := serverCfg.URL
-			wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
-			wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
-			serverURL := wsURL + "/ws/worker"
+			// Use ws_url if available (from server), otherwise derive from URL
+			var serverURL string
+			if serverCfg.WsURL != "" {
+				serverURL = serverCfg.WsURL
+			} else {
+				// Derive WebSocket URL from HTTP URL (backwards compat)
+				wsURL := serverCfg.URL
+				wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
+				wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
+				serverURL = wsURL + "/ws/worker"
+			}
 
 			cfg := cli.DefaultDaemonConfig()
 			cfg.Concurrency = concurrency
@@ -892,11 +906,17 @@ func daemonRunCmd() *cobra.Command {
 				return fmt.Errorf("not logged in - run 'cinch login' first")
 			}
 
-			// Convert HTTP URL to WebSocket URL
-			wsURL := serverCfg.URL
-			wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
-			wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
-			serverURL := wsURL + "/ws/worker"
+			// Use ws_url if available (from server), otherwise derive from URL
+			var serverURL string
+			if serverCfg.WsURL != "" {
+				serverURL = serverCfg.WsURL
+			} else {
+				// Derive WebSocket URL from HTTP URL (backwards compat)
+				wsURL := serverCfg.URL
+				wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
+				wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
+				serverURL = wsURL + "/ws/worker"
+			}
 
 			cfg := cli.DefaultDaemonConfig()
 			cfg.Concurrency = concurrency
@@ -1353,6 +1373,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 
 	cfg.SetServerConfig("default", cli.ServerConfig{
 		URL:   serverURL,
+		WsURL: tokenResp.WsURL,
 		Token: tokenResp.AccessToken,
 		Email: tokenResp.Email,
 	})

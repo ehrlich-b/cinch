@@ -20,6 +20,7 @@ type CLIConfig struct {
 // ServerConfig represents a server configuration.
 type ServerConfig struct {
 	URL   string `toml:"url"`
+	WsURL string `toml:"ws_url,omitempty"` // WebSocket URL (optional, defaults to derived from URL)
 	Token string `toml:"token"`
 	Email string `toml:"email"` // User's email (identity)
 }
@@ -124,7 +125,8 @@ type DeviceAuthResponse struct {
 type DeviceTokenResponse struct {
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`
-	Email       string `json:"email"` // User's email
+	Email       string `json:"email"`  // User's email
+	WsURL       string `json:"ws_url"` // WebSocket URL for workers
 	Error       string `json:"error"`
 }
 
