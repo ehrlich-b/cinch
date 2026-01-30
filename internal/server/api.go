@@ -478,6 +478,18 @@ func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string
 			return
 		}
 
+		// Create a new GitHub Check Run for the retry
+		if newJob.InstallationID != nil && h.githubApp != nil && h.githubApp.IsConfigured() {
+			checkRunID, err := h.githubApp.CreateCheckRun(repo, newJob.Commit, newJob.ID, *newJob.InstallationID)
+			if err != nil {
+				h.log.Warn("failed to create check run for retry", "job_id", newJob.ID, "error", err)
+			} else {
+				if err := h.storage.UpdateJobCheckRunID(ctx, newJob.ID, checkRunID); err != nil {
+					h.log.Warn("failed to save check run ID", "job_id", newJob.ID, "error", err)
+				}
+			}
+		}
+
 		job = newJob
 		newJobID = newJob.ID
 
