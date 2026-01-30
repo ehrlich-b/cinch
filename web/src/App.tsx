@@ -8,7 +8,6 @@ import { JobDetailPage } from './pages/JobDetailPage'
 import { RepoJobsPage } from './pages/RepoJobsPage'
 import { WorkersPage } from './pages/WorkersPage'
 import { ReposPage } from './pages/ReposPage'
-import { BadgesPage } from './pages/BadgesPage'
 import { AccountPage } from './pages/AccountPage'
 import { SuccessPage } from './pages/SuccessPage'
 import { GitLabOnboardPage } from './pages/onboard/GitLabOnboardPage'
@@ -32,7 +31,6 @@ function getPageFromPath(): { page: Page; jobId: string | null; repoPath: RepoPa
   if (path === '/jobs') return { page: 'jobs', jobId: null, repoPath: null }
   if (path === '/workers') return { page: 'workers', jobId: null, repoPath: null }
   if (path === '/repos') return { page: 'repos', jobId: null, repoPath: null }
-  if (path === '/badges') return { page: 'badges', jobId: null, repoPath: null }
   if (path === '/account') return { page: 'account', jobId: null, repoPath: null }
   if (path === '/gitlab/onboard') return { page: 'gitlab-onboard', jobId: null, repoPath: null }
   if (path === '/forgejo/onboard') return { page: 'forgejo-onboard', jobId: null, repoPath: null }
@@ -65,7 +63,6 @@ export function App() {
     else if (newPage === 'repo-jobs' && repoPath) path = `/jobs/${repoPath.forge}/${repoPath.owner}/${repoPath.repo}`
     else if (newPage === 'workers') path = '/workers'
     else if (newPage === 'repos') path = '/repos'
-    else if (newPage === 'badges') path = '/badges'
     else if (newPage === 'account') path = '/account'
     else if (newPage === 'gitlab-onboard') path = '/gitlab/onboard'
     else if (newPage === 'forgejo-onboard') path = '/forgejo/onboard'
@@ -145,7 +142,6 @@ export function App() {
           <button className={page === 'jobs' ? 'active' : ''} onClick={() => navigate('jobs')}>Jobs</button>
           <button className={page === 'workers' ? 'active' : ''} onClick={() => navigate('workers')}>Workers</button>
           <button className={page === 'repos' ? 'active' : ''} onClick={() => navigate('repos')}>Repos</button>
-          <button className={page === 'badges' ? 'active' : ''} onClick={() => navigate('badges')}>Badges</button>
         </nav>
         <div className="auth">
           {auth.loading ? null : auth.authenticated ? (
@@ -176,7 +172,6 @@ export function App() {
             onSelectRepo={(repoPath) => navigate('repo-jobs', null, repoPath)}
           />
         )}
-        {page === 'badges' && <BadgesPage />}
         {page === 'account' && <AccountPage onLogout={() => window.location.href = '/auth/logout'} />}
       </main>
     </div>

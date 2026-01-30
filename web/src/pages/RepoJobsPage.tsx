@@ -5,6 +5,42 @@ import { ForgeIcon } from '../components/ForgeIcon'
 import { formatDuration, relativeTime } from '../utils/format'
 import type { Job, RepoPath } from '../types'
 
+function BadgeSection({ repoPath }: { repoPath: RepoPath }) {
+  const [copied, setCopied] = useState(false)
+  const [showBadge, setShowBadge] = useState(false)
+
+  const badgeUrl = `https://cinch.sh/badge/${repoPath.forge}/${repoPath.owner}/${repoPath.repo}.svg`
+  const jobsUrl = `https://cinch.sh/jobs/${repoPath.forge}/${repoPath.owner}/${repoPath.repo}`
+  const markdownSnippet = `[![build](${badgeUrl})](${jobsUrl})`
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(markdownSnippet)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="badge-section">
+      <button className="badge-toggle" onClick={() => setShowBadge(!showBadge)}>
+        {showBadge ? 'Hide' : 'Show'} README badge
+      </button>
+      {showBadge && (
+        <div className="badge-content">
+          <div className="badge-preview">
+            <img src={badgeUrl} alt="build status" />
+          </div>
+          <div className="badge-code">
+            <code>{markdownSnippet}</code>
+            <button onClick={copyToClipboard} className="copy-btn">
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface Props {
   repoPath: RepoPath
   onSelectJob: (id: string) => void
@@ -80,6 +116,7 @@ export function RepoJobsPage({ repoPath, onSelectJob, onBack }: Props) {
             </a>
           )}
         </div>
+        <BadgeSection repoPath={repoPath} />
       </div>
 
       <div className="jobs-filters">

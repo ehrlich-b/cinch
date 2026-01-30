@@ -1,4 +1,4 @@
-export type Page = 'home' | 'jobs' | 'repo-jobs' | 'workers' | 'repos' | 'badges' | 'account' | 'gitlab-onboard' | 'forgejo-onboard' | 'success'
+export type Page = 'home' | 'jobs' | 'repo-jobs' | 'workers' | 'repos' | 'account' | 'gitlab-onboard' | 'forgejo-onboard' | 'success'
 
 export interface AuthState {
   authenticated: boolean
