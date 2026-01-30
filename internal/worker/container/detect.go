@@ -204,7 +204,19 @@ func PrepareImage(ctx context.Context, source *ImageSource, jobID string, stdout
 		}
 		return source.Image, nil
 
-	case "dockerfile", "devcontainer":
+	case "devcontainer":
+		// Devcontainer with just an image (no dockerfile) - pull it
+		if source.Image != "" && source.Dockerfile == "" {
+			fmt.Fprintf(stdout, "$ docker pull %s\n", source.Image)
+			d := &Docker{Image: source.Image, Stdout: stdout, Stderr: stderr}
+			if err := d.Pull(ctx); err != nil {
+				return "", fmt.Errorf("pull image: %w", err)
+			}
+			return source.Image, nil
+		}
+		// Devcontainer with dockerfile - build it
+		fallthrough
+	case "dockerfile":
 		// Build image with job-specific tag
 		tag := fmt.Sprintf("cinch-build-%s", jobID)
 		fmt.Fprintf(stdout, "$ docker build -f %s -t %s %s\n", source.Dockerfile, tag, source.Context)

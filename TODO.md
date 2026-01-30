@@ -1,75 +1,31 @@
 # Cinch TODO
 
-**Last Updated:** 2026-01-28
+**Last Updated:** 2026-01-29
 
 ---
 
-## Done: MVP 1.8 - Worker Trust Model
+## Bugs to Fix
+
+- [ ] **No container config should fail, not default to ubuntu:22.04** - If no image/dockerfile/devcontainer specified, error with helpful message instead of silently using ubuntu:22.04 (which will almost always fail)
 
 ---
 
-**SECURITY CRITICAL.** Fork PRs currently dispatch to maintainer's worker = backdoor.
+## Current: MVP 1.10 - Homepage & Launch Prep
 
-See `design/12-worker-trust-model.md` for full design.
+### Landing Page (Priority)
 
-### Core Concept
+- [ ] cinch.sh landing page overhaul - explain the product in 10 seconds
+- [ ] Problem/solution/how it works/pricing - all visible without scrolling
+- [ ] One badge on a repo that isn't mine (social proof)
 
-Two worker modes:
-- **Personal (default)**: Only runs YOUR code (your pushes, your PRs)
-- **Shared (`--shared`)**: Runs collaborator code, defers to personal workers
+### Launch Prep
 
-Fork PRs run on the **contributor's** machine, not the maintainer's.
-
-### Implementation
-
-- [x] Add author/author_id to Job struct
-- [x] Add trust_level (owner/collaborator/external) computed from forge API
-- [x] Add worker mode (personal/shared) to registration
-- [x] Dispatch: personal workers only get author's jobs
-- [x] Dispatch: shared workers defer to author's personal worker if online
-- [x] Fork PRs: new `pending_contributor` status
-- [x] Fork PRs: status message with `cinch worker -s` instructions
-- [x] Web UI: Retry/Run button (approves pending_contributor, retries failed)
-- [x] CLI: `cinch worker --shared` flag
-- [x] API: `POST /api/jobs/{id}/run` endpoint (unified retry + approval)
-
-### Dispatch Priority
-
-```
-1. Author's personal worker online → dispatch there
-2. Team worker online, author is collaborator → dispatch there
-3. Fork PR, no author worker → hold as "pending_contributor"
-4. Maintainer approves → dispatch to shared worker
-```
+- [ ] Make GitHub App public (currently private)
+- [ ] Install flow polish - can a stranger go zero → green checkmark without asking questions?
 
 ---
 
-## Current: MVP 1.9 - Polish
-
-- [x] Retry failed jobs from web UI (done in 1.8)
-- [x] `cinch status` - check job status from CLI (multi-remote, adaptive prefixes)
-- [x] `cinch logs` / `cinch logs -f` - fetch or stream logs from CLI
-- [x] Worker list in web UI with live updates (WebSocket streaming)
-- [x] Remote worker control (shutdown/disconnect buttons)
-- [x] Unique worker IDs per machine (`user:email:hostname` format)
-- [x] Worker visibility model (see below)
-
-### Worker Visibility & Control Model
-
-**Done:**
-- Personal workers: Only visible to owner
-- Shared workers: Visible to all authenticated users
-- Control: Only owner can control their shared workers (personal workers can't be remotely controlled)
-
-**Implementation:**
-- [x] Filter `/api/workers` by ownership (personal = owner only, shared = all)
-- [x] Filter WebSocket `/ws/workers` events same way
-- [x] Backend authorization: only allow control of your own workers (was already done in 1.8)
-- [x] Persist owner_name and mode in workers table
-
----
-
-## Then: MVP 1.10 - Stripe Integration
+## Then: MVP 1.11 - Stripe Integration
 
 **Pricing:** Public repos free, private repos $5/seat/month, self-hosted free.
 
@@ -82,7 +38,7 @@ Fork PRs run on the **contributor's** machine, not the maintainer's.
 
 ---
 
-## Then: MVP 1.11 - Security Review & Polish
+## Then: MVP 1.12 - Security Review & Polish
 
 - [ ] Security audit of worker trust model implementation
 - [ ] Review webhook signature validation across forges
@@ -93,7 +49,7 @@ Fork PRs run on the **contributor's** machine, not the maintainer's.
 
 ---
 
-## Then: MVP 1.12 - Fly Multi-Node
+## Then: MVP 1.13 - Fly Multi-Node
 
 Simple horizontal scaling via Fly - no architectural changes, just make sure it works.
 
@@ -231,9 +187,6 @@ If SQLite + LiteFS can't handle scale:
 - [ ] Loading skeletons
 - [ ] Real Settings page (tokens, repos)
 - [ ] Badge repo selector (generate badge markdown)
-- [ ] Retry from web UI (button on failed job)
-- [ ] Remote worker shutdown (web UI → graceful stop signal)
-- [ ] Worker list in web UI (see all connected workers)
 
 ### Daemon Polish
 - [ ] `cinch daemon scale N` to adjust running worker count
@@ -254,6 +207,25 @@ If SQLite + LiteFS can't handle scale:
 ---
 
 ## Done
+
+### MVP 1.9 - Polish (2026-01-29)
+
+- ✅ Retry failed jobs from web UI
+- ✅ `cinch status` - check job status from CLI
+- ✅ `cinch logs` / `cinch logs -f` - fetch or stream logs from CLI
+- ✅ Worker list in web UI with live updates
+- ✅ Remote worker control (shutdown/disconnect buttons)
+- ✅ Unique worker IDs per machine
+- ✅ Worker visibility model (personal = owner only, shared = all authenticated)
+
+### MVP 1.8 - Worker Trust Model (2026-01-28)
+
+Fork PRs run on contributor's machine, not maintainer's. See `design/12-worker-trust-model.md`.
+
+- ✅ Personal/shared worker modes
+- ✅ Dispatch priority based on author and trust level
+- ✅ `pending_contributor` status for fork PRs
+- ✅ Web UI approval flow for fork PRs
 
 ### MVP 1.7 - PR/MR Support (2026-01-28)
 

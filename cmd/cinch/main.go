@@ -1432,22 +1432,58 @@ func repoAddCmd() *cobra.Command {
 	var forgeToken string
 
 	cmd := &cobra.Command{
-		Use:   "add <owner/name>",
+		Use:   "add [owner/name]",
 		Short: "Add a repository to Cinch",
 		Long: `Add a repository to Cinch for CI.
 
-Examples:
-  cinch repo add ehrlich-b/cinch
-  cinch repo add myorg/myproject --forge gitlab
-  cinch repo add myorg/myproject --forge gitlab --url https://gitlab.mycompany.com --token glpat-xxx
+If no repository is specified, detects from git remotes in the current directory.
 
-After adding, configure the webhook in your forge:
-  - URL: shown in output
-  - Secret: shown in output (or token for GitLab)
-  - Events: push, pull_request (or merge_request for GitLab)`,
-		Args: cobra.ExactArgs(1),
+Examples:
+  cinch repo add                    # Add current repo (detects from git)
+  cinch repo add ehrlich-b/cinch    # Add specific GitHub repo
+  cinch repo add myorg/myproject --forge gitlab
+  cinch repo add myorg/myproject --forge gitlab --url https://gitlab.mycompany.com --token glpat-xxx`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRepoAdd(args[0], forgeType, forgeURL, forgeToken)
+			var repoPath string
+			var detectedForge string
+
+			if len(args) == 0 {
+				// Detect from git remotes
+				repos, err := cli.DetectRepos()
+				if err != nil {
+					return fmt.Errorf("not in a git repository: %w", err)
+				}
+				if len(repos) == 0 {
+					return fmt.Errorf("no git remotes found")
+				}
+				// Use first repo (prefer github if available)
+				repo := repos[0]
+				for _, r := range repos {
+					if r.Forge == "github.com" {
+						repo = r
+						break
+					}
+				}
+				repoPath = repo.Owner + "/" + repo.Name
+				detectedForge = repo.Forge
+				// Map forge domain to forge type
+				switch {
+				case detectedForge == "github.com":
+					forgeType = "github"
+				case detectedForge == "gitlab.com" || strings.Contains(detectedForge, "gitlab"):
+					forgeType = "gitlab"
+				case detectedForge == "codeberg.org":
+					forgeType = "forgejo"
+				default:
+					forgeType = "github" // default
+				}
+				fmt.Printf("Detected: %s (%s)\n", repoPath, forgeType)
+			} else {
+				repoPath = args[0]
+			}
+
+			return runRepoAdd(repoPath, forgeType, forgeURL, forgeToken)
 		},
 	}
 	cmd.Flags().StringVar(&forgeType, "forge", "github", "Forge type (github, gitlab, forgejo, gitea)")
@@ -1690,11 +1726,14 @@ func runManualRepoAdd(serverCfg cli.ServerConfig, repoPath, forgeType, forgeURL,
 			fmt.Println("  Then run: cinch repo add --forge gitlab --token <token> ...")
 		}
 	case "github":
-		fmt.Println("Configure webhook in GitHub:")
-		fmt.Printf("  URL: %s\n", webhookURL)
-		fmt.Printf("  Secret: %s\n", result.WebhookSecret)
-		fmt.Println("  Content type: application/json")
-		fmt.Println("  Events: push, pull_request")
+		// GitHub uses the GitHub App - redirect to add repo to installation
+		appURL := "https://github.com/apps/cinch-sh/installations/select_target"
+		fmt.Println()
+		fmt.Println("To enable webhooks, add this repo to your GitHub App installation:")
+		fmt.Printf("  %s\n", appURL)
+		fmt.Println()
+		fmt.Println("Opening browser...")
+		openBrowser(appURL)
 	default:
 		fmt.Printf("Configure webhook in %s:\n", forgeType)
 		fmt.Printf("  URL: %s\n", webhookURL)
