@@ -118,17 +118,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sync private flag if it changed
-	if repo.Private != event.Repo.Private {
-		if err := h.storage.UpdateRepoPrivate(ctx, repo.ID, event.Repo.Private); err != nil {
-			h.log.Warn("failed to update repo private flag", "error", err)
-		} else {
-			h.log.Info("repo private flag updated", "repo", event.Repo.FullName(), "private", event.Repo.Private)
-			repo.Private = event.Repo.Private
-		}
-	}
-
-	// Now verify signature with the stored secret
+	// SECURITY: Verify signature BEFORE any state changes
 	if repo.WebhookSecret != "" {
 		r.Body = io.NopCloser(strings.NewReader(string(body)))
 		_, err = matchedForge.ParsePush(r, repo.WebhookSecret)
@@ -136,6 +126,16 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.log.Warn("webhook signature verification failed", "repo", event.Repo.FullName(), "error", err)
 			http.Error(w, "signature verification failed", http.StatusUnauthorized)
 			return
+		}
+	}
+
+	// Now safe to sync private flag (after signature verified)
+	if repo.Private != event.Repo.Private {
+		if err := h.storage.UpdateRepoPrivate(ctx, repo.ID, event.Repo.Private); err != nil {
+			h.log.Warn("failed to update repo private flag", "error", err)
+		} else {
+			h.log.Info("repo private flag updated", "repo", event.Repo.FullName(), "private", event.Repo.Private)
+			repo.Private = event.Repo.Private
 		}
 	}
 
@@ -204,17 +204,7 @@ func (h *WebhookHandler) handlePullRequest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Sync private flag if it changed
-	if repo.Private != prEvent.Repo.Private {
-		if err := h.storage.UpdateRepoPrivate(ctx, repo.ID, prEvent.Repo.Private); err != nil {
-			h.log.Warn("failed to update repo private flag", "error", err)
-		} else {
-			h.log.Info("repo private flag updated", "repo", prEvent.Repo.FullName(), "private", prEvent.Repo.Private)
-			repo.Private = prEvent.Repo.Private
-		}
-	}
-
-	// Now verify signature with the stored secret
+	// SECURITY: Verify signature BEFORE any state changes
 	if repo.WebhookSecret != "" {
 		r.Body = io.NopCloser(strings.NewReader(string(body)))
 		_, err = matchedForge.ParsePullRequest(r, repo.WebhookSecret)
@@ -222,6 +212,16 @@ func (h *WebhookHandler) handlePullRequest(w http.ResponseWriter, r *http.Reques
 			h.log.Warn("webhook signature verification failed", "repo", prEvent.Repo.FullName(), "error", err)
 			http.Error(w, "signature verification failed", http.StatusUnauthorized)
 			return
+		}
+	}
+
+	// Now safe to sync private flag (after signature verified)
+	if repo.Private != prEvent.Repo.Private {
+		if err := h.storage.UpdateRepoPrivate(ctx, repo.ID, prEvent.Repo.Private); err != nil {
+			h.log.Warn("failed to update repo private flag", "error", err)
+		} else {
+			h.log.Info("repo private flag updated", "repo", prEvent.Repo.FullName(), "private", prEvent.Repo.Private)
+			repo.Private = prEvent.Repo.Private
 		}
 	}
 
