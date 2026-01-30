@@ -225,6 +225,32 @@ func (s *SQLiteStorage) GetJob(ctx context.Context, id string) (*Job, error) {
 	return job, err
 }
 
+func (s *SQLiteStorage) GetJobSiblings(ctx context.Context, repoID, commit, excludeJobID string) ([]*Job, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, repo_id, commit_sha, branch, tag, pr_number, pr_base_branch, status, exit_code, worker_id,
+		        installation_id, check_run_id, started_at, finished_at, created_at,
+		        author, trust_level, is_fork, approved_by, approved_at
+		 FROM jobs WHERE repo_id = ? AND commit_sha = ? AND id != ?
+		 ORDER BY created_at DESC`, repoID, commit, excludeJobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []*Job
+	for rows.Next() {
+		job := &Job{}
+		if err := rows.Scan(
+			&job.ID, &job.RepoID, &job.Commit, &job.Branch, &job.Tag, &job.PRNumber, &job.PRBaseBranch, &job.Status,
+			&job.ExitCode, &job.WorkerID, &job.InstallationID, &job.CheckRunID, &job.StartedAt, &job.FinishedAt, &job.CreatedAt,
+			&job.Author, &job.TrustLevel, &job.IsFork, &job.ApprovedBy, &job.ApprovedAt); err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
 func (s *SQLiteStorage) UpdateJobCheckRunID(ctx context.Context, id string, checkRunID int64) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE jobs SET check_run_id = ? WHERE id = ?`,

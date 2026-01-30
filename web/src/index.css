@@ -188,6 +188,61 @@ tr.clickable {
   margin-bottom: 1rem;
 }
 
+.attempts-dropdown {
+  position: relative;
+}
+
+.attempts-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.attempts-btn:hover {
+  background: var(--bg-secondary);
+  border-color: var(--text-muted);
+}
+
+.attempts-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.25rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 160px;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.attempt-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.attempt-item.current {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.attempt-item.clickable {
+  cursor: pointer;
+}
+
+.attempt-item.clickable:hover {
+  background: var(--bg-tertiary);
+}
+
 .job-detail {
   display: flex;
   flex-direction: column;

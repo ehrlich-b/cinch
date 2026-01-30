@@ -2,12 +2,46 @@ import { useState, useEffect, useRef } from 'react'
 import { ErrorState } from '../components/ErrorState'
 import { StatusIcon } from '../components/StatusIcon'
 import { relativeTime, renderAnsi } from '../utils/format'
-import type { Job, LogEntry } from '../types'
+import type { Job, JobAttempt, LogEntry } from '../types'
 
 interface Props {
   jobId: string
   onBack: () => void
   onSelectJob?: (jobId: string) => void
+}
+
+function AttemptsDropdown({ attempts, onSelect }: {
+  attempts: JobAttempt[]
+  onSelect: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  if (attempts.length === 0) return null
+
+  return (
+    <div className="attempts-dropdown">
+      <button onClick={() => setOpen(!open)} className="attempts-btn">
+        {attempts.length + 1} attempts ▾
+      </button>
+      {open && (
+        <div className="attempts-menu">
+          <div className="attempt-item current">
+            <StatusIcon status="current" /> Current
+          </div>
+          {attempts.map(a => (
+            <div
+              key={a.id}
+              className="attempt-item clickable"
+              onClick={() => { onSelect(a.id); setOpen(false) }}
+            >
+              <StatusIcon status={a.status} />
+              <span>{relativeTime(a.created_at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function JobDetailPage({ jobId, onBack, onSelectJob }: Props) {
@@ -116,6 +150,12 @@ export function JobDetailPage({ jobId, onBack, onSelectJob }: Props) {
             </span>
             <span className="mono">{job.commit?.slice(0, 7)}</span>
             <span className="text-muted">{relativeTime(job.created_at)}</span>
+            {job.attempts && job.attempts.length > 0 && onSelectJob && (
+              <AttemptsDropdown
+                attempts={job.attempts}
+                onSelect={onSelectJob}
+              />
+            )}
             {canRun && (
               <button
                 onClick={handleRun}
