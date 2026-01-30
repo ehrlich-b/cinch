@@ -190,34 +190,36 @@ tr.clickable {
 
 .attempts-dropdown {
   position: relative;
+  display: inline-block;
 }
 
 .attempts-btn {
-  background: var(--bg-tertiary);
+  background: transparent;
   border: 1px solid var(--border);
-  color: var(--text-muted);
-  padding: 0.2rem 0.5rem;
+  color: var(--text);
+  padding: 0.25rem 0.75rem;
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.75rem;
+  font-weight: 500;
 }
 
 .attempts-btn:hover {
-  background: var(--bg-secondary);
+  background: var(--bg-tertiary);
   border-color: var(--text-muted);
 }
 
 .attempts-menu {
   position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 0.25rem;
+  top: calc(100% + 4px);
+  left: 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 6px;
-  min-width: 160px;
+  min-width: 140px;
   z-index: 100;
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  overflow: hidden;
 }
 
 .attempt-item {
@@ -226,7 +228,8 @@ tr.clickable {
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   font-size: 0.75rem;
-  color: var(--text-muted);
+  color: var(--text);
+  white-space: nowrap;
 }
 
 .attempt-item.current {
