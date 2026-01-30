@@ -2,70 +2,125 @@
 
 **Last Updated:** 2026-01-29
 
+**Goal:** Someone besides me uses this by Sunday (2026-02-02)
+
+---
+
+## Launch Blockers
+
+These must be done before public launch. No exceptions.
+
+### Multi-Node Scaling (URGENT)
+
+Can't launch with single-point-of-failure. Need to survive GitHub outages (that's when people look for alternatives).
+
+- [ ] **LiteFS or Postgres** - SQLite single-writer won't work with multiple nodes
+- [ ] **Test `fly scale count 2`** - Does it actually work?
+- [ ] **WebSocket reconnection** - Workers reconnect to healthy node on failure
+- [ ] **Job dispatch across nodes** - Postgres NOTIFY or Redis pub/sub
+- [ ] **Document failover behavior** - What happens when a node dies mid-job?
+
+### GitHub App Public
+
+- [ ] **Make GitHub App public** - Currently private, strangers can't install
+
+### Landing Page
+
+- [ ] **cinch.sh landing page overhaul** - Explain the product in 10 seconds
+- [ ] **Problem/solution/how it works/pricing** - All visible without scrolling
+- [ ] **"GitHub is charging for self-hosted runners"** - Lead with the pain point
+
+### Security Review
+
+See `REVIEW.md` for full security audit. Critical issues must be fixed before launch.
+
+**CRITICAL (must fix):**
+- [x] **Public access to job logs** - Fixed: private repo logs require auth (REST + WebSocket)
+- [x] **Webhook secret in API response** - Fixed: removed from repoResponse, only returned on create
+- [x] **Unrestricted PR approval** - Fixed: only repo owner can approve (TODO: proper collaborator check)
+
+**HIGH (should fix):**
+- [x] **WebSocket origin checks** - Fixed: UI WebSockets now use stricter uiUpgrader with origin checking
+- [x] **Webhook mutation before signature verify** - Fixed: signature verified before any state changes
+- [x] **Sensitive GET endpoints public** - Fixed: private repo jobs/logs require auth; listJobs filters private repos
+
+**MEDIUM (fix soon):**
+- [x] **Forge tokens plaintext** - Fixed: AES-256-GCM encryption using JWT secret. Migration encrypts existing values.
+- [ ] **Git token in clone URL** - Token visible in process list. Use git credential helper.
+- [ ] **Worker ID collision** - Duplicate IDs overwrite without cleanup.
+
 ---
 
 ## Bugs to Fix
 
-- [ ] **No container config should fail, not default to ubuntu:22.04** - If no image/dockerfile/devcontainer specified, error with helpful message instead of silently using ubuntu:22.04 (which will almost always fail)
+- [x] **Worker visibility broken** - Fixed 2026-01-29. Unauthenticated users get empty list. Personal workers only visible to owner.
+
+- [ ] **No container config should fail, not default to ubuntu:22.04** - If no image/dockerfile/devcontainer specified, error with helpful message instead of silently using ubuntu:22.04
 
 ---
 
-## Current: MVP 1.10 - Homepage & Launch Prep
+## After Launch: First Users
 
-### Landing Page (Priority)
+### User Acquisition
 
-- [ ] cinch.sh landing page overhaul - explain the product in 10 seconds
-- [ ] Problem/solution/how it works/pricing - all visible without scrolling
-- [ ] One badge on a repo that isn't mine (social proof)
+Network is unavailable (coworkers going through stuff). Need outside channels:
 
-### Launch Prep
+- [ ] **r/selfhosted post** - "I built a self-hosted CI that runs on your hardware" - low bar, they expect rough edges
+- [ ] **awesome-selfhosted PR** - Get listed
+- [ ] **Hacker News Show HN** - Higher risk/reward, needs polish first
+- [ ] **Indie Hackers** - Journey post
+- [ ] **One badge on someone else's repo** - Social proof
 
-- [ ] Make GitHub App public (currently private)
-- [ ] Install flow polish - can a stranger go zero → green checkmark without asking questions?
+### Install Flow Polish
+
+- [ ] **Zero to green checkmark without questions** - Can a stranger do it?
+- [ ] **Error messages that help** - Not just "failed", but "here's what to do"
 
 ---
 
-## Then: MVP 1.11 - Stripe Integration
+## After First Users: Billing
 
-**Pricing:** Public repos free, private repos $5/seat/month, self-hosted free.
+**Pricing decision: Keep it simple.**
+
+$5/seat/month. One SKU. No personal/team split, no yearly commitment complexity. A seat is anyone who triggers a build on a private repo. Public repos free forever. Self-hosted free forever.
 
 - [ ] Stripe checkout integration
-- [ ] Seat counting logic
+- [ ] Seat counting logic (unique pushers to private repos per billing period)
 - [ ] Public vs private repo detection
-- [ ] Payment prompt during onboarding (private repo selected → pay first)
 - [ ] Billing page in web UI
-- [ ] Storage quota billing (for cache overage)
+- [ ] Soft enforcement (warn, don't block)
 
 ---
 
-## Then: MVP 1.12 - Security Review & Polish
+## Polish (Post-Launch)
 
-- [ ] Security audit of worker trust model implementation
-- [ ] Review webhook signature validation across forges
-- [ ] Audit token storage and transmission
-- [ ] Review container isolation (escape vectors)
-- [ ] Web UI refresh (visual polish pass)
-- [ ] Distinctive badge design (see badge-exploration.md)
+### Web UI
+- [ ] Visual polish pass
+- [ ] Distinctive badge design
+- [ ] Light/dark theme toggle
+- [ ] Loading skeletons
+
+### Documentation
+- [ ] Branch protection setup guide (GitHub rulesets)
+- [ ] GitLab/Forgejo merge protection setup
+- [ ] Troubleshooting: "why isn't my PR gated?"
+
+### Daemon
+- [ ] `cinch daemon scale N` to adjust worker count
+- [ ] Windows support
+
+### Known Issues
+- [ ] Worker should check for docker/podman on startup (fail fast)
+- [ ] Cache volumes need docs + configurability
+- [ ] Log retention policy (30 days free, configurable paid)
 
 ---
 
-## Then: MVP 1.13 - Fly Multi-Node
+## 2.x - Future
 
-Simple horizontal scaling via Fly - no architectural changes, just make sure it works.
-
-- [ ] Test `fly scale count 2` with SQLite (litefs or single-writer)
-- [ ] Verify WebSocket connections survive node failures
-- [ ] Document scaling playbook
-
----
-
-## 2.x - Edge Architecture
+### Edge Architecture
 
 Move client-facing traffic to Cloudflare edge, eliminate Fly egress costs.
-
-### a.cinch.sh - Artifact/Storage Worker
-
-Single Cloudflare Worker at `a.cinch.sh` fronting all R2 storage. Fly handles auth only.
 
 ```
 Client (JWT)
@@ -74,135 +129,36 @@ Client (JWT)
 a.cinch.sh (Cloudflare Worker)
     │
     ├── ACL check: GET cinch.fly.dev/api/acl?resource=/logs/j_xxx
-    │              (tiny request, Fly validates JWT + permissions)
     │
     └── If 200: fetch from R2, stream to client (free egress)
-        If 403: return forbidden
 ```
 
-**Routes:**
-```
-a.cinch.sh/logs/{job_id}/final.log   → R2: logs/{job_id}/final.log
-a.cinch.sh/cache/{repo}/{hash}       → R2: cache/{repo}/{hash}
-a.cinch.sh/artifacts/{job_id}/{name} → R2: artifacts/{job_id}/{name}
-```
+- [ ] Create `a.cinch.sh` Cloudflare Worker
+- [ ] ACL endpoint on Fly
+- [ ] Direct uploads via presigned URLs
 
-**Implementation:**
-- [ ] Create `a.cinch.sh` subdomain on Cloudflare
-- [ ] Worker: extract JWT from Authorization header
-- [ ] Worker: ACL check to Fly origin (forward JWT)
-- [ ] Worker: on 200, fetch from R2 and stream response
-- [ ] Worker: cache ACL responses for 60s (reduce Fly calls)
-- [ ] Fly: `/api/acl` endpoint - validate JWT, check resource access
+### Features
 
-**ACL endpoint (Fly):**
-```go
-GET /api/acl?resource=/logs/j_xxx
-Authorization: Bearer <cinch-jwt>
-
-// Check: does this user have access to this job's repo?
-// Return: 200 OK or 403 Forbidden
-```
-
-**Cost savings:**
-- Log reads: 0 Fly egress (was 100%)
-- Cache downloads: 0 Fly egress
-- Artifact downloads: 0 Fly egress
-- Only ACL checks hit Fly (~100 bytes each)
-
-### Direct Uploads (Future)
-
-For writes, workers/CLI could upload directly to R2 with presigned URLs:
-- [ ] Server generates presigned PUT URL
-- [ ] Client uploads directly to R2
-- [ ] Server never sees the data
-
----
-
-## 2.x - Features
-
-### Artifacts
-
-Native artifact storage (beyond `cinch release` which pushes to forge releases).
-
+**Artifacts:**
 - [ ] `cinch artifact upload dist/*`
-- [ ] Artifact download in subsequent jobs
 - [ ] Artifact browser in web UI
 
-### Build Cache
+**Build Cache:**
+- [ ] Cache layers in R2
+- [ ] LRU eviction
 
-Cache layers in R2, shared across builds.
-
+**Parallel Builds:**
 ```yaml
-cache:
-  - node_modules/
-  - ~/.cache/go-build/
-  - target/
-```
-
-- [ ] Cache manifest format
-- [ ] Upload/download cache layers to R2
-- [ ] LRU eviction when quota exceeded
-- [ ] Cache hit/miss metrics in UI
-
-### Parallel Builds
-
-```yaml
-# Array = parallel jobs (no DAG)
 build:
   - make build
   - make test
-  - make docs
 ```
 
-Array items fan out as independent parallel jobs. No DAG, no workflow DSL.
+**Worker TUI:**
+- [ ] bubbletea TUI for `cinch worker`
 
-### Worker TUI
-
-The bubbletea TUI for `cinch worker` - makes running a worker feel alive.
-
-- [ ] bubbletea TUI for `cinch worker` attach mode
-- [ ] Real-time log streaming in TUI
-- [ ] Recent jobs list (last 5-10)
-- [ ] Keyboard navigation
-
-### Postgres (if needed)
-
-If SQLite + LiteFS can't handle scale:
-
-- [ ] Postgres storage backend (interface already abstracted)
-- [ ] Postgres NOTIFY for cross-node job dispatch
-
----
-
-## Backlog
-
-### Documentation
-- [ ] Branch protection setup guide (GitHub rulesets require typing "cinch" as check name - not auto-discovered)
-- [ ] GitLab/Forgejo equivalent merge protection setup
-- [ ] Troubleshooting: "why isn't my PR gated?"
-
-### Web UI Polish
-- [ ] Light/dark theme toggle
-- [ ] Loading skeletons
-- [ ] Real Settings page (tokens, repos)
-- [ ] Badge repo selector (generate badge markdown)
-
-### Daemon Polish
-- [ ] `cinch daemon scale N` to adjust running worker count
-- [ ] Windows support (probably just "run in terminal" for now)
-
-### CLI Polish
-- [x] `cinch status` - check job status from CLI
-- [x] `cinch logs -f` - stream logs from CLI
-
-### Known Issues
-- [ ] Worker should check for docker/podman on startup (fail fast)
-- [ ] Cache volumes need docs + configurability
-
-### Forge Expansion (Low Priority)
-- [ ] GitHub web onboarding (not just GitHub App)
-- [ ] Azure DevOps, AWS CodeCommit, Gitee (demand-driven)
+### Forge Expansion
+- [ ] Azure DevOps, AWS CodeCommit (demand-driven)
 
 ---
 
@@ -220,8 +176,6 @@ If SQLite + LiteFS can't handle scale:
 
 ### MVP 1.8 - Worker Trust Model (2026-01-28)
 
-Fork PRs run on contributor's machine, not maintainer's. See `design/12-worker-trust-model.md`.
-
 - ✅ Personal/shared worker modes
 - ✅ Dispatch priority based on author and trust level
 - ✅ `pending_contributor` status for fork PRs
@@ -229,90 +183,60 @@ Fork PRs run on contributor's machine, not maintainer's. See `design/12-worker-t
 
 ### MVP 1.7 - PR/MR Support (2026-01-28)
 
-PR/MR events trigger builds, status checks gate merges.
-
-- ✅ GitHub Pull Request events (`pull_request`)
-- ✅ GitLab Merge Request events (`merge_request`)
-- ✅ Forgejo/Gitea Pull Request events (`pull_request`)
+- ✅ GitHub/GitLab/Forgejo PR events
 - ✅ Status checks on PR head commit
-- ✅ PR fields in Job struct (pr_number, pr_base_branch)
-- ✅ API returns PR info
-- ✅ Web UI displays PR info (shows "PR #123" instead of just branch)
-- ✅ Webhook subscriptions include PR events for new repos
+- ✅ PR fields in Job struct and API
+- ✅ Web UI displays PR info
 
 ### MVP 1.6 - Logs → R2 (2026-01-28)
 
-Job logs stored in Cloudflare R2 instead of SQLite.
-
-- ✅ R2 bucket setup (`cinch` bucket)
+- ✅ R2 bucket setup
 - ✅ LogStore interface with SQLite fallback
-- ✅ R2 implementation with 256KB buffer + 30s flush
-- ✅ Log streaming to R2 (chunks during job, final.log on complete)
-- ✅ Log retrieval from R2 (web UI, API)
-- [ ] Retention policy (30 days free tier, configurable for paid)
-- [ ] Migration: existing SQLite logs → R2
+- ✅ Log streaming to R2
+- ✅ Log retrieval from R2
 
 ### MVP 1.5 - Daemon (2026-01-28)
 
-Background worker daemon with internal parallelism via Unix socket.
-
-- ✅ `cinch daemon start/stop/status/logs` commands
-- ✅ `cinch daemon install/uninstall` for service management
-- ✅ launchd plist generation for macOS
-- ✅ systemd unit generation for Linux
-- ✅ Internal parallelism (`-n 4` = 4 concurrent job slots)
-- ✅ `cinch worker` connects to daemon, streams job events
-- ✅ `cinch worker -s` standalone mode (temp daemon + viewer)
-- ✅ Graceful shutdown with job quiescing
-- ✅ `cinch install --with-daemon` option
+- ✅ `cinch daemon start/stop/status/logs`
+- ✅ launchd/systemd service management
+- ✅ Internal parallelism (`-n 4`)
+- ✅ Graceful shutdown
 
 ### MVP 1.4 - Forge Expansion (2026-01-27)
 
-Multi-forge support complete. Cinch hosted on GitHub, GitLab, and Codeberg simultaneously.
-
-- ✅ GitLab: Full integration (OAuth + auto-webhook + PAT fallback + self-hosted)
-- ✅ Forgejo/Gitea: Hybrid flow (OAuth webhook + manual PAT + self-hosted)
-- ✅ Codeberg differentiation (shows "CODEBERG" not "FORGEJO" in UI)
-- ✅ `make push` pushes to all forges, releases land on all three
+- ✅ GitLab full integration
+- ✅ Forgejo/Gitea hybrid flow
+- ✅ `make push` to all forges
 
 ### MVP 1.3 - Public Launch Prep (2026-01-26)
 
-- ✅ Build badges via shields.io (`/badge/{forge}/{owner}/{repo}.svg`)
-- ✅ Queue reliability (jobs re-queue on disconnect/restart)
-- ✅ Unified onboarding (login = onboarding, email-based identity)
-- ✅ GitHub App consolidation (one OAuth, not two)
-- ✅ Account settings (connect/disconnect forges)
-- ✅ Web UI redesign (routing, empty states, error handling, relative timestamps)
-- ✅ Public repo pages (`cinch.sh/jobs/github.com/owner/repo`)
+- ✅ Build badges
+- ✅ Queue reliability
+- ✅ Unified onboarding
+- ✅ Public repo pages
 
 ### MVP 1.2 - Container Execution (2026-01-24)
 
-- ✅ Container runtime (Docker/Podman) with image/dockerfile/devcontainer support
-- ✅ Cache volumes for warm builds
-- ✅ Multi-platform binaries, Linux binary injected into containers
+- ✅ Docker/Podman runtime
+- ✅ Cache volumes
 - ✅ `cinch release` command
-- ✅ Bootstrap loop closed (Cinch releases itself)
+- ✅ Bootstrap loop closed
 
 ### MVP 1.1 - Releases (2026-01-24)
 
-- ✅ Tag detection and `CINCH_TAG` env var
+- ✅ Tag detection
 - ✅ Forge tokens passed to jobs
-- ✅ Install script and `make release` target
+- ✅ Install script
 
 ### MVP 1.0 - Core CI (2026-01-23)
 
-- ✅ Single binary (server, worker, CLI, web UI)
-- ✅ GitHub/Forgejo/Gitea webhooks + status API
+- ✅ Single binary
+- ✅ Webhooks + status API
 - ✅ GitHub App with Checks API
-- ✅ OAuth + device flow auth
+- ✅ OAuth + device flow
 - ✅ Job queue with WebSocket dispatch
 - ✅ Real-time log streaming
 - ✅ Deployed to Fly.io
-
-### Tech Debt (2026-01-28)
-
-- ✅ Break up web/src/App.tsx - Split into components/pages (2200 lines → 184 + modules)
-- ✅ Non-TTY mode for worker output (`[worker]`/`[job]` prefixes, no ANSI decoration)
 
 ---
 
@@ -321,27 +245,18 @@ Multi-forge support complete. Cinch hosted on GitHub, GitLab, and Codeberg simul
 ### Environment Variables
 
 ```bash
-CINCH_REF=refs/heads/main       # Full ref
-CINCH_BRANCH=main               # Branch (empty for tags)
-CINCH_TAG=                      # Tag (empty for branches)
-CINCH_COMMIT=abc1234567890      # Commit SHA
+CINCH_REF=refs/heads/main
+CINCH_BRANCH=main
+CINCH_TAG=
+CINCH_COMMIT=abc1234567890
 CINCH_JOB_ID=j_abc123
 CINCH_REPO=https://github.com/owner/repo.git
-CINCH_FORGE=github              # github, gitlab, forgejo, gitea
-GITHUB_TOKEN=ghs_xxx            # Forge-specific token
-CINCH_FORGE_TOKEN=xxx           # Always set
+CINCH_FORGE=github
+GITHUB_TOKEN=ghs_xxx
+CINCH_FORGE_TOKEN=xxx
 ```
 
-### Adding a New Forge
-
-```go
-// 1. Implement interface in internal/forge/newforge.go
-// 2. Add type constant in internal/forge/forge.go
-// 3. Add to factory switch statement
-// 4. Register in cmd/cinch/main.go
-```
-
-### Scaling Architecture (Future)
+### Scaling Architecture (Target)
 
 ```
                     ┌─────────────────┐
@@ -363,7 +278,7 @@ CINCH_FORGE_TOKEN=xxx           # Always set
                     │  (jobs, repos)  │
                     └─────────────────┘
 
-Workers connect via websocket to any Fly node.
+Workers connect via WebSocket to any Fly node.
 Jobs dispatched via Postgres NOTIFY.
 Logs/cache stored in R2.
 ```

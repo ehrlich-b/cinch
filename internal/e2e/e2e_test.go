@@ -49,7 +49,7 @@ func TestE2EFullPipeline(t *testing.T) {
 
 	// Initialize storage with temp file (not :memory: to avoid parallel test issues)
 	dbFile := filepath.Join(t.TempDir(), "test.db")
-	store, err := storage.NewSQLite(dbFile)
+	store, err := storage.NewSQLite(dbFile, "")
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestE2EFullPipeline(t *testing.T) {
 	wsHandler := server.NewWSHandler(hub, store, log)
 	dispatcher := server.NewDispatcher(hub, store, wsHandler, log)
 	webhookHandler := server.NewWebhookHandler(store, dispatcher, "", log)
-	logStreamHandler := server.NewLogStreamHandler(store, log)
+	logStreamHandler := server.NewLogStreamHandler(store, nil, log) // nil auth for tests
 
 	// Wire up dependencies
 	wsHandler.SetStatusPoster(&mockStatusPoster{t: t})
@@ -387,7 +387,7 @@ func TestE2EWorkerReconnect(t *testing.T) {
 
 	// Initialize storage with temp file
 	dbFile := filepath.Join(t.TempDir(), "test.db")
-	store, err := storage.NewSQLite(dbFile)
+	store, err := storage.NewSQLite(dbFile, "")
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}
@@ -465,7 +465,7 @@ func TestE2EJobCancellation(t *testing.T) {
 
 	// Initialize storage with temp file
 	dbFile := filepath.Join(t.TempDir(), "test.db")
-	store, err := storage.NewSQLite(dbFile)
+	store, err := storage.NewSQLite(dbFile, "")
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}

@@ -4,11 +4,13 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/ehrlich-b/cinch/internal/crypto"
 )
 
 func newTestStorage(t *testing.T) *SQLiteStorage {
 	t.Helper()
-	s, err := NewSQLite(":memory:")
+	s, err := NewSQLite(":memory:", "")
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}
@@ -428,4 +430,126 @@ func TestNotFound(t *testing.T) {
 	if err != ErrNotFound {
 		t.Errorf("GetTokenByHash: expected ErrNotFound, got %v", err)
 	}
+}
+
+func TestEncryptedSecrets(t *testing.T) {
+	// Test with encryption enabled
+	s, err := NewSQLite(":memory:", "test-encryption-key")
+	if err != nil {
+		t.Fatalf("NewSQLite failed: %v", err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	// Create repo with secrets
+	repo := &Repo{
+		ID:            "r_enc",
+		ForgeType:     ForgeTypeGitHub,
+		CloneURL:      "https://github.com/test/encrypted.git",
+		WebhookSecret: "my-webhook-secret",
+		ForgeToken:    "ghp_my-forge-token",
+		CreatedAt:     time.Now(),
+	}
+	if err := s.CreateRepo(ctx, repo); err != nil {
+		t.Fatalf("CreateRepo failed: %v", err)
+	}
+
+	// Retrieve and verify secrets are decrypted
+	got, err := s.GetRepo(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("GetRepo failed: %v", err)
+	}
+	if got.WebhookSecret != repo.WebhookSecret {
+		t.Errorf("WebhookSecret = %q, want %q", got.WebhookSecret, repo.WebhookSecret)
+	}
+	if got.ForgeToken != repo.ForgeToken {
+		t.Errorf("ForgeToken = %q, want %q", got.ForgeToken, repo.ForgeToken)
+	}
+
+	// Verify data is encrypted in database by reading raw value
+	var rawSecret string
+	err = s.db.QueryRow("SELECT webhook_secret FROM repos WHERE id = ?", repo.ID).Scan(&rawSecret)
+	if err != nil {
+		t.Fatalf("raw query failed: %v", err)
+	}
+	if rawSecret == repo.WebhookSecret {
+		t.Error("secret should be encrypted in database, but found plaintext")
+	}
+	if len(rawSecret) < 10 || rawSecret[:4] != "enc:" {
+		t.Errorf("encrypted value should have enc: prefix, got %q", rawSecret[:min(20, len(rawSecret))])
+	}
+}
+
+func TestMigrationEncryptsExistingSecrets(t *testing.T) {
+	// First, create storage without encryption
+	s1, err := NewSQLite(":memory:", "")
+	if err != nil {
+		t.Fatalf("NewSQLite failed: %v", err)
+	}
+	ctx := context.Background()
+
+	// Insert repo with plaintext secrets
+	repo := &Repo{
+		ID:            "r_migrate",
+		ForgeType:     ForgeTypeGitHub,
+		CloneURL:      "https://github.com/test/migrate.git",
+		WebhookSecret: "plaintext-secret",
+		ForgeToken:    "plaintext-token",
+		CreatedAt:     time.Now(),
+	}
+	if err := s1.CreateRepo(ctx, repo); err != nil {
+		t.Fatalf("CreateRepo failed: %v", err)
+	}
+
+	// Verify plaintext in DB
+	var rawSecret string
+	err = s1.db.QueryRow("SELECT webhook_secret FROM repos WHERE id = ?", repo.ID).Scan(&rawSecret)
+	if err != nil {
+		t.Fatalf("raw query failed: %v", err)
+	}
+	if rawSecret != repo.WebhookSecret {
+		t.Errorf("expected plaintext in DB, got %q", rawSecret)
+	}
+
+	// Get the underlying db handle
+	db := s1.db
+
+	// Create new storage with encryption, pointing to same db
+	// This simulates app restart with encryption enabled
+	s2 := &SQLiteStorage{db: db}
+	cipher, _ := newTestCipher("migration-key")
+	s2.cipher = cipher
+	s2.log = s1.log
+
+	// Run migration which should encrypt existing secrets
+	if err := s2.migrateEncryptSecrets(); err != nil {
+		t.Fatalf("migrateEncryptSecrets failed: %v", err)
+	}
+
+	// Verify encryption happened
+	err = db.QueryRow("SELECT webhook_secret FROM repos WHERE id = ?", repo.ID).Scan(&rawSecret)
+	if err != nil {
+		t.Fatalf("raw query failed: %v", err)
+	}
+	if rawSecret == repo.WebhookSecret {
+		t.Error("secret should be encrypted after migration")
+	}
+	if len(rawSecret) < 4 || rawSecret[:4] != "enc:" {
+		t.Errorf("encrypted value should have enc: prefix, got %q", rawSecret[:min(20, len(rawSecret))])
+	}
+
+	// Verify we can still read the decrypted value
+	got, err := s2.GetRepo(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("GetRepo failed: %v", err)
+	}
+	if got.WebhookSecret != repo.WebhookSecret {
+		t.Errorf("decrypted WebhookSecret = %q, want %q", got.WebhookSecret, repo.WebhookSecret)
+	}
+
+	s1.Close()
+}
+
+func newTestCipher(secret string) (*crypto.Cipher, error) {
+	return crypto.NewCipher(secret)
 }
