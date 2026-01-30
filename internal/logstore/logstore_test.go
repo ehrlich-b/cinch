@@ -13,7 +13,7 @@ import (
 )
 
 func TestSQLiteLogStore(t *testing.T) {
-	store, err := storage.NewSQLite(":memory:")
+	store, err := storage.NewSQLite(":memory:", "")
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}

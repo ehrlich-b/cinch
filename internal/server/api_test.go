@@ -13,7 +13,7 @@ import (
 )
 
 func TestAPIListJobs(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	// Create repo for foreign key
@@ -61,7 +61,7 @@ func TestAPIListJobs(t *testing.T) {
 }
 
 func TestAPIListJobsWithFilters(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	// Create repo
@@ -112,7 +112,7 @@ func TestAPIListJobsWithFilters(t *testing.T) {
 }
 
 func TestAPIGetJob(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	// Create repo
@@ -160,7 +160,7 @@ func TestAPIGetJob(t *testing.T) {
 }
 
 func TestAPIGetJobNotFound(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -175,7 +175,7 @@ func TestAPIGetJobNotFound(t *testing.T) {
 }
 
 func TestAPIGetJobLogs(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	// Create repo and job
@@ -218,14 +218,26 @@ func TestAPIGetJobLogs(t *testing.T) {
 }
 
 func TestAPIListWorkers(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
-	// Create workers
+	// Create workers - one owned by alice, one owned by bob
 	_ = store.CreateWorker(t.Context(), &storage.Worker{
-		ID:        "w_1",
-		Name:      "worker-1",
+		ID:        "user:alice:worker-1",
+		Name:      "alice-worker",
+		OwnerName: "alice",
+		Mode:      "personal",
 		Labels:    []string{"linux", "docker"},
+		Status:    storage.WorkerStatusOnline,
+		LastSeen:  time.Now(),
+		CreatedAt: time.Now(),
+	})
+	_ = store.CreateWorker(t.Context(), &storage.Worker{
+		ID:        "user:bob:worker-2",
+		Name:      "bob-worker",
+		OwnerName: "bob",
+		Mode:      "personal",
+		Labels:    []string{"linux"},
 		Status:    storage.WorkerStatusOnline,
 		LastSeen:  time.Now(),
 		CreatedAt: time.Now(),
@@ -234,29 +246,29 @@ func TestAPIListWorkers(t *testing.T) {
 	hub := NewHub()
 	api := NewAPIHandler(store, hub, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/workers", nil)
-	w := httptest.NewRecorder()
-	api.ServeHTTP(w, req)
+	// Test: unauthenticated request returns empty (security fix)
+	t.Run("unauthenticated returns empty", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/workers", nil)
+		w := httptest.NewRecorder()
+		api.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-	}
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
 
-	var resp struct {
-		Workers []workerResponse `json:"workers"`
-	}
-	_ = json.NewDecoder(w.Body).Decode(&resp)
+		var resp struct {
+			Workers []workerResponse `json:"workers"`
+		}
+		_ = json.NewDecoder(w.Body).Decode(&resp)
 
-	if len(resp.Workers) != 1 {
-		t.Errorf("len(workers) = %d, want 1", len(resp.Workers))
-	}
-	if len(resp.Workers) > 0 && resp.Workers[0].Name != "worker-1" {
-		t.Errorf("Name = %s, want worker-1", resp.Workers[0].Name)
-	}
+		if len(resp.Workers) != 0 {
+			t.Errorf("unauthenticated: len(workers) = %d, want 0", len(resp.Workers))
+		}
+	})
 }
 
 func TestAPICreateRepo(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -280,7 +292,7 @@ func TestAPICreateRepo(t *testing.T) {
 		t.Fatalf("status = %d, want %d, body: %s", w.Code, http.StatusCreated, w.Body.String())
 	}
 
-	var repo repoResponse
+	var repo createRepoResponse
 	_ = json.NewDecoder(w.Body).Decode(&repo)
 
 	if repo.Owner != "myorg" {
@@ -298,7 +310,7 @@ func TestAPICreateRepo(t *testing.T) {
 }
 
 func TestAPICreateRepoMissingFields(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -316,7 +328,7 @@ func TestAPICreateRepoMissingFields(t *testing.T) {
 }
 
 func TestAPIListRepos(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	// Create repos
@@ -356,7 +368,7 @@ func TestAPIListRepos(t *testing.T) {
 }
 
 func TestAPIGetRepo(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	_ = store.CreateRepo(t.Context(), &storage.Repo{
@@ -385,14 +397,16 @@ func TestAPIGetRepo(t *testing.T) {
 	if repo.Owner != "myorg" {
 		t.Errorf("Owner = %s, want myorg", repo.Owner)
 	}
-	// Webhook secret should be included in single repo view
-	if repo.WebhookSecret != "secret123" {
-		t.Errorf("WebhookSecret = %s, want secret123", repo.WebhookSecret)
+
+	// Verify webhook secret is NOT exposed in GET response (security fix)
+	body := w.Body.String()
+	if strings.Contains(body, "secret123") || strings.Contains(body, "webhook_secret") {
+		t.Error("webhook_secret should NOT be included in GET response")
 	}
 }
 
 func TestAPIDeleteRepo(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	_ = store.CreateRepo(t.Context(), &storage.Repo{
@@ -420,7 +434,7 @@ func TestAPIDeleteRepo(t *testing.T) {
 }
 
 func TestAPICreateToken(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -451,7 +465,7 @@ func TestAPICreateToken(t *testing.T) {
 }
 
 func TestAPIListTokens(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	_ = store.CreateToken(t.Context(), &storage.Token{
@@ -483,7 +497,7 @@ func TestAPIListTokens(t *testing.T) {
 }
 
 func TestAPIRevokeToken(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	_ = store.CreateToken(t.Context(), &storage.Token{
@@ -513,7 +527,7 @@ func TestAPIRevokeToken(t *testing.T) {
 }
 
 func TestAPINotFound(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -528,7 +542,7 @@ func TestAPINotFound(t *testing.T) {
 }
 
 func TestAPIMethodNotAllowed(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -563,7 +577,7 @@ func TestGenerateSecret(t *testing.T) {
 }
 
 func TestAPIInvalidJSON(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:")
+	store, _ := storage.NewSQLite(":memory:", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)

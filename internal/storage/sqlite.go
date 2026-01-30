@@ -4,21 +4,26 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/ehrlich-b/cinch/internal/crypto"
 	_ "modernc.org/sqlite"
 )
 
 // SQLiteStorage implements Storage using SQLite.
 type SQLiteStorage struct {
-	db *sql.DB
+	db     *sql.DB
+	cipher *crypto.Cipher // nil = no encryption (tests)
+	log    *slog.Logger
 }
 
 // NewSQLite creates a new SQLite storage.
 // Use ":memory:" for in-memory database, or a file path for persistent storage.
-func NewSQLite(dsn string) (*SQLiteStorage, error) {
+// If encryptionSecret is provided, sensitive fields are encrypted at rest.
+func NewSQLite(dsn string, encryptionSecret string) (*SQLiteStorage, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -36,7 +41,16 @@ func NewSQLite(dsn string) (*SQLiteStorage, error) {
 		}
 	}
 
-	s := &SQLiteStorage{db: db}
+	var cipher *crypto.Cipher
+	if encryptionSecret != "" {
+		cipher, err = crypto.NewCipher(encryptionSecret)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("create cipher: %w", err)
+		}
+	}
+
+	s := &SQLiteStorage{db: db, cipher: cipher, log: slog.Default()}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -181,6 +195,140 @@ func (s *SQLiteStorage) migrate() error {
 		_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 	}
 
+	// Encrypt existing plaintext secrets if cipher is configured
+	if s.cipher != nil {
+		if err := s.migrateEncryptSecrets(); err != nil {
+			return fmt.Errorf("encrypt secrets migration: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// migrateEncryptSecrets encrypts any plaintext secrets that haven't been encrypted yet.
+func (s *SQLiteStorage) migrateEncryptSecrets() error {
+	// Encrypt repos.webhook_secret and repos.forge_token
+	rows, err := s.db.Query(`SELECT id, webhook_secret, forge_token FROM repos`)
+	if err != nil {
+		return err
+	}
+	var repoUpdates []struct {
+		id, webhookSecret, forgeToken string
+	}
+	for rows.Next() {
+		var id, webhookSecret, forgeToken string
+		if err := rows.Scan(&id, &webhookSecret, &forgeToken); err != nil {
+			rows.Close()
+			return err
+		}
+		needsUpdate := false
+		if webhookSecret != "" && !crypto.IsEncrypted(webhookSecret) {
+			enc, err := s.cipher.Encrypt(webhookSecret)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			webhookSecret = enc
+			needsUpdate = true
+		}
+		if forgeToken != "" && !crypto.IsEncrypted(forgeToken) {
+			enc, err := s.cipher.Encrypt(forgeToken)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			forgeToken = enc
+			needsUpdate = true
+		}
+		if needsUpdate {
+			repoUpdates = append(repoUpdates, struct{ id, webhookSecret, forgeToken string }{id, webhookSecret, forgeToken})
+		}
+	}
+	rows.Close()
+
+	for _, u := range repoUpdates {
+		if _, err := s.db.Exec(`UPDATE repos SET webhook_secret = ?, forge_token = ? WHERE id = ?`,
+			u.webhookSecret, u.forgeToken, u.id); err != nil {
+			return err
+		}
+		s.log.Info("encrypted repo secrets", "repo_id", u.id)
+	}
+
+	// Encrypt users.gitlab_credentials and users.forgejo_credentials
+	rows, err = s.db.Query(`SELECT id, gitlab_credentials, forgejo_credentials FROM users`)
+	if err != nil {
+		return err
+	}
+	var userUpdates []struct {
+		id, gitlabCreds, forgejoCreds string
+	}
+	for rows.Next() {
+		var id, gitlabCreds, forgejoCreds string
+		if err := rows.Scan(&id, &gitlabCreds, &forgejoCreds); err != nil {
+			rows.Close()
+			return err
+		}
+		needsUpdate := false
+		if gitlabCreds != "" && !crypto.IsEncrypted(gitlabCreds) {
+			enc, err := s.cipher.Encrypt(gitlabCreds)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			gitlabCreds = enc
+			needsUpdate = true
+		}
+		if forgejoCreds != "" && !crypto.IsEncrypted(forgejoCreds) {
+			enc, err := s.cipher.Encrypt(forgejoCreds)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			forgejoCreds = enc
+			needsUpdate = true
+		}
+		if needsUpdate {
+			userUpdates = append(userUpdates, struct{ id, gitlabCreds, forgejoCreds string }{id, gitlabCreds, forgejoCreds})
+		}
+	}
+	rows.Close()
+
+	for _, u := range userUpdates {
+		if _, err := s.db.Exec(`UPDATE users SET gitlab_credentials = ?, forgejo_credentials = ? WHERE id = ?`,
+			u.gitlabCreds, u.forgejoCreds, u.id); err != nil {
+			return err
+		}
+		s.log.Info("encrypted user credentials", "user_id", u.id)
+	}
+
+	return nil
+}
+
+// encrypt encrypts a value if cipher is configured.
+func (s *SQLiteStorage) encrypt(plaintext string) (string, error) {
+	if s.cipher == nil || plaintext == "" {
+		return plaintext, nil
+	}
+	return s.cipher.Encrypt(plaintext)
+}
+
+// decrypt decrypts a value if cipher is configured.
+func (s *SQLiteStorage) decrypt(ciphertext string) (string, error) {
+	if s.cipher == nil || ciphertext == "" {
+		return ciphertext, nil
+	}
+	return s.cipher.Decrypt(ciphertext)
+}
+
+// decryptUserCredentials decrypts the user's forge credentials.
+func (s *SQLiteStorage) decryptUserCredentials(user *User) error {
+	var err error
+	if user.GitLabCredentials, err = s.decrypt(user.GitLabCredentials); err != nil {
+		return fmt.Errorf("decrypt gitlab_credentials: %w", err)
+	}
+	if user.ForgejoCredentials, err = s.decrypt(user.ForgejoCredentials); err != nil {
+		return fmt.Errorf("decrypt forgejo_credentials: %w", err)
+	}
 	return nil
 }
 
@@ -464,8 +612,18 @@ func (s *SQLiteStorage) UpdateWorkerOwner(ctx context.Context, id, ownerName, mo
 // --- Repos ---
 
 func (s *SQLiteStorage) CreateRepo(ctx context.Context, repo *Repo) error {
+	// Encrypt secrets before storing
+	webhookSecret, err := s.encrypt(repo.WebhookSecret)
+	if err != nil {
+		return fmt.Errorf("encrypt webhook_secret: %w", err)
+	}
+	forgeToken, err := s.encrypt(repo.ForgeToken)
+	if err != nil {
+		return fmt.Errorf("encrypt forge_token: %w", err)
+	}
+
 	// Use upsert to handle re-onboarding: if repo exists, update token and webhook secret
-	_, err := s.db.ExecContext(ctx,
+	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO repos (id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, private, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(clone_url) DO UPDATE SET
@@ -473,7 +631,7 @@ func (s *SQLiteStorage) CreateRepo(ctx context.Context, repo *Repo) error {
 		 	forge_token = excluded.forge_token,
 		 	private = excluded.private`,
 		repo.ID, repo.ForgeType, repo.Owner, repo.Name, repo.CloneURL, repo.HTMLURL,
-		repo.WebhookSecret, repo.ForgeToken, repo.Build, repo.Release, repo.Private, repo.CreatedAt)
+		webhookSecret, forgeToken, repo.Build, repo.Release, repo.Private, repo.CreatedAt)
 	return err
 }
 
@@ -487,7 +645,17 @@ func (s *SQLiteStorage) GetRepo(ctx context.Context, id string) (*Repo, error) {
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
-	return repo, err
+	if err != nil {
+		return nil, err
+	}
+	// Decrypt secrets
+	if repo.WebhookSecret, err = s.decrypt(repo.WebhookSecret); err != nil {
+		return nil, fmt.Errorf("decrypt webhook_secret: %w", err)
+	}
+	if repo.ForgeToken, err = s.decrypt(repo.ForgeToken); err != nil {
+		return nil, fmt.Errorf("decrypt forge_token: %w", err)
+	}
+	return repo, nil
 }
 
 func (s *SQLiteStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string) (*Repo, error) {
@@ -500,7 +668,17 @@ func (s *SQLiteStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string) 
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
-	return repo, err
+	if err != nil {
+		return nil, err
+	}
+	// Decrypt secrets
+	if repo.WebhookSecret, err = s.decrypt(repo.WebhookSecret); err != nil {
+		return nil, fmt.Errorf("decrypt webhook_secret: %w", err)
+	}
+	if repo.ForgeToken, err = s.decrypt(repo.ForgeToken); err != nil {
+		return nil, fmt.Errorf("decrypt forge_token: %w", err)
+	}
+	return repo, nil
 }
 
 func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
@@ -518,6 +696,13 @@ func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 		if err := rows.Scan(&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL,
 			&repo.HTMLURL, &repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.Private, &repo.CreatedAt); err != nil {
 			return nil, err
+		}
+		// Decrypt secrets
+		if repo.WebhookSecret, err = s.decrypt(repo.WebhookSecret); err != nil {
+			return nil, fmt.Errorf("decrypt webhook_secret: %w", err)
+		}
+		if repo.ForgeToken, err = s.decrypt(repo.ForgeToken); err != nil {
+			return nil, fmt.Errorf("decrypt forge_token: %w", err)
 		}
 		repos = append(repos, repo)
 	}
@@ -539,7 +724,17 @@ func (s *SQLiteStorage) GetRepoByOwnerName(ctx context.Context, forge, owner, na
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
-	return repo, err
+	if err != nil {
+		return nil, err
+	}
+	// Decrypt secrets
+	if repo.WebhookSecret, err = s.decrypt(repo.WebhookSecret); err != nil {
+		return nil, fmt.Errorf("decrypt webhook_secret: %w", err)
+	}
+	if repo.ForgeToken, err = s.decrypt(repo.ForgeToken); err != nil {
+		return nil, fmt.Errorf("decrypt forge_token: %w", err)
+	}
+	return repo, nil
 }
 
 func (s *SQLiteStorage) UpdateRepoPrivate(ctx context.Context, id string, private bool) error {
@@ -624,6 +819,10 @@ func (s *SQLiteStorage) GetOrCreateUser(ctx context.Context, name string) (*User
 		if emailsJSON != "" {
 			user.Emails = parseEmailsJSON(emailsJSON)
 		}
+		// Decrypt credentials
+		if err := s.decryptUserCredentials(user); err != nil {
+			return nil, err
+		}
 		return user, nil
 	}
 	if err == sql.ErrNoRows {
@@ -667,6 +866,10 @@ func (s *SQLiteStorage) GetOrCreateUserByEmail(ctx context.Context, email, name 
 		}
 		if emailsJSON != "" {
 			user.Emails = parseEmailsJSON(emailsJSON)
+		}
+		// Decrypt credentials
+		if err := s.decryptUserCredentials(user); err != nil {
+			return nil, err
 		}
 		return user, nil
 	}
@@ -718,20 +921,32 @@ func (s *SQLiteStorage) GetUserByName(ctx context.Context, name string) (*User, 
 	if emailsJSON != "" {
 		user.Emails = parseEmailsJSON(emailsJSON)
 	}
+	// Decrypt credentials
+	if err := s.decryptUserCredentials(user); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
 func (s *SQLiteStorage) UpdateUserGitLabCredentials(ctx context.Context, userID, credentials string) error {
-	_, err := s.db.ExecContext(ctx,
+	encrypted, err := s.encrypt(credentials)
+	if err != nil {
+		return fmt.Errorf("encrypt gitlab_credentials: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
 		`UPDATE users SET gitlab_credentials = ?, gitlab_credentials_at = ? WHERE id = ?`,
-		credentials, time.Now(), userID)
+		encrypted, time.Now(), userID)
 	return err
 }
 
 func (s *SQLiteStorage) UpdateUserForgejoCredentials(ctx context.Context, userID, credentials string) error {
-	_, err := s.db.ExecContext(ctx,
+	encrypted, err := s.encrypt(credentials)
+	if err != nil {
+		return fmt.Errorf("encrypt forgejo_credentials: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
 		`UPDATE users SET forgejo_credentials = ?, forgejo_credentials_at = ? WHERE id = ?`,
-		credentials, time.Now(), userID)
+		encrypted, time.Now(), userID)
 	return err
 }
 
@@ -764,6 +979,10 @@ func (s *SQLiteStorage) GetUserByEmail(ctx context.Context, email string) (*User
 	if emailsJSON != "" {
 		// Parse JSON array of emails
 		user.Emails = parseEmailsJSON(emailsJSON)
+	}
+	// Decrypt credentials
+	if err := s.decryptUserCredentials(user); err != nil {
+		return nil, err
 	}
 	return user, nil
 }

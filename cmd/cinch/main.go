@@ -116,9 +116,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 		dbPath = filepath.Join(dataDir, "cinch.db")
 	}
 
-	// Initialize storage
+	// Get JWT secret (also used for DB encryption)
+	jwtSecret := os.Getenv("CINCH_JWT_SECRET")
+
+	// Initialize storage with encryption using JWT secret
 	log.Info("initializing storage", "path", dbPath)
-	store, err := storage.NewSQLite(dbPath)
+	store, err := storage.NewSQLite(dbPath, jwtSecret)
 	if err != nil {
 		return fmt.Errorf("initialize storage: %w", err)
 	}
@@ -129,7 +132,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	authConfig := server.AuthConfig{
 		GitHubClientID:     os.Getenv("CINCH_GITHUB_APP_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("CINCH_GITHUB_APP_CLIENT_SECRET"),
-		JWTSecret:          os.Getenv("CINCH_JWT_SECRET"),
+		JWTSecret:          jwtSecret,
 		BaseURL:            baseURL,
 	}
 	authHandler := server.NewAuthHandler(authConfig, store, log)
@@ -168,7 +171,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	dispatcher := server.NewDispatcher(hub, store, wsHandler, log)
 	webhookHandler := server.NewWebhookHandler(store, dispatcher, baseURL, log)
 	apiHandler := server.NewAPIHandler(store, hub, authHandler, log)
-	logStreamHandler := server.NewLogStreamHandler(store, log)
+	logStreamHandler := server.NewLogStreamHandler(store, authHandler, log)
 	badgeHandler := server.NewBadgeHandler(store, log, baseURL)
 	workerStreamHandler := server.NewWorkerStreamHandler(hub, authHandler, log)
 
@@ -192,8 +195,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 		ClientSecret: os.Getenv("CINCH_GITLAB_CLIENT_SECRET"),
 		BaseURL:      os.Getenv("CINCH_GITLAB_URL"), // defaults to https://gitlab.com
 	}
-	jwtSecret := []byte(os.Getenv("CINCH_JWT_SECRET"))
-	gitlabOAuthHandler := server.NewGitLabOAuthHandler(gitlabOAuthConfig, baseURL, jwtSecret, store, log)
+	jwtSecretBytes := []byte(jwtSecret)
+	gitlabOAuthHandler := server.NewGitLabOAuthHandler(gitlabOAuthConfig, baseURL, jwtSecretBytes, store, log)
 	if gitlabOAuthHandler.IsConfigured() {
 		log.Info("GitLab OAuth configured")
 	}
@@ -204,7 +207,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		ClientSecret: os.Getenv("CINCH_FORGEJO_CLIENT_SECRET"),
 		BaseURL:      os.Getenv("CINCH_FORGEJO_URL"), // defaults to https://codeberg.org
 	}
-	forgejoOAuthHandler := server.NewForgejoOAuthHandler(forgejoOAuthConfig, baseURL, jwtSecret, store, log)
+	forgejoOAuthHandler := server.NewForgejoOAuthHandler(forgejoOAuthConfig, baseURL, jwtSecretBytes, store, log)
 	if forgejoOAuthHandler.IsConfigured() {
 		log.Info("Forgejo OAuth configured", "url", forgejoOAuthConfig.BaseURL)
 	}
