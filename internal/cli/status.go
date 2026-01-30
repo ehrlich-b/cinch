@@ -125,6 +125,11 @@ func fetchJobsForRepo(client *http.Client, opts StatusOptions, info *RepoInfo) (
 	return result.Jobs, nil
 }
 
+// DetectRepos gets repo info from all git remotes. Exported for use by repo add command.
+func DetectRepos() ([]*RepoInfo, error) {
+	return detectAllRepos()
+}
+
 // detectAllRepos gets repo info from all git remotes.
 func detectAllRepos() ([]*RepoInfo, error) {
 	cmd := exec.Command("git", "remote")
