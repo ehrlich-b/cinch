@@ -10,6 +10,17 @@
 
 These must be done before public launch. No exceptions.
 
+### WebSocket Endpoint Split (MUST)
+
+Separate WebSocket from HTTP so we can proxy HTTP through Cloudflare without hitting WS limits. Self-hosted users get single-domain simplicity. See `design/18-websocket-endpoint.md`.
+
+- [x] **Server: CINCH_WS_BASE_URL config** - optional env var, defaults to same as BASE_URL
+- [x] **Server: include ws_url in login response** - tells clients where to connect
+- [x] **Client: save ws_url from login** - store in ~/.cinch/config alongside url
+- [x] **Client: connect to ws_url** - worker uses ws_url instead of deriving from url
+- [ ] **Fly: add ws.cinch.sh cert** - `fly certs create ws.cinch.sh`
+- [ ] **Cloudflare: ws.cinch.sh DNS only** - gray cloud, direct to Fly
+
 ### Self-Hosting MVP (MUST)
 
 - [ ] **Filesystem log store default** - logs on disk by default (not SQLite tables)
@@ -18,15 +29,23 @@ These must be done before public launch. No exceptions.
 - [ ] **Secrets (minimal)** - repo-level env secrets injection for jobs
 - [ ] **Labels/worker targeting** - wire `config.Workers` into job dispatch (MVP requirement)
 
-### Multi-Node Scaling (URGENT)
+### Postgres Support (MVP)
 
-Can't launch with single-point-of-failure. Need to survive GitHub outages (that's when people look for alternatives).
+Single web server + single Postgres instance. Vertical scaling only.
 
-- [ ] **LiteFS or Postgres** - SQLite single-writer won't work with multiple nodes
-- [ ] **Test `fly scale count 2`** - Does it actually work?
-- [ ] **WebSocket reconnection** - Workers reconnect to healthy node on failure
-- [ ] **Job dispatch across nodes** - Postgres NOTIFY or Redis pub/sub
-- [ ] **Document failover behavior** - What happens when a node dies mid-job?
+- [ ] **PostgresStorage implementation** - implement Storage interface for Postgres
+- [ ] **DATABASE_URL config** - connect to Postgres when set, SQLite otherwise
+- [ ] **Schema migrations** - Postgres-compatible schema with proper types (TIMESTAMPTZ, JSONB)
+- [ ] **Deploy Fly Postgres** - `fly postgres create` for hosted service
+
+### Worker Resilience (MVP)
+
+Workers must survive server restarts gracefully.
+
+- [ ] **Finish job on disconnect** - worker completes current job even if server goes away
+- [ ] **Reconnect with backoff** - exponential backoff with jitter (1s → 30s max)
+- [ ] **Report result on reconnect** - "hey, I finished job X while you were away"
+- [ ] **Heartbeat tolerance** - server doesn't mark worker offline for 60s+ of no contact
 
 ### GitHub App Public
 
@@ -133,7 +152,15 @@ $5/seat/month. One SKU. No personal/team split, no yearly commitment complexity.
 
 ---
 
-## 2.x - Future
+## 2.x - Future (Unplanned)
+
+### Horizontal Scaling
+
+Not planned for MVP. If we outgrow a single 16-vCPU server + Postgres, we either:
+1. Scale up to a bigger machine
+2. Implement horizontal scaling at that point
+
+See `design/11-scaling.md` for capacity estimates. A single beefy server handles 10,000+ workers, 100,000+ jobs/day.
 
 ### Edge Architecture
 
@@ -273,29 +300,27 @@ GITHUB_TOKEN=ghs_xxx
 CINCH_FORGE_TOKEN=xxx
 ```
 
-### Scaling Architecture (Target)
+### Scaling Architecture (V1)
 
 ```
-                    ┌─────────────────┐
-                    │   Cloudflare    │
-                    │   (CDN + R2)    │
-                    └────────┬────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-        ┌─────▼─────┐  ┌─────▼─────┐  ┌─────▼─────┐
-        │  Fly Node │  │  Fly Node │  │  Fly Node │
-        │  (web/ws) │  │  (web/ws) │  │  (web/ws) │
-        └─────┬─────┘  └─────┬─────┘  └─────┬─────┘
-              │              │              │
-              └──────────────┼──────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │    Postgres     │
-                    │  (jobs, repos)  │
-                    └─────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     Cloudflare (CDN)                        │
+│                     R2 (logs/artifacts)                     │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                    ┌─────▼─────┐
+                    │  Fly.io   │
+                    │  Web Node │ ◄──── Webhooks from forges
+                    │ (1 machine)│ ◄──── WebSocket from workers
+                    └─────┬─────┘
+                          │
+                    ┌─────▼─────┐
+                    │ Postgres  │
+                    │(Fly or RDS)│
+                    └───────────┘
 
-Workers connect via WebSocket to any Fly node.
-Jobs dispatched via Postgres NOTIFY.
-Logs/cache stored in R2.
+Single web server. Single database. Vertical scaling.
+Server restart = ~1 minute downtime. Workers retry automatically.
 ```
+
+**Capacity:** Back-of-napkin math says way more than we'll ever need. See design/11-scaling.md.

@@ -48,6 +48,7 @@ type AuthConfig struct {
 	GitHubClientSecret string
 	JWTSecret          string
 	BaseURL            string // e.g., "https://cinch.sh"
+	WsBaseURL          string // e.g., "wss://ws.cinch.sh" - defaults to BaseURL if not set
 }
 
 // AuthHandler handles authentication routes.
@@ -1189,6 +1190,7 @@ func (h *AuthHandler) handleDeviceToken(w http.ResponseWriter, r *http.Request) 
 		"access_token": token,
 		"token_type":   "Bearer",
 		"email":        dc.Email,
+		"ws_url":       h.getWsURL(),
 	})
 }
 
@@ -1203,6 +1205,23 @@ func (h *AuthHandler) createUserToken(email string) (string, error) {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(h.getJWTSigningKey())
+}
+
+// getWsURL returns the WebSocket URL for workers to connect to.
+// If WsBaseURL is configured, uses it; otherwise derives from BaseURL.
+func (h *AuthHandler) getWsURL() string {
+	if h.config.WsBaseURL != "" {
+		// Convert to wss:// if needed
+		wsURL := h.config.WsBaseURL
+		wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
+		wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
+		return wsURL + "/ws/worker"
+	}
+	// Derive from BaseURL
+	wsURL := h.config.BaseURL
+	wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
+	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
+	return wsURL + "/ws/worker"
 }
 
 // ValidateUserToken validates a Bearer token from the CLI.
