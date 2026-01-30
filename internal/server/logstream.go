@@ -19,6 +19,7 @@ import (
 type LogStreamHandler struct {
 	storage  storage.Storage
 	logStore logstore.LogStore
+	auth     *AuthHandler
 	log      *slog.Logger
 
 	// Subscriptions: jobID -> set of connections
@@ -27,12 +28,13 @@ type LogStreamHandler struct {
 }
 
 // NewLogStreamHandler creates a new log stream handler.
-func NewLogStreamHandler(store storage.Storage, log *slog.Logger) *LogStreamHandler {
+func NewLogStreamHandler(store storage.Storage, auth *AuthHandler, log *slog.Logger) *LogStreamHandler {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &LogStreamHandler{
 		storage:     store,
+		auth:        auth,
 		log:         log,
 		subscribers: make(map[string]map[*websocket.Conn]bool),
 	}
@@ -68,8 +70,28 @@ func (h *LogStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upgrade to WebSocket
-	conn, err := upgrader.Upgrade(w, r, nil)
+	// Authorization: require auth for private repo logs
+	repo, err := h.storage.GetRepo(ctx, job.RepoID)
+	if err != nil {
+		h.log.Error("failed to get repo for log auth", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if repo.Private {
+		var email string
+		if h.auth != nil {
+			email = h.auth.GetUser(r)
+		}
+		if email == "" {
+			http.Error(w, "authentication required for private repo logs", http.StatusUnauthorized)
+			return
+		}
+		// TODO: check if user is collaborator on repo (design/16-worker-visibility.md)
+	}
+
+	// Upgrade to WebSocket (use UI upgrader with origin checks)
+	conn, err := uiUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.log.Error("websocket upgrade failed", "error", err)
 		return

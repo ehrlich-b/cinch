@@ -259,6 +259,12 @@ func jobToResponse(j *storage.Job) jobResponse {
 func (h *APIHandler) listJobs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
+	// Check auth for filtering private repos
+	var isAuthenticated bool
+	if h.auth != nil {
+		isAuthenticated = h.auth.GetUser(r) != ""
+	}
+
 	filter := storage.JobFilter{
 		RepoID: q.Get("repo_id"),
 		Status: storage.JobStatus(q.Get("status")),
@@ -284,14 +290,22 @@ func (h *APIHandler) listJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build response with repo names
-	resp := make([]jobResponse, len(jobs))
-	for i, j := range jobs {
-		resp[i] = jobToResponse(j)
-		// Try to get repo name
-		if repo, err := h.storage.GetRepo(r.Context(), j.RepoID); err == nil {
-			resp[i].Repo = repo.Owner + "/" + repo.Name
+	// Build response with repo names, filtering out private repos for unauthenticated users
+	var resp []jobResponse
+	for _, j := range jobs {
+		repo, err := h.storage.GetRepo(r.Context(), j.RepoID)
+		if err != nil {
+			continue // Skip jobs with missing repos
 		}
+
+		// Filter: unauthenticated users only see public repo jobs
+		if repo.Private && !isAuthenticated {
+			continue
+		}
+
+		jr := jobToResponse(j)
+		jr.Repo = repo.Owner + "/" + repo.Name
+		resp = append(resp, jr)
 	}
 
 	h.writeJSON(w, map[string]any{"jobs": resp})
@@ -308,6 +322,26 @@ func (h *APIHandler) getJob(w http.ResponseWriter, r *http.Request, jobID string
 		h.log.Error("failed to get job", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+
+	// Authorization: require auth for private repo jobs
+	repo, err := h.storage.GetRepo(ctx, job.RepoID)
+	if err != nil {
+		h.log.Error("failed to get repo for job auth", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if repo.Private {
+		var email string
+		if h.auth != nil {
+			email = h.auth.GetUser(r)
+		}
+		if email == "" {
+			http.Error(w, "authentication required for private repo", http.StatusUnauthorized)
+			return
+		}
+		// TODO: check if user is collaborator on repo
 	}
 
 	// Get sibling jobs (other attempts for same commit)
@@ -335,6 +369,42 @@ func (h *APIHandler) getJobLogs(w http.ResponseWriter, r *http.Request, jobID st
 		Stream    string    `json:"stream"`
 		Data      string    `json:"data"`
 		CreatedAt time.Time `json:"created_at"`
+	}
+
+	// Authorization: require auth for private repo logs
+	// Get job to find repo
+	job, err := h.storage.GetJob(r.Context(), jobID)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "job not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get job for log auth", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Get repo to check if private
+	repo, err := h.storage.GetRepo(r.Context(), job.RepoID)
+	if err != nil {
+		h.log.Error("failed to get repo for log auth", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// For private repos, require authentication
+	if repo.Private {
+		var email string
+		if h.auth != nil {
+			email = h.auth.GetUser(r)
+		}
+		if email == "" {
+			http.Error(w, "authentication required for private repo logs", http.StatusUnauthorized)
+			return
+		}
+		// TODO: check if user is collaborator on repo (design/16-worker-visibility.md)
+		// For now, any authenticated user can view logs of private repos they know the job ID for
+		// This is still better than fully public, as they need to be logged in
 	}
 
 	// Use logStore if available
@@ -441,6 +511,19 @@ func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string
 
 	switch job.Status {
 	case storage.JobStatusPendingContributor:
+		// Security: Only repo collaborators can approve fork PRs
+		// TODO: implement proper forge API collaborator check (design/16-worker-visibility.md)
+		// For now, only allow repo owner to approve. This is restrictive but secure.
+		if repo.Owner != username {
+			h.log.Warn("unauthorized PR approval attempt",
+				"job_id", jobID,
+				"repo_owner", repo.Owner,
+				"approver", username,
+				"repo", repo.Owner+"/"+repo.Name)
+			http.Error(w, "only repo collaborators can approve fork PRs", http.StatusForbidden)
+			return
+		}
+
 		// Approve and queue the existing job
 		if err := h.storage.ApproveJob(ctx, jobID, username); err != nil {
 			h.log.Error("failed to approve job", "job_id", jobID, "error", err)
@@ -579,7 +662,28 @@ type workerResponse struct {
 
 func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 	// Get authenticated user for visibility filtering
-	username := h.auth.GetUser(r)
+	// GetUser returns email, but worker.OwnerName is GitHub username
+	// So we need to look up the user to get their name
+	var email string
+	if h.auth != nil {
+		email = h.auth.GetUser(r)
+	}
+
+	// Workers require authentication
+	if email == "" {
+		h.writeJSON(w, map[string]any{"workers": []workerResponse{}})
+		return
+	}
+
+	// Look up user to get their username (for matching against worker owner)
+	var username string
+	if user, err := h.storage.GetUserByEmail(r.Context(), email); err == nil && user != nil {
+		username = user.Name
+	}
+	if username == "" {
+		// Fallback to email if user not found
+		username = email
+	}
 
 	workers, err := h.storage.ListWorkers(r.Context())
 	if err != nil {
@@ -616,10 +720,18 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 			mode = "personal"
 		}
 
+		// If owner is empty, try to extract from worker ID (format: user:owner:hostname)
+		if ownerName == "" {
+			parts := strings.Split(wk.ID, ":")
+			if len(parts) >= 2 && parts[0] == "user" {
+				ownerName = parts[1]
+			}
+		}
+
 		// Visibility filtering:
-		// - Personal workers: only visible to owner
+		// - Personal workers: only visible to owner (must have owner set)
 		// - Shared workers: visible to all authenticated users
-		if mode == "personal" && ownerName != username {
+		if mode == "personal" && (ownerName == "" || ownerName != username) {
 			continue // Skip - not visible to this user
 		}
 
@@ -661,8 +773,19 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 				mode = "personal"
 			}
 
-			// Visibility filtering
-			if mode == "personal" && conn.OwnerName != username {
+			// Get owner name, extract from ID if needed
+			ownerName := conn.OwnerName
+			if ownerName == "" {
+				parts := strings.Split(conn.ID, ":")
+				if len(parts) >= 2 && parts[0] == "user" {
+					ownerName = parts[1]
+				}
+			}
+
+			// Visibility filtering:
+			// - Personal workers: only visible to owner (must have owner set)
+			// - Shared workers: visible to all authenticated users
+			if mode == "personal" && (ownerName == "" || ownerName != username) {
 				continue
 			}
 
@@ -675,7 +798,7 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 				LastSeen:   conn.LastPing,
 				CreatedAt:  conn.LastPing, // Use LastPing as approximate creation
 				Mode:       mode,
-				OwnerName:  conn.OwnerName,
+				OwnerName:  ownerName,
 				Version:    conn.Version,
 				Connected:  true,
 				ActiveJobs: conn.ActiveJobs,
@@ -829,7 +952,6 @@ type repoResponse struct {
 	Private         bool      `json:"private,omitempty"`
 	CloneURL        string    `json:"clone_url"`
 	HTMLURL         string    `json:"html_url,omitempty"`
-	WebhookSecret   string    `json:"webhook_secret,omitempty"`
 	Build           string    `json:"build"`
 	Release         string    `json:"release,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -845,6 +967,13 @@ type createRepoRequest struct {
 	ForgeToken string `json:"forge_token"`
 	Build      string `json:"build"`
 	Release    string `json:"release"`
+}
+
+// createRepoResponse includes webhook secret - only used for initial creation
+// so user can configure webhook on their forge. Never returned by GET endpoints.
+type createRepoResponse struct {
+	repoResponse
+	WebhookSecret string `json:"webhook_secret"`
 }
 
 func (h *APIHandler) listRepos(w http.ResponseWriter, r *http.Request) {
@@ -905,17 +1034,17 @@ func (h *APIHandler) getRepo(w http.ResponseWriter, r *http.Request, repoID stri
 	}
 
 	resp := repoResponse{
-		ID:            repo.ID,
-		ForgeType:     string(repo.ForgeType),
-		Owner:         repo.Owner,
-		Name:          repo.Name,
-		Private:       repo.Private,
-		CloneURL:      repo.CloneURL,
-		HTMLURL:       repo.HTMLURL,
-		WebhookSecret: repo.WebhookSecret, // Include for admin viewing
-		Build:         repo.Build,
-		Release:       repo.Release,
-		CreatedAt:     repo.CreatedAt,
+		ID:        repo.ID,
+		ForgeType: string(repo.ForgeType),
+		Owner:     repo.Owner,
+		Name:      repo.Name,
+		Private:   repo.Private,
+		CloneURL:  repo.CloneURL,
+		HTMLURL:   repo.HTMLURL,
+		// WebhookSecret intentionally omitted - never expose secrets in API
+		Build:     repo.Build,
+		Release:   repo.Release,
+		CreatedAt: repo.CreatedAt,
 	}
 
 	h.writeJSON(w, resp)
@@ -964,18 +1093,20 @@ func (h *APIHandler) createRepo(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("repo created", "repo_id", repo.ID, "clone_url", repo.CloneURL)
 
-	// Return full repo with webhook secret
-	resp := repoResponse{
-		ID:            repo.ID,
-		ForgeType:     string(repo.ForgeType),
-		Owner:         repo.Owner,
-		Name:          repo.Name,
-		CloneURL:      repo.CloneURL,
-		HTMLURL:       repo.HTMLURL,
+	// Return repo with webhook secret (only on creation, for webhook setup)
+	resp := createRepoResponse{
+		repoResponse: repoResponse{
+			ID:        repo.ID,
+			ForgeType: string(repo.ForgeType),
+			Owner:     repo.Owner,
+			Name:      repo.Name,
+			CloneURL:  repo.CloneURL,
+			HTMLURL:   repo.HTMLURL,
+			Build:     repo.Build,
+			Release:   repo.Release,
+			CreatedAt: repo.CreatedAt,
+		},
 		WebhookSecret: repo.WebhookSecret,
-		Build:         repo.Build,
-		Release:       repo.Release,
-		CreatedAt:     repo.CreatedAt,
 	}
 
 	w.WriteHeader(http.StatusCreated)

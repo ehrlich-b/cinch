@@ -31,13 +31,41 @@ const (
 	maxMessageSize = 1 << 20 // 1MB
 )
 
-var upgrader = websocket.Upgrader{
+// workerUpgrader allows all origins - workers connect from user machines
+var workerUpgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for workers
+		return true // Workers connect from anywhere
 	},
 }
+
+// uiUpgrader is stricter - only same-origin requests for UI WebSockets
+var uiUpgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // No origin header (same-origin or non-browser)
+		}
+		// Check if origin matches the host
+		host := r.Host
+		// Allow if origin host matches request host
+		// Origin format: https://cinch.sh or http://localhost:8080
+		if strings.Contains(origin, host) {
+			return true
+		}
+		// Also allow localhost for dev
+		if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
+			return true
+		}
+		return false
+	},
+}
+
+// upgrader is an alias for workerUpgrader for backward compatibility
+var upgrader = workerUpgrader
 
 // StatusPoster posts job status to forges.
 type StatusPoster interface {

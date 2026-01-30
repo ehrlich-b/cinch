@@ -79,7 +79,7 @@ func (h *WorkerStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		username = h.auth.GetUser(r)
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := uiUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.log.Error("websocket upgrade failed", "error", err)
 		return
