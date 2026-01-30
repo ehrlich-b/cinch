@@ -72,7 +72,13 @@ export function JobDetailPage({ jobId, onBack, onSelectJob }: Props) {
         if (!r.ok) throw new Error(`Failed to load job (${r.status})`)
         return r.json()
       })
-      .then(data => setJob(data))
+      .then(data => {
+        setJob(data)
+        // Set status from job for completed jobs (WebSocket may not send it in time)
+        if (['success', 'failed', 'error', 'cancelled'].includes(data.status)) {
+          setStatus(data.status)
+        }
+      })
       .catch(e => setError(e.message || 'Failed to load job'))
   }
 

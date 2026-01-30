@@ -330,11 +330,20 @@ func (d *Dispatcher) checkStaleWorkers() {
 	for _, w := range stale {
 		d.log.Warn("removing stale worker", "worker_id", w.ID, "last_ping", w.LastPing)
 
-		// Mark any active jobs as error
+		// Mark any active jobs as error (only if not already in terminal state)
 		for _, jobID := range w.ActiveJobs {
 			ctx := context.Background()
-			if err := d.storage.UpdateJobStatus(ctx, jobID, storage.JobStatusError, nil); err != nil {
-				d.log.Error("failed to update job status", "job_id", jobID, "error", err)
+			// Check current status first - don't overwrite completed jobs
+			job, err := d.storage.GetJob(ctx, jobID)
+			if err != nil {
+				d.log.Error("failed to get job for stale worker cleanup", "job_id", jobID, "error", err)
+				continue
+			}
+			// Only mark as error if job is still in an active state
+			if job.Status == storage.JobStatusPending || job.Status == storage.JobStatusQueued || job.Status == storage.JobStatusRunning {
+				if err := d.storage.UpdateJobStatus(ctx, jobID, storage.JobStatusError, nil); err != nil {
+					d.log.Error("failed to update job status", "job_id", jobID, "error", err)
+				}
 			}
 		}
 
