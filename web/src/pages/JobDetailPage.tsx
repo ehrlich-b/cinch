@@ -10,7 +10,8 @@ interface Props {
   onSelectJob?: (jobId: string) => void
 }
 
-function AttemptsDropdown({ attempts, onSelect }: {
+function AttemptsDropdown({ currentJob, attempts, onSelect }: {
+  currentJob: { id: string, status: string, created_at?: string }
   attempts: JobAttempt[]
   onSelect: (id: string) => void
 }) {
@@ -18,26 +19,35 @@ function AttemptsDropdown({ attempts, onSelect }: {
 
   if (attempts.length === 0) return null
 
+  // Combine current job with siblings and sort by creation time (oldest first)
+  const allAttempts = [
+    { id: currentJob.id, status: currentJob.status, created_at: currentJob.created_at || '' },
+    ...attempts
+  ].sort((a, b) => a.created_at.localeCompare(b.created_at))
+
+  // Find which attempt number the current job is
+  const currentAttemptNum = allAttempts.findIndex(a => a.id === currentJob.id) + 1
+
   return (
     <div className="attempts-dropdown">
       <button onClick={() => setOpen(!open)} className="attempts-btn">
-        {attempts.length + 1} attempts ▾
+        Attempt {currentAttemptNum} of {allAttempts.length} ▾
       </button>
       {open && (
         <div className="attempts-menu">
-          <div className="attempt-item current">
-            <StatusIcon status="current" /> Current
-          </div>
-          {attempts.map(a => (
-            <div
-              key={a.id}
-              className="attempt-item clickable"
-              onClick={() => { onSelect(a.id); setOpen(false) }}
-            >
-              <StatusIcon status={a.status} />
-              <span>{relativeTime(a.created_at)}</span>
-            </div>
-          ))}
+          {allAttempts.map((a, i) => {
+            const isCurrent = a.id === currentJob.id
+            return (
+              <div
+                key={a.id}
+                className={`attempt-item ${isCurrent ? 'current' : 'clickable'}`}
+                onClick={() => { if (!isCurrent) { onSelect(a.id); setOpen(false) }}}
+              >
+                <StatusIcon status={a.status} />
+                <span>Attempt {i + 1}</span>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -91,7 +101,14 @@ export function JobDetailPage({ jobId, onBack, onSelectJob }: Props) {
   const canRun = job && ['failed', 'success', 'error', 'cancelled', 'pending_contributor'].includes(status || job.status)
   const runButtonLabel = (status || job?.status) === 'pending_contributor' ? 'Run' : 'Retry'
 
+  // Reset state when jobId changes
   useEffect(() => {
+    setLogs([])
+    setStatus('')
+    setJob(null)
+    setError(null)
+    setWsError(null)
+    setRunError(null)
     fetchJob()
   }, [jobId])
 
@@ -152,6 +169,7 @@ export function JobDetailPage({ jobId, onBack, onSelectJob }: Props) {
             <span className="text-muted">{relativeTime(job.created_at)}</span>
             {job.attempts && job.attempts.length > 0 && onSelectJob && (
               <AttemptsDropdown
+                currentJob={{ id: job.id, status: status || job.status, created_at: job.created_at }}
                 attempts={job.attempts}
                 onSelect={onSelectJob}
               />
