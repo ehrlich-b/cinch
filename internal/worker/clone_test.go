@@ -10,37 +10,62 @@ import (
 	"github.com/ehrlich-b/cinch/internal/protocol"
 )
 
-func TestInjectToken(t *testing.T) {
+func TestInjectUsername(t *testing.T) {
 	tests := []struct {
 		name     string
 		url      string
-		token    string
 		expected string
 	}{
 		{
 			name:     "github https",
 			url:      "https://github.com/user/repo.git",
-			token:    "ghs_xxx",
-			expected: "https://x-access-token:ghs_xxx@github.com/user/repo.git",
+			expected: "https://x-access-token@github.com/user/repo.git",
 		},
 		{
 			name:     "custom host",
 			url:      "https://git.example.com/user/repo.git",
-			token:    "token123",
-			expected: "https://x-access-token:token123@git.example.com/user/repo.git",
+			expected: "https://x-access-token@git.example.com/user/repo.git",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := injectToken(tt.url, tt.token)
+			result, err := injectUsername(tt.url)
 			if err != nil {
-				t.Fatalf("injectToken failed: %v", err)
+				t.Fatalf("injectUsername failed: %v", err)
 			}
 			if result != tt.expected {
 				t.Errorf("result = %s, want %s", result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestCreateAskpassScript(t *testing.T) {
+	token := "test-token-123"
+	script, err := createAskpassScript(token)
+	if err != nil {
+		t.Fatalf("createAskpassScript failed: %v", err)
+	}
+	defer os.Remove(script)
+
+	// Check script exists and is executable
+	info, err := os.Stat(script)
+	if err != nil {
+		t.Fatalf("script not found: %v", err)
+	}
+	if info.Mode()&0100 == 0 {
+		t.Error("script is not executable")
+	}
+
+	// Execute script and check output
+	cmd := exec.Command(script)
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+	if string(output) != token+"\n" {
+		t.Errorf("script output = %q, want %q", string(output), token+"\n")
 	}
 }
 

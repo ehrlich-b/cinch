@@ -23,7 +23,7 @@
 
 ### Security (remaining)
 
-- [ ] **Git token in clone URL** - Token visible in process list. Use git credential helper.
+- ✅ **Git token in clone URL** - Now uses GIT_ASKPASS instead of embedding in URL
 - [ ] **Worker ID collision** - Duplicate IDs overwrite without cleanup.
 
 ---

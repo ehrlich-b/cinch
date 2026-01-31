@@ -42,13 +42,24 @@ func (c *GitCloner) Clone(ctx context.Context, repo protocol.JobRepo) (string, e
 		return "", fmt.Errorf("create work dir: %w", err)
 	}
 
-	// Build clone URL with token if provided
+	// Build clone URL - use credential helper to avoid token in process list
 	cloneURL := repo.CloneURL
+	var askpassScript string
 	if repo.CloneToken != "" {
-		cloneURL, err = injectToken(repo.CloneURL, repo.CloneToken)
+		// Create a temporary askpass script that provides the token
+		// This avoids exposing the token in the command line (visible in `ps`)
+		askpassScript, err = createAskpassScript(repo.CloneToken)
 		if err != nil {
 			os.RemoveAll(workDir)
-			return "", fmt.Errorf("inject token: %w", err)
+			return "", fmt.Errorf("create askpass script: %w", err)
+		}
+		defer os.Remove(askpassScript)
+
+		// Add username to URL (password will come from askpass script)
+		cloneURL, err = injectUsername(repo.CloneURL)
+		if err != nil {
+			os.RemoveAll(workDir)
+			return "", fmt.Errorf("inject username: %w", err)
 		}
 	}
 
@@ -63,6 +74,9 @@ func (c *GitCloner) Clone(ctx context.Context, repo protocol.JobRepo) (string, e
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0", // Don't prompt for credentials
 	)
+	if askpassScript != "" {
+		cmd.Env = append(cmd.Env, "GIT_ASKPASS="+askpassScript)
+	}
 
 	if output, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(workDir)
@@ -97,15 +111,45 @@ func (c *GitCloner) Clone(ctx context.Context, repo protocol.JobRepo) (string, e
 	return workDir, nil
 }
 
-// injectToken adds authentication token to a clone URL.
-func injectToken(cloneURL, token string) (string, error) {
+// createAskpassScript creates a temporary executable script that outputs the token.
+// This is used with GIT_ASKPASS to avoid putting tokens in command-line arguments
+// where they would be visible in `ps` output.
+func createAskpassScript(token string) (string, error) {
+	// Create temp file with executable permissions
+	f, err := os.CreateTemp("", "git-askpass-*.sh")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+
+	// Write script that echoes the token
+	// The script is simple: when git calls it asking for password, it outputs the token
+	script := fmt.Sprintf("#!/bin/sh\necho '%s'\n", token)
+	if _, err := f.WriteString(script); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", err
+	}
+	f.Close()
+
+	// Make executable
+	if err := os.Chmod(path, 0700); err != nil {
+		os.Remove(path)
+		return "", err
+	}
+
+	return path, nil
+}
+
+// injectUsername adds just the username to a clone URL (password comes from askpass).
+func injectUsername(cloneURL string) (string, error) {
 	u, err := url.Parse(cloneURL)
 	if err != nil {
 		return "", err
 	}
 
-	// Set user info with token
-	u.User = url.UserPassword("x-access-token", token)
+	// Set just the username - password will be provided by GIT_ASKPASS
+	u.User = url.User("x-access-token")
 
 	return u.String(), nil
 }
