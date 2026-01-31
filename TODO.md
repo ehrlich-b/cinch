@@ -38,15 +38,6 @@ Workers must survive server restarts gracefully.
 - [x] **Secrets (minimal)** - repo-level env secrets injection for jobs
 - [x] **Labels/worker targeting** - wire `config.Workers` into job dispatch (MVP requirement)
 
-### Postgres Support (MVP)
-
-Single web server + single Postgres instance. Vertical scaling only.
-
-- [ ] **PostgresStorage implementation** - implement Storage interface for Postgres
-- [ ] **DATABASE_URL config** - connect to Postgres when set, SQLite otherwise
-- [ ] **Schema migrations** - Postgres-compatible schema with proper types (TIMESTAMPTZ, JSONB)
-- [ ] **Deploy Fly Postgres** - `fly postgres create` for hosted service
-
 ### GitHub App Public
 
 - [ ] **Make GitHub App public** - Currently private, strangers can't install
@@ -80,6 +71,34 @@ See `REVIEW.md` for full security audit. Critical issues must be fixed before la
 - [ ] **Git token in clone URL** - Token visible in process list. Use git credential helper.
 - [ ] **Worker ID collision** - Duplicate IDs overwrite without cleanup.
 
+### Fair Use Limits
+
+Prevent R2 abuse without restricting legitimate use. See `design/20-fair-use-limits.md`.
+
+**Three tiers:**
+| Resource | Free | Pro ($5/seat) | Self-Hosted |
+|----------|------|---------------|-------------|
+| Storage quota | 100 MB | 10 GB | Unlimited |
+| Log retention | 7 days | 90 days | Unlimited |
+| Workers | 10 | 1000 | Unlimited |
+| Concurrent jobs | 5 | 100 | Unlimited |
+| Job timeout max | 1 hour | 6 hours | Unlimited |
+
+**Infrastructure (done):**
+- [x] **Log compression** - Gzip on finalize (~10-30x savings), backwards compatible
+- [x] **User tier model** - `tier` field: free/pro (self-hosted = no enforcement)
+- [x] **Storage tracking fields** - `user.storage_used_bytes`, `job.log_size_bytes`
+- [x] **Storage interface methods** - `UpdateJobLogSize`, `UpdateUserStorageUsed`, `GetUserByRepoID`
+- [x] **Size tracking on finalize** - `Finalize()` returns compressed size, stored in job
+
+**Enforcement (TODO):**
+- [ ] **Quota check at job dispatch** - Block new jobs if user over quota
+- [ ] **Aggregate user storage** - Update `user.storage_used_bytes` on job complete
+- [ ] **Link repos to users** - Set `repos.owner_user_id` on repo create
+- [ ] **Log retention cleanup** - Background job to delete old logs
+- [ ] **Worker limit enforcement** - Reject registration when at limit
+- [ ] **Usage API endpoint** - `GET /api/account/usage`
+
 ---
 
 ## Bugs to Fix
@@ -108,6 +127,23 @@ Network is unavailable (coworkers going through stuff). Need outside channels:
 
 - [ ] **Zero to green checkmark without questions** - Can a stranger do it?
 - [ ] **Error messages that help** - Not just "failed", but "here's what to do"
+
+---
+
+## Ready When Needed
+
+### Postgres (One Weekend Away)
+
+SQLite handles launch. Postgres is implemented and tested, ready to deploy if we hit scale issues.
+
+- [x] **PostgresStorage implementation** - `internal/storage/postgres.go` implements full Storage interface
+- [x] **Schema migrations** - Postgres-compatible schema (TIMESTAMPTZ, JSONB, proper indexes)
+- [x] **Tests passing** - `TEST_DATABASE_URL=postgres://... go test ./internal/storage/...`
+- [ ] **DATABASE_URL config** - wire up in main.go (30 min)
+- [ ] **Deploy Fly Postgres** - `fly postgres create` (10 min)
+- [ ] **Data migration** - export SQLite, import Postgres (see `design/19-postgres-migration.md`)
+
+**When to migrate:** If SQLite write latency spikes or we need concurrent writers.
 
 ---
 
@@ -145,10 +181,11 @@ $5/seat/month. One SKU. No personal/team split, no yearly commitment complexity.
 ### Known Issues
 - [ ] Worker should check for docker/podman on startup (fail fast)
 - [ ] Cache volumes need docs + configurability
-- [ ] Log retention policy (30 days free, configurable paid)
 
 ### Pro Features (Post-Launch)
-- [ ] **Artifacts (Pro only)** - 10GB shared quota across logs/cache/images in R2
+- [ ] **Artifacts (Pro only)** - Upload build artifacts, 10GB shared quota
+- [ ] **Extended log retention** - 90 days (vs 7 days free)
+- [ ] **Higher concurrency** - 100 concurrent jobs (vs 5 free)
 
 ---
 

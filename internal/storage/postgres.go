@@ -6,40 +6,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/ehrlich-b/cinch/internal/crypto"
-	_ "modernc.org/sqlite"
+	_ "github.com/lib/pq"
 )
 
-// SQLiteStorage implements Storage using SQLite.
-type SQLiteStorage struct {
+// PostgresStorage implements Storage using PostgreSQL.
+type PostgresStorage struct {
 	db     *sql.DB
 	cipher *crypto.Cipher // nil = no encryption (tests)
 	log    *slog.Logger
 }
 
-// NewSQLite creates a new SQLite storage.
-// Use ":memory:" for in-memory database, or a file path for persistent storage.
+// NewPostgres creates a new Postgres storage.
+// DSN format: postgres://user:password@host:port/dbname?sslmode=disable
 // If encryptionSecret is provided, sensitive fields are encrypted at rest.
-func NewSQLite(dsn string, encryptionSecret string) (*SQLiteStorage, error) {
-	db, err := sql.Open("sqlite", dsn)
+func NewPostgres(dsn string, encryptionSecret string) (*PostgresStorage, error) {
+	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// Enable foreign keys and WAL mode for better performance
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+	// Test connection
+	if err := db.Ping(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
-	}
-	if dsn != ":memory:" {
-		if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("enable WAL: %w", err)
-		}
+		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
 	var cipher *crypto.Cipher
@@ -51,7 +44,7 @@ func NewSQLite(dsn string, encryptionSecret string) (*SQLiteStorage, error) {
 		}
 	}
 
-	s := &SQLiteStorage{db: db, cipher: cipher, log: slog.Default()}
+	s := &PostgresStorage{db: db, cipher: cipher, log: slog.Default()}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -60,15 +53,17 @@ func NewSQLite(dsn string, encryptionSecret string) (*SQLiteStorage, error) {
 	return s, nil
 }
 
-func (s *SQLiteStorage) migrate() error {
+func (s *PostgresStorage) migrate() error {
 	migrations := []string{
 		`CREATE TABLE IF NOT EXISTS workers (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			labels TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL DEFAULT 'offline',
-			last_seen DATETIME,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			last_seen TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			owner_name TEXT NOT NULL DEFAULT '',
+			mode TEXT NOT NULL DEFAULT 'personal'
 		)`,
 		`CREATE TABLE IF NOT EXISTS repos (
 			id TEXT PRIMARY KEY,
@@ -81,45 +76,74 @@ func (s *SQLiteStorage) migrate() error {
 			forge_token TEXT NOT NULL DEFAULT '',
 			build TEXT NOT NULL DEFAULT 'make check',
 			release TEXT NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			workers TEXT NOT NULL DEFAULT '',
+			secrets TEXT NOT NULL DEFAULT '',
+			private BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE TABLE IF NOT EXISTS jobs (
 			id TEXT PRIMARY KEY,
 			repo_id TEXT NOT NULL,
 			commit_sha TEXT NOT NULL,
 			branch TEXT NOT NULL,
+			tag TEXT NOT NULL DEFAULT '',
+			pr_number INTEGER,
+			pr_base_branch TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL DEFAULT 'pending',
 			exit_code INTEGER,
 			worker_id TEXT,
-			installation_id INTEGER,
-			check_run_id INTEGER,
-			started_at DATETIME,
-			finished_at DATETIME,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY (repo_id) REFERENCES repos(id),
-			FOREIGN KEY (worker_id) REFERENCES workers(id)
+			installation_id BIGINT,
+			check_run_id BIGINT,
+			started_at TIMESTAMPTZ,
+			finished_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			author TEXT NOT NULL DEFAULT '',
+			trust_level TEXT NOT NULL DEFAULT 'collaborator',
+			is_fork BOOLEAN NOT NULL DEFAULT FALSE,
+			approved_by TEXT,
+			approved_at TIMESTAMPTZ
 		)`,
 		`CREATE TABLE IF NOT EXISTS job_logs (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			id BIGSERIAL PRIMARY KEY,
 			job_id TEXT NOT NULL,
 			stream TEXT NOT NULL,
 			data TEXT NOT NULL,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY (job_id) REFERENCES jobs(id)
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE TABLE IF NOT EXISTS tokens (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			hash TEXT NOT NULL UNIQUE,
 			worker_id TEXT,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			revoked_at DATETIME,
-			FOREIGN KEY (worker_id) REFERENCES workers(id)
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			revoked_at TIMESTAMPTZ
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_jobs_repo_id ON jobs(repo_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)`,
-		`CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash)`,
+		`CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			email TEXT NOT NULL DEFAULT '',
+			emails TEXT NOT NULL DEFAULT '[]',
+			github_connected_at TIMESTAMPTZ,
+			gitlab_credentials TEXT NOT NULL DEFAULT '',
+			gitlab_credentials_at TIMESTAMPTZ,
+			forgejo_credentials TEXT NOT NULL DEFAULT '',
+			forgejo_credentials_at TIMESTAMPTZ,
+			tier TEXT NOT NULL DEFAULT 'free',
+			storage_used_bytes BIGINT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+	}
+
+	// Add columns that may not exist (for migrations)
+	alterStatements := []string{
+		// Storage quota columns
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'free'`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_used_bytes BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS log_size_bytes BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE repos ADD COLUMN IF NOT EXISTS owner_user_id TEXT`,
+	}
+	for _, stmt := range alterStatements {
+		_, _ = s.db.Exec(stmt)
 	}
 
 	for _, m := range migrations {
@@ -128,87 +152,21 @@ func (s *SQLiteStorage) migrate() error {
 		}
 	}
 
-	// Add columns to existing tables (ignore errors - columns may already exist)
-	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN installation_id INTEGER")
-	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN check_run_id INTEGER")
-	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN tag TEXT NOT NULL DEFAULT ''")
-	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN pr_number INTEGER")
-	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN pr_base_branch TEXT NOT NULL DEFAULT ''")
-	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN build TEXT NOT NULL DEFAULT 'make check'")
-	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN release TEXT NOT NULL DEFAULT ''")
+	// Create indexes (ignore errors - may already exist)
+	indexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_workers_owner_name ON workers(owner_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_repos_forge_owner_name ON repos(forge_type, owner, name)`,
+		`CREATE INDEX IF NOT EXISTS idx_repos_owner_user_id ON repos(owner_user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_jobs_repo_id ON jobs(repo_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_jobs_author ON jobs(author)`,
+		`CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash)`,
+		`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
+	}
 
-	// Users table for storing forge credentials
-	_, _ = s.db.Exec(`CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL UNIQUE,
-		gitlab_credentials TEXT NOT NULL DEFAULT '',
-		gitlab_credentials_at DATETIME,
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-	)`)
-
-	// Add Forgejo credentials columns
-	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN forgejo_credentials TEXT NOT NULL DEFAULT ''")
-	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN forgejo_credentials_at DATETIME")
-
-	// Add email and GitHub connection tracking
-	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
-	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN emails TEXT NOT NULL DEFAULT ''") // JSON array
-	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN github_connected_at DATETIME")
-	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
-
-	// Add private column to repos
-	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
-	// Add workers column to repos (comma-separated labels for fan-out)
-	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN workers TEXT NOT NULL DEFAULT ''")
-	// Add secrets column to repos (encrypted JSON map of env vars)
-	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN secrets TEXT NOT NULL DEFAULT ''")
-	// Index for efficient forge/owner/name lookups
-	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_repos_forge_owner_name ON repos(forge_type, owner, name)")
-
-	// Worker trust model: add author tracking to jobs
-	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN author TEXT NOT NULL DEFAULT ''")
-	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN trust_level TEXT NOT NULL DEFAULT 'collaborator'")
-	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN is_fork INTEGER NOT NULL DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN approved_by TEXT")
-	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN approved_at DATETIME")
-	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_jobs_author ON jobs(author)")
-
-	// Worker visibility: add owner tracking to workers
-	_, _ = s.db.Exec("ALTER TABLE workers ADD COLUMN owner_name TEXT NOT NULL DEFAULT ''")
-	_, _ = s.db.Exec("ALTER TABLE workers ADD COLUMN mode TEXT NOT NULL DEFAULT 'personal'")
-	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_workers_owner_name ON workers(owner_name)")
-
-	// Storage quota: add tier and usage tracking to users
-	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN tier TEXT NOT NULL DEFAULT 'free'")
-	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN storage_used_bytes INTEGER NOT NULL DEFAULT 0")
-
-	// Storage tracking: add log size to jobs
-	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN log_size_bytes INTEGER NOT NULL DEFAULT 0")
-
-	// Repo ownership: add owner_user_id for quota attribution
-	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN owner_user_id TEXT")
-	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_repos_owner_user_id ON repos(owner_user_id)")
-
-	// Drop UNIQUE constraint on users.name (email is the identity, not username)
-	// SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the table
-	if s.hasUniqueConstraintOnUsersName() {
-		_, _ = s.db.Exec(`CREATE TABLE users_new (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			email TEXT NOT NULL DEFAULT '',
-			emails TEXT NOT NULL DEFAULT '',
-			github_connected_at DATETIME,
-			gitlab_credentials TEXT NOT NULL DEFAULT '',
-			gitlab_credentials_at DATETIME,
-			forgejo_credentials TEXT NOT NULL DEFAULT '',
-			forgejo_credentials_at DATETIME,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`)
-		_, _ = s.db.Exec(`INSERT INTO users_new SELECT id, name, email, emails, github_connected_at,
-			gitlab_credentials, gitlab_credentials_at, forgejo_credentials, forgejo_credentials_at, created_at FROM users`)
-		_, _ = s.db.Exec(`DROP TABLE users`)
-		_, _ = s.db.Exec(`ALTER TABLE users_new RENAME TO users`)
-		_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+	for _, idx := range indexes {
+		_, _ = s.db.Exec(idx)
 	}
 
 	// Encrypt existing plaintext secrets if cipher is configured
@@ -222,7 +180,7 @@ func (s *SQLiteStorage) migrate() error {
 }
 
 // migrateEncryptSecrets encrypts any plaintext secrets that haven't been encrypted yet.
-func (s *SQLiteStorage) migrateEncryptSecrets() error {
+func (s *PostgresStorage) migrateEncryptSecrets() error {
 	// Encrypt repos.webhook_secret and repos.forge_token
 	rows, err := s.db.Query(`SELECT id, webhook_secret, forge_token FROM repos`)
 	if err != nil {
@@ -263,7 +221,7 @@ func (s *SQLiteStorage) migrateEncryptSecrets() error {
 	rows.Close()
 
 	for _, u := range repoUpdates {
-		if _, err := s.db.Exec(`UPDATE repos SET webhook_secret = ?, forge_token = ? WHERE id = ?`,
+		if _, err := s.db.Exec(`UPDATE repos SET webhook_secret = $1, forge_token = $2 WHERE id = $3`,
 			u.webhookSecret, u.forgeToken, u.id); err != nil {
 			return err
 		}
@@ -310,7 +268,7 @@ func (s *SQLiteStorage) migrateEncryptSecrets() error {
 	rows.Close()
 
 	for _, u := range userUpdates {
-		if _, err := s.db.Exec(`UPDATE users SET gitlab_credentials = ?, forgejo_credentials = ? WHERE id = ?`,
+		if _, err := s.db.Exec(`UPDATE users SET gitlab_credentials = $1, forgejo_credentials = $2 WHERE id = $3`,
 			u.gitlabCreds, u.forgejoCreds, u.id); err != nil {
 			return err
 		}
@@ -321,7 +279,7 @@ func (s *SQLiteStorage) migrateEncryptSecrets() error {
 }
 
 // encrypt encrypts a value if cipher is configured.
-func (s *SQLiteStorage) encrypt(plaintext string) (string, error) {
+func (s *PostgresStorage) encrypt(plaintext string) (string, error) {
 	if s.cipher == nil || plaintext == "" {
 		return plaintext, nil
 	}
@@ -329,7 +287,7 @@ func (s *SQLiteStorage) encrypt(plaintext string) (string, error) {
 }
 
 // decrypt decrypts a value if cipher is configured.
-func (s *SQLiteStorage) decrypt(ciphertext string) (string, error) {
+func (s *PostgresStorage) decrypt(ciphertext string) (string, error) {
 	if s.cipher == nil || ciphertext == "" {
 		return ciphertext, nil
 	}
@@ -337,7 +295,7 @@ func (s *SQLiteStorage) decrypt(ciphertext string) (string, error) {
 }
 
 // decryptUserCredentials decrypts the user's forge credentials.
-func (s *SQLiteStorage) decryptUserCredentials(user *User) error {
+func (s *PostgresStorage) decryptUserCredentials(user *User) error {
 	var err error
 	if user.GitLabCredentials, err = s.decrypt(user.GitLabCredentials); err != nil {
 		return fmt.Errorf("decrypt gitlab_credentials: %w", err)
@@ -348,38 +306,28 @@ func (s *SQLiteStorage) decryptUserCredentials(user *User) error {
 	return nil
 }
 
-// hasUniqueConstraintOnUsersName checks if users.name has a UNIQUE constraint.
-func (s *SQLiteStorage) hasUniqueConstraintOnUsersName() bool {
-	var sql string
-	err := s.db.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").Scan(&sql)
-	if err != nil {
-		return false
-	}
-	return strings.Contains(sql, "name TEXT NOT NULL UNIQUE")
-}
-
-func (s *SQLiteStorage) Close() error {
+func (s *PostgresStorage) Close() error {
 	return s.db.Close()
 }
 
 // --- Jobs ---
 
-func (s *SQLiteStorage) CreateJob(ctx context.Context, job *Job) error {
+func (s *PostgresStorage) CreateJob(ctx context.Context, job *Job) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO jobs (id, repo_id, commit_sha, branch, tag, pr_number, pr_base_branch, status, installation_id, check_run_id, created_at, author, trust_level, is_fork, approved_by, approved_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 		job.ID, job.RepoID, job.Commit, job.Branch, job.Tag, job.PRNumber, job.PRBaseBranch, job.Status, job.InstallationID, job.CheckRunID, job.CreatedAt,
 		job.Author, job.TrustLevel, job.IsFork, job.ApprovedBy, job.ApprovedAt)
 	return err
 }
 
-func (s *SQLiteStorage) GetJob(ctx context.Context, id string) (*Job, error) {
+func (s *PostgresStorage) GetJob(ctx context.Context, id string) (*Job, error) {
 	job := &Job{}
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, repo_id, commit_sha, branch, tag, pr_number, pr_base_branch, status, exit_code, worker_id,
 		        installation_id, check_run_id, started_at, finished_at, created_at,
 		        author, trust_level, is_fork, approved_by, approved_at
-		 FROM jobs WHERE id = ?`, id).Scan(
+		 FROM jobs WHERE id = $1`, id).Scan(
 		&job.ID, &job.RepoID, &job.Commit, &job.Branch, &job.Tag, &job.PRNumber, &job.PRBaseBranch, &job.Status,
 		&job.ExitCode, &job.WorkerID, &job.InstallationID, &job.CheckRunID, &job.StartedAt, &job.FinishedAt, &job.CreatedAt,
 		&job.Author, &job.TrustLevel, &job.IsFork, &job.ApprovedBy, &job.ApprovedAt)
@@ -389,12 +337,12 @@ func (s *SQLiteStorage) GetJob(ctx context.Context, id string) (*Job, error) {
 	return job, err
 }
 
-func (s *SQLiteStorage) GetJobSiblings(ctx context.Context, repoID, commit, excludeJobID string) ([]*Job, error) {
+func (s *PostgresStorage) GetJobSiblings(ctx context.Context, repoID, commit, excludeJobID string) ([]*Job, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, repo_id, commit_sha, branch, tag, pr_number, pr_base_branch, status, exit_code, worker_id,
 		        installation_id, check_run_id, started_at, finished_at, created_at,
 		        author, trust_level, is_fork, approved_by, approved_at
-		 FROM jobs WHERE repo_id = ? AND commit_sha = ? AND id != ?
+		 FROM jobs WHERE repo_id = $1 AND commit_sha = $2 AND id != $3
 		 ORDER BY created_at DESC`, repoID, commit, excludeJobID)
 	if err != nil {
 		return nil, err
@@ -415,40 +363,45 @@ func (s *SQLiteStorage) GetJobSiblings(ctx context.Context, repoID, commit, excl
 	return jobs, rows.Err()
 }
 
-func (s *SQLiteStorage) UpdateJobCheckRunID(ctx context.Context, id string, checkRunID int64) error {
+func (s *PostgresStorage) UpdateJobCheckRunID(ctx context.Context, id string, checkRunID int64) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE jobs SET check_run_id = ? WHERE id = ?`,
+		`UPDATE jobs SET check_run_id = $1 WHERE id = $2`,
 		checkRunID, id)
 	return err
 }
 
-func (s *SQLiteStorage) ListJobs(ctx context.Context, filter JobFilter) ([]*Job, error) {
+func (s *PostgresStorage) ListJobs(ctx context.Context, filter JobFilter) ([]*Job, error) {
 	query := `SELECT id, repo_id, commit_sha, branch, tag, pr_number, pr_base_branch, status, exit_code, worker_id,
 	                 installation_id, check_run_id, started_at, finished_at, created_at,
 	                 author, trust_level, is_fork, approved_by, approved_at FROM jobs WHERE 1=1`
 	args := []any{}
+	argNum := 1
 
 	if filter.RepoID != "" {
-		query += " AND repo_id = ?"
+		query += fmt.Sprintf(" AND repo_id = $%d", argNum)
 		args = append(args, filter.RepoID)
+		argNum++
 	}
 	if filter.Status != "" {
-		query += " AND status = ?"
+		query += fmt.Sprintf(" AND status = $%d", argNum)
 		args = append(args, filter.Status)
+		argNum++
 	}
 	if filter.Branch != "" {
-		query += " AND branch = ?"
+		query += fmt.Sprintf(" AND branch = $%d", argNum)
 		args = append(args, filter.Branch)
+		argNum++
 	}
 
 	query += " ORDER BY created_at DESC"
 
 	if filter.Limit > 0 {
-		query += " LIMIT ?"
+		query += fmt.Sprintf(" LIMIT $%d", argNum)
 		args = append(args, filter.Limit)
+		argNum++
 	}
 	if filter.Offset > 0 {
-		query += " OFFSET ?"
+		query += fmt.Sprintf(" OFFSET $%d", argNum)
 		args = append(args, filter.Offset)
 	}
 
@@ -472,7 +425,7 @@ func (s *SQLiteStorage) ListJobs(ctx context.Context, filter JobFilter) ([]*Job,
 	return jobs, rows.Err()
 }
 
-func (s *SQLiteStorage) ListJobsByWorker(ctx context.Context, workerID string, limit int) ([]*Job, error) {
+func (s *PostgresStorage) ListJobsByWorker(ctx context.Context, workerID string, limit int) ([]*Job, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -480,7 +433,7 @@ func (s *SQLiteStorage) ListJobsByWorker(ctx context.Context, workerID string, l
 	query := `SELECT id, repo_id, commit_sha, branch, tag, pr_number, pr_base_branch, status, exit_code, worker_id,
 	                 installation_id, check_run_id, started_at, finished_at, created_at,
 	                 author, trust_level, is_fork, approved_by, approved_at
-	          FROM jobs WHERE worker_id = ? ORDER BY created_at DESC LIMIT ?`
+	          FROM jobs WHERE worker_id = $1 ORDER BY created_at DESC LIMIT $2`
 
 	rows, err := s.db.QueryContext(ctx, query, workerID, limit)
 	if err != nil {
@@ -502,44 +455,44 @@ func (s *SQLiteStorage) ListJobsByWorker(ctx context.Context, workerID string, l
 	return jobs, rows.Err()
 }
 
-func (s *SQLiteStorage) UpdateJobStatus(ctx context.Context, id string, status JobStatus, exitCode *int) error {
+func (s *PostgresStorage) UpdateJobStatus(ctx context.Context, id string, status JobStatus, exitCode *int) error {
 	var err error
 	now := time.Now()
 
 	switch status {
 	case JobStatusRunning:
 		_, err = s.db.ExecContext(ctx,
-			`UPDATE jobs SET status = ?, started_at = ? WHERE id = ?`,
+			`UPDATE jobs SET status = $1, started_at = $2 WHERE id = $3`,
 			status, now, id)
 	case JobStatusSuccess, JobStatusFailed, JobStatusCancelled, JobStatusError:
 		_, err = s.db.ExecContext(ctx,
-			`UPDATE jobs SET status = ?, exit_code = ?, finished_at = ? WHERE id = ?`,
+			`UPDATE jobs SET status = $1, exit_code = $2, finished_at = $3 WHERE id = $4`,
 			status, exitCode, now, id)
 	default:
 		_, err = s.db.ExecContext(ctx,
-			`UPDATE jobs SET status = ? WHERE id = ?`,
+			`UPDATE jobs SET status = $1 WHERE id = $2`,
 			status, id)
 	}
 	return err
 }
 
-func (s *SQLiteStorage) UpdateJobWorker(ctx context.Context, jobID, workerID string) error {
+func (s *PostgresStorage) UpdateJobWorker(ctx context.Context, jobID, workerID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE jobs SET worker_id = ? WHERE id = ?`,
+		`UPDATE jobs SET worker_id = $1 WHERE id = $2`,
 		workerID, jobID)
 	return err
 }
 
-func (s *SQLiteStorage) ApproveJob(ctx context.Context, jobID, approvedBy string) error {
+func (s *PostgresStorage) ApproveJob(ctx context.Context, jobID, approvedBy string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE jobs SET approved_by = ?, approved_at = ?, status = ? WHERE id = ? AND status = ?`,
+		`UPDATE jobs SET approved_by = $1, approved_at = $2, status = $3 WHERE id = $4 AND status = $5`,
 		approvedBy, time.Now(), JobStatusPending, jobID, JobStatusPendingContributor)
 	return err
 }
 
 // --- Workers ---
 
-func (s *SQLiteStorage) CreateWorker(ctx context.Context, worker *Worker) error {
+func (s *PostgresStorage) CreateWorker(ctx context.Context, worker *Worker) error {
 	labels := strings.Join(worker.Labels, ",")
 	mode := worker.Mode
 	if mode == "" {
@@ -547,17 +500,17 @@ func (s *SQLiteStorage) CreateWorker(ctx context.Context, worker *Worker) error 
 	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO workers (id, name, labels, status, last_seen, created_at, owner_name, mode)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		worker.ID, worker.Name, labels, worker.Status, worker.LastSeen, worker.CreatedAt, worker.OwnerName, mode)
 	return err
 }
 
-func (s *SQLiteStorage) GetWorker(ctx context.Context, id string) (*Worker, error) {
+func (s *PostgresStorage) GetWorker(ctx context.Context, id string) (*Worker, error) {
 	worker := &Worker{}
 	var labels string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, name, labels, status, last_seen, created_at, owner_name, mode
-		 FROM workers WHERE id = ?`, id).Scan(
+		 FROM workers WHERE id = $1`, id).Scan(
 		&worker.ID, &worker.Name, &labels, &worker.Status, &worker.LastSeen, &worker.CreatedAt,
 		&worker.OwnerName, &worker.Mode)
 	if err == sql.ErrNoRows {
@@ -572,7 +525,7 @@ func (s *SQLiteStorage) GetWorker(ctx context.Context, id string) (*Worker, erro
 	return worker, nil
 }
 
-func (s *SQLiteStorage) ListWorkers(ctx context.Context) ([]*Worker, error) {
+func (s *PostgresStorage) ListWorkers(ctx context.Context) ([]*Worker, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, name, labels, status, last_seen, created_at, owner_name, mode FROM workers ORDER BY created_at DESC`)
 	if err != nil {
@@ -596,38 +549,38 @@ func (s *SQLiteStorage) ListWorkers(ctx context.Context) ([]*Worker, error) {
 	return workers, rows.Err()
 }
 
-func (s *SQLiteStorage) UpdateWorkerLastSeen(ctx context.Context, id string) error {
+func (s *PostgresStorage) UpdateWorkerLastSeen(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE workers SET last_seen = ? WHERE id = ?`,
+		`UPDATE workers SET last_seen = $1 WHERE id = $2`,
 		time.Now(), id)
 	return err
 }
 
-func (s *SQLiteStorage) UpdateWorkerStatus(ctx context.Context, id string, status WorkerStatus) error {
+func (s *PostgresStorage) UpdateWorkerStatus(ctx context.Context, id string, status WorkerStatus) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE workers SET status = ? WHERE id = ?`,
+		`UPDATE workers SET status = $1 WHERE id = $2`,
 		status, id)
 	return err
 }
 
-func (s *SQLiteStorage) DeleteWorker(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM workers WHERE id = ?`, id)
+func (s *PostgresStorage) DeleteWorker(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM workers WHERE id = $1`, id)
 	return err
 }
 
-func (s *SQLiteStorage) UpdateWorkerOwner(ctx context.Context, id, ownerName, mode string) error {
+func (s *PostgresStorage) UpdateWorkerOwner(ctx context.Context, id, ownerName, mode string) error {
 	if mode == "" {
 		mode = "personal"
 	}
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE workers SET owner_name = ?, mode = ? WHERE id = ?`,
+		`UPDATE workers SET owner_name = $1, mode = $2 WHERE id = $3`,
 		ownerName, mode, id)
 	return err
 }
 
 // --- Repos ---
 
-func (s *SQLiteStorage) CreateRepo(ctx context.Context, repo *Repo) error {
+func (s *PostgresStorage) CreateRepo(ctx context.Context, repo *Repo) error {
 	// Encrypt secrets before storing
 	webhookSecret, err := s.encrypt(repo.WebhookSecret)
 	if err != nil {
@@ -657,23 +610,23 @@ func (s *SQLiteStorage) CreateRepo(ctx context.Context, repo *Repo) error {
 	// Use upsert to handle re-onboarding: if repo exists, update token and webhook secret
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO repos (id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(clone_url) DO UPDATE SET
-		 	webhook_secret = excluded.webhook_secret,
-		 	forge_token = excluded.forge_token,
-		 	workers = excluded.workers,
-		 	private = excluded.private`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		 ON CONFLICT (clone_url) DO UPDATE SET
+		 	webhook_secret = EXCLUDED.webhook_secret,
+		 	forge_token = EXCLUDED.forge_token,
+		 	workers = EXCLUDED.workers,
+		 	private = EXCLUDED.private`,
 		repo.ID, repo.ForgeType, repo.Owner, repo.Name, repo.CloneURL, repo.HTMLURL,
 		webhookSecret, forgeToken, repo.Build, repo.Release, workers, secretsJSON, repo.Private, repo.CreatedAt)
 	return err
 }
 
-func (s *SQLiteStorage) GetRepo(ctx context.Context, id string) (*Repo, error) {
+func (s *PostgresStorage) GetRepo(ctx context.Context, id string) (*Repo, error) {
 	repo := &Repo{}
 	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
-		 FROM repos WHERE id = ?`, id).Scan(
+		 FROM repos WHERE id = $1`, id).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
 		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
@@ -708,12 +661,12 @@ func (s *SQLiteStorage) GetRepo(ctx context.Context, id string) (*Repo, error) {
 	return repo, nil
 }
 
-func (s *SQLiteStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string) (*Repo, error) {
+func (s *PostgresStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string) (*Repo, error) {
 	repo := &Repo{}
 	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
-		 FROM repos WHERE clone_url = ?`, cloneURL).Scan(
+		 FROM repos WHERE clone_url = $1`, cloneURL).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
 		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
@@ -748,7 +701,7 @@ func (s *SQLiteStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string) 
 	return repo, nil
 }
 
-func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
+func (s *PostgresStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
 		 FROM repos ORDER BY created_at DESC`)
@@ -793,17 +746,17 @@ func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 	return repos, rows.Err()
 }
 
-func (s *SQLiteStorage) DeleteRepo(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM repos WHERE id = ?`, id)
+func (s *PostgresStorage) DeleteRepo(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM repos WHERE id = $1`, id)
 	return err
 }
 
-func (s *SQLiteStorage) GetRepoByOwnerName(ctx context.Context, forge, owner, name string) (*Repo, error) {
+func (s *PostgresStorage) GetRepoByOwnerName(ctx context.Context, forge, owner, name string) (*Repo, error) {
 	repo := &Repo{}
 	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
-		 FROM repos WHERE forge_type = ? AND owner = ? AND name = ?`, forge, owner, name).Scan(
+		 FROM repos WHERE forge_type = $1 AND owner = $2 AND name = $3`, forge, owner, name).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
 		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
@@ -838,14 +791,14 @@ func (s *SQLiteStorage) GetRepoByOwnerName(ctx context.Context, forge, owner, na
 	return repo, nil
 }
 
-func (s *SQLiteStorage) UpdateRepoPrivate(ctx context.Context, id string, private bool) error {
+func (s *PostgresStorage) UpdateRepoPrivate(ctx context.Context, id string, private bool) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE repos SET private = ? WHERE id = ?`,
+		`UPDATE repos SET private = $1 WHERE id = $2`,
 		private, id)
 	return err
 }
 
-func (s *SQLiteStorage) UpdateRepoSecrets(ctx context.Context, id string, secrets map[string]string) error {
+func (s *PostgresStorage) UpdateRepoSecrets(ctx context.Context, id string, secrets map[string]string) error {
 	// Convert and encrypt secrets map to JSON
 	var secretsJSON string
 	if len(secrets) > 0 {
@@ -859,26 +812,26 @@ func (s *SQLiteStorage) UpdateRepoSecrets(ctx context.Context, id string, secret
 		}
 	}
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE repos SET secrets = ? WHERE id = ?`,
+		`UPDATE repos SET secrets = $1 WHERE id = $2`,
 		secretsJSON, id)
 	return err
 }
 
 // --- Tokens ---
 
-func (s *SQLiteStorage) CreateToken(ctx context.Context, token *Token) error {
+func (s *PostgresStorage) CreateToken(ctx context.Context, token *Token) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO tokens (id, name, hash, worker_id, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5)`,
 		token.ID, token.Name, token.Hash, token.WorkerID, token.CreatedAt)
 	return err
 }
 
-func (s *SQLiteStorage) GetTokenByHash(ctx context.Context, hash string) (*Token, error) {
+func (s *PostgresStorage) GetTokenByHash(ctx context.Context, hash string) (*Token, error) {
 	token := &Token{}
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, name, hash, worker_id, created_at, revoked_at
-		 FROM tokens WHERE hash = ? AND revoked_at IS NULL`, hash).Scan(
+		 FROM tokens WHERE hash = $1 AND revoked_at IS NULL`, hash).Scan(
 		&token.ID, &token.Name, &token.Hash, &token.WorkerID, &token.CreatedAt, &token.RevokedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -886,7 +839,7 @@ func (s *SQLiteStorage) GetTokenByHash(ctx context.Context, hash string) (*Token
 	return token, err
 }
 
-func (s *SQLiteStorage) ListTokens(ctx context.Context) ([]*Token, error) {
+func (s *PostgresStorage) ListTokens(ctx context.Context) ([]*Token, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, name, hash, worker_id, created_at, revoked_at FROM tokens ORDER BY created_at DESC`)
 	if err != nil {
@@ -906,23 +859,23 @@ func (s *SQLiteStorage) ListTokens(ctx context.Context) ([]*Token, error) {
 	return tokens, rows.Err()
 }
 
-func (s *SQLiteStorage) RevokeToken(ctx context.Context, id string) error {
+func (s *PostgresStorage) RevokeToken(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE tokens SET revoked_at = ? WHERE id = ?`,
+		`UPDATE tokens SET revoked_at = $1 WHERE id = $2`,
 		time.Now(), id)
 	return err
 }
 
 // --- Users ---
 
-func (s *SQLiteStorage) GetOrCreateUser(ctx context.Context, name string) (*User, error) {
+func (s *PostgresStorage) GetOrCreateUser(ctx context.Context, name string) (*User, error) {
 	user := &User{}
 	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
 	var emailsJSON string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, name, email, emails, github_connected_at, gitlab_credentials, gitlab_credentials_at,
 		        forgejo_credentials, forgejo_credentials_at, created_at
-		 FROM users WHERE name = ?`, name).Scan(
+		 FROM users WHERE name = $1`, name).Scan(
 		&user.ID, &user.Name, &user.Email, &emailsJSON, &githubConnectedAt,
 		&user.GitLabCredentials, &gitlabCredentialsAt,
 		&user.ForgejoCredentials, &forgejoCredentialsAt, &user.CreatedAt)
@@ -953,7 +906,7 @@ func (s *SQLiteStorage) GetOrCreateUser(ctx context.Context, name string) (*User
 			CreatedAt: time.Now(),
 		}
 		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO users (id, name, created_at) VALUES (?, ?, ?)`,
+			`INSERT INTO users (id, name, created_at) VALUES ($1, $2, $3)`,
 			user.ID, user.Name, user.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("create user: %w", err)
@@ -963,14 +916,14 @@ func (s *SQLiteStorage) GetOrCreateUser(ctx context.Context, name string) (*User
 	return nil, err
 }
 
-func (s *SQLiteStorage) GetOrCreateUserByEmail(ctx context.Context, email, name string) (*User, error) {
+func (s *PostgresStorage) GetOrCreateUserByEmail(ctx context.Context, email, name string) (*User, error) {
 	user := &User{}
 	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
 	var emailsJSON string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, name, email, emails, github_connected_at, gitlab_credentials, gitlab_credentials_at,
 		        forgejo_credentials, forgejo_credentials_at, created_at
-		 FROM users WHERE email = ?`, email).Scan(
+		 FROM users WHERE email = $1`, email).Scan(
 		&user.ID, &user.Name, &user.Email, &emailsJSON, &githubConnectedAt,
 		&user.GitLabCredentials, &gitlabCredentialsAt,
 		&user.ForgejoCredentials, &forgejoCredentialsAt, &user.CreatedAt)
@@ -1002,7 +955,7 @@ func (s *SQLiteStorage) GetOrCreateUserByEmail(ctx context.Context, email, name 
 			CreatedAt: time.Now(),
 		}
 		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO users (id, name, email, created_at) VALUES (?, ?, ?, ?)`,
+			`INSERT INTO users (id, name, email, created_at) VALUES ($1, $2, $3, $4)`,
 			user.ID, user.Name, user.Email, user.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("create user: %w", err)
@@ -1012,7 +965,7 @@ func (s *SQLiteStorage) GetOrCreateUserByEmail(ctx context.Context, email, name 
 	return nil, err
 }
 
-func (s *SQLiteStorage) GetUserByName(ctx context.Context, name string) (*User, error) {
+func (s *PostgresStorage) GetUserByName(ctx context.Context, name string) (*User, error) {
 	user := &User{}
 	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
 	var emailsJSON string
@@ -1021,7 +974,7 @@ func (s *SQLiteStorage) GetUserByName(ctx context.Context, name string) (*User, 
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, name, email, emails, github_connected_at, gitlab_credentials, gitlab_credentials_at,
 		        forgejo_credentials, forgejo_credentials_at, tier, storage_used_bytes, created_at
-		 FROM users WHERE name = ?`, name).Scan(
+		 FROM users WHERE name = $1`, name).Scan(
 		&user.ID, &user.Name, &user.Email, &emailsJSON, &githubConnectedAt,
 		&user.GitLabCredentials, &gitlabCredentialsAt,
 		&user.ForgejoCredentials, &forgejoCredentialsAt, &tier, &storageUsed, &user.CreatedAt)
@@ -1058,29 +1011,29 @@ func (s *SQLiteStorage) GetUserByName(ctx context.Context, name string) (*User, 
 	return user, nil
 }
 
-func (s *SQLiteStorage) UpdateUserGitLabCredentials(ctx context.Context, userID, credentials string) error {
+func (s *PostgresStorage) UpdateUserGitLabCredentials(ctx context.Context, userID, credentials string) error {
 	encrypted, err := s.encrypt(credentials)
 	if err != nil {
 		return fmt.Errorf("encrypt gitlab_credentials: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE users SET gitlab_credentials = ?, gitlab_credentials_at = ? WHERE id = ?`,
+		`UPDATE users SET gitlab_credentials = $1, gitlab_credentials_at = $2 WHERE id = $3`,
 		encrypted, time.Now(), userID)
 	return err
 }
 
-func (s *SQLiteStorage) UpdateUserForgejoCredentials(ctx context.Context, userID, credentials string) error {
+func (s *PostgresStorage) UpdateUserForgejoCredentials(ctx context.Context, userID, credentials string) error {
 	encrypted, err := s.encrypt(credentials)
 	if err != nil {
 		return fmt.Errorf("encrypt forgejo_credentials: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE users SET forgejo_credentials = ?, forgejo_credentials_at = ? WHERE id = ?`,
+		`UPDATE users SET forgejo_credentials = $1, forgejo_credentials_at = $2 WHERE id = $3`,
 		encrypted, time.Now(), userID)
 	return err
 }
 
-func (s *SQLiteStorage) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+func (s *PostgresStorage) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	user := &User{}
 	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
 	var emailsJSON string
@@ -1089,7 +1042,7 @@ func (s *SQLiteStorage) GetUserByEmail(ctx context.Context, email string) (*User
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, name, email, emails, github_connected_at, gitlab_credentials, gitlab_credentials_at,
 		        forgejo_credentials, forgejo_credentials_at, tier, storage_used_bytes, created_at
-		 FROM users WHERE email = ? OR emails LIKE ?`, email, "%"+email+"%").Scan(
+		 FROM users WHERE email = $1 OR emails LIKE $2`, email, "%"+email+"%").Scan(
 		&user.ID, &user.Name, &user.Email, &emailsJSON, &githubConnectedAt,
 		&user.GitLabCredentials, &gitlabCredentialsAt,
 		&user.ForgejoCredentials, &forgejoCredentialsAt, &tier, &storageUsed, &user.CreatedAt)
@@ -1109,7 +1062,6 @@ func (s *SQLiteStorage) GetUserByEmail(ctx context.Context, email string) (*User
 		user.GitHubConnectedAt = githubConnectedAt.Time
 	}
 	if emailsJSON != "" {
-		// Parse JSON array of emails
 		user.Emails = parseEmailsJSON(emailsJSON)
 	}
 	if tier.Valid {
@@ -1127,106 +1079,102 @@ func (s *SQLiteStorage) GetUserByEmail(ctx context.Context, email string) (*User
 	return user, nil
 }
 
-func (s *SQLiteStorage) UpdateUserEmail(ctx context.Context, userID, email string) error {
+func (s *PostgresStorage) UpdateUserEmail(ctx context.Context, userID, email string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE users SET email = ? WHERE id = ?`,
+		`UPDATE users SET email = $1 WHERE id = $2`,
 		email, userID)
 	return err
 }
 
-func (s *SQLiteStorage) AddUserEmail(ctx context.Context, userID, email string) error {
+func (s *PostgresStorage) AddUserEmail(ctx context.Context, userID, email string) error {
 	// Get current emails
 	var emailsJSON string
-	err := s.db.QueryRowContext(ctx, `SELECT emails FROM users WHERE id = ?`, userID).Scan(&emailsJSON)
+	err := s.db.QueryRowContext(ctx, `SELECT emails FROM users WHERE id = $1`, userID).Scan(&emailsJSON)
 	if err != nil {
 		return err
 	}
 
 	emails := parseEmailsJSON(emailsJSON)
 	// Check if email already exists
-	if slices.Contains(emails, email) {
-		return nil // Already exists
+	for _, e := range emails {
+		if e == email {
+			return nil // Already exists
+		}
 	}
 	emails = append(emails, email)
 
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE users SET emails = ? WHERE id = ?`,
+		`UPDATE users SET emails = $1 WHERE id = $2`,
 		formatEmailsJSON(emails), userID)
 	return err
 }
 
-func (s *SQLiteStorage) UpdateUserGitHubConnected(ctx context.Context, userID string) error {
+func (s *PostgresStorage) UpdateUserGitHubConnected(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE users SET github_connected_at = ? WHERE id = ?`,
+		`UPDATE users SET github_connected_at = $1 WHERE id = $2`,
 		time.Now(), userID)
 	return err
 }
 
-func (s *SQLiteStorage) UpdateUserGitLabConnected(ctx context.Context, userID string) error {
+func (s *PostgresStorage) UpdateUserGitLabConnected(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE users SET gitlab_credentials_at = ? WHERE id = ?`,
+		`UPDATE users SET gitlab_credentials_at = $1 WHERE id = $2`,
 		time.Now(), userID)
 	return err
 }
 
-func (s *SQLiteStorage) UpdateUserForgejoConnected(ctx context.Context, userID string) error {
+func (s *PostgresStorage) UpdateUserForgejoConnected(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE users SET forgejo_credentials_at = ? WHERE id = ?`,
+		`UPDATE users SET forgejo_credentials_at = $1 WHERE id = $2`,
 		time.Now(), userID)
 	return err
 }
 
-func (s *SQLiteStorage) ClearUserGitLabCredentials(ctx context.Context, userID string) error {
+func (s *PostgresStorage) ClearUserGitLabCredentials(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE users SET gitlab_credentials = '', gitlab_credentials_at = NULL WHERE id = ?`,
+		`UPDATE users SET gitlab_credentials = '', gitlab_credentials_at = NULL WHERE id = $1`,
 		userID)
 	return err
 }
 
-func (s *SQLiteStorage) ClearUserForgejoCredentials(ctx context.Context, userID string) error {
+func (s *PostgresStorage) ClearUserForgejoCredentials(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE users SET forgejo_credentials = '', forgejo_credentials_at = NULL WHERE id = ?`,
+		`UPDATE users SET forgejo_credentials = '', forgejo_credentials_at = NULL WHERE id = $1`,
 		userID)
 	return err
 }
 
-func (s *SQLiteStorage) ClearUserGitHubConnected(ctx context.Context, userID string) error {
+func (s *PostgresStorage) ClearUserGitHubConnected(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE users SET github_connected_at = NULL WHERE id = ?`,
+		`UPDATE users SET github_connected_at = NULL WHERE id = $1`,
 		userID)
 	return err
 }
 
-func (s *SQLiteStorage) DeleteUser(ctx context.Context, id string) error {
-	// Delete user and all associated data
-	// Note: repos are not currently linked to users, so they remain
-	// In a future version, we might want to cascade delete repos too
-
-	// Delete tokens created by this user (we don't have user_id on tokens yet, so skip)
-	// For now, just delete the user record
-	_, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+func (s *PostgresStorage) DeleteUser(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
 	return err
 }
 
 // UpdateJobLogSize updates the log size for a job.
-func (s *SQLiteStorage) UpdateJobLogSize(ctx context.Context, jobID string, sizeBytes int64) error {
+func (s *PostgresStorage) UpdateJobLogSize(ctx context.Context, jobID string, sizeBytes int64) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE jobs SET log_size_bytes = ? WHERE id = ?`,
+		`UPDATE jobs SET log_size_bytes = $1 WHERE id = $2`,
 		sizeBytes, jobID)
 	return err
 }
 
 // UpdateUserStorageUsed adds deltaBytes to the user's storage usage.
-func (s *SQLiteStorage) UpdateUserStorageUsed(ctx context.Context, userID string, deltaBytes int64) error {
+func (s *PostgresStorage) UpdateUserStorageUsed(ctx context.Context, userID string, deltaBytes int64) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE users SET storage_used_bytes = storage_used_bytes + ? WHERE id = ?`,
+		`UPDATE users SET storage_used_bytes = storage_used_bytes + $1 WHERE id = $2`,
 		deltaBytes, userID)
 	return err
 }
 
 // GetUserByRepoID finds the user who owns a repo (for quota checks).
 // Returns nil if no owner is set (legacy repos).
-func (s *SQLiteStorage) GetUserByRepoID(ctx context.Context, repoID string) (*User, error) {
+func (s *PostgresStorage) GetUserByRepoID(ctx context.Context, repoID string) (*User, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT u.id, u.name, u.email, u.emails, u.github_connected_at,
 			u.gitlab_credentials, u.gitlab_credentials_at,
@@ -1234,7 +1182,7 @@ func (s *SQLiteStorage) GetUserByRepoID(ctx context.Context, repoID string) (*Us
 			u.tier, u.storage_used_bytes, u.created_at
 		FROM users u
 		JOIN repos r ON r.owner_user_id = u.id
-		WHERE r.id = ?
+		WHERE r.id = $1
 	`, repoID)
 
 	var u User
@@ -1276,42 +1224,19 @@ func (s *SQLiteStorage) GetUserByRepoID(ctx context.Context, repoID string) (*Us
 	return &u, nil
 }
 
-// Helper functions for emails JSON
-func parseEmailsJSON(s string) []string {
-	if s == "" || s == "[]" {
-		return nil
-	}
-	var emails []string
-	if err := json.Unmarshal([]byte(s), &emails); err != nil {
-		return nil
-	}
-	return emails
-}
-
-func formatEmailsJSON(emails []string) string {
-	if len(emails) == 0 {
-		return "[]"
-	}
-	b, err := json.Marshal(emails)
-	if err != nil {
-		return "[]"
-	}
-	return string(b)
-}
-
 // --- Logs ---
 
-func (s *SQLiteStorage) AppendLog(ctx context.Context, jobID, stream, data string) error {
+func (s *PostgresStorage) AppendLog(ctx context.Context, jobID, stream, data string) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO job_logs (job_id, stream, data, created_at)
-		 VALUES (?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4)`,
 		jobID, stream, data, time.Now())
 	return err
 }
 
-func (s *SQLiteStorage) GetLogs(ctx context.Context, jobID string) ([]*LogEntry, error) {
+func (s *PostgresStorage) GetLogs(ctx context.Context, jobID string) ([]*LogEntry, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, job_id, stream, data, created_at FROM job_logs WHERE job_id = ? ORDER BY id`,
+		`SELECT id, job_id, stream, data, created_at FROM job_logs WHERE job_id = $1 ORDER BY id`,
 		jobID)
 	if err != nil {
 		return nil, err

@@ -69,6 +69,11 @@ type Storage interface {
 	ClearUserGitHubConnected(ctx context.Context, userID string) error
 	DeleteUser(ctx context.Context, id string) error
 
+	// Storage quota
+	UpdateJobLogSize(ctx context.Context, jobID string, sizeBytes int64) error
+	UpdateUserStorageUsed(ctx context.Context, userID string, deltaBytes int64) error
+	GetUserByRepoID(ctx context.Context, repoID string) (*User, error) // Find repo owner for quota checks
+
 	// Lifecycle
 	Close() error
 }
@@ -122,6 +127,9 @@ type Job struct {
 	// Approval for external PRs
 	ApprovedBy *string    // Username who approved shared worker execution
 	ApprovedAt *time.Time // When approval was granted
+
+	// Storage tracking
+	LogSizeBytes int64 // Size of compressed logs in bytes
 }
 
 // JobFilter for listing jobs.
@@ -164,6 +172,23 @@ const (
 	ForgeTypeGitea   ForgeType = "gitea"
 )
 
+// UserTier represents the subscription tier.
+type UserTier string
+
+const (
+	UserTierFree UserTier = "free"
+	UserTierPro  UserTier = "pro"
+	// Note: Self-hosted has no tier enforcement - limits are not applied.
+	// Self-hosted is detected by the server (no R2 config = self-hosted).
+)
+
+// Storage quotas by tier (hosted service only)
+const (
+	StorageQuotaFree = 100 * 1024 * 1024       // 100 MB
+	StorageQuotaPro  = 10 * 1024 * 1024 * 1024 // 10 GB
+	// Self-hosted: no quota (return math.MaxInt64 or skip enforcement)
+)
+
 // User represents a Cinch user with connected forge credentials.
 type User struct {
 	ID                   string
@@ -176,6 +201,23 @@ type User struct {
 	ForgejoCredentials   string    // JSON-encoded OAuth credentials for Forgejo/Codeberg
 	ForgejoCredentialsAt time.Time // When Forgejo was connected
 	CreatedAt            time.Time
+
+	// Storage quota (fair use limits)
+	Tier             UserTier // "free" or "pro"
+	StorageUsedBytes int64    // Total storage used across all jobs
+}
+
+// StorageQuota returns the storage quota in bytes for this user's tier.
+func (u *User) StorageQuota() int64 {
+	if u.Tier == UserTierPro {
+		return StorageQuotaPro
+	}
+	return StorageQuotaFree
+}
+
+// IsOverQuota returns true if the user has exceeded their storage quota.
+func (u *User) IsOverQuota() bool {
+	return u.StorageUsedBytes >= u.StorageQuota()
 }
 
 // Repo represents a configured repository.

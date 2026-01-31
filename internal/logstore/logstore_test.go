@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +65,7 @@ func TestSQLiteLogStore(t *testing.T) {
 	}
 
 	// Finalize (no-op for SQLite)
-	if err := ls.Finalize(ctx, jobID); err != nil {
+	if _, err := ls.Finalize(ctx, jobID); err != nil {
 		t.Fatalf("Finalize failed: %v", err)
 	}
 
@@ -105,6 +107,95 @@ func TestSQLiteLogStore(t *testing.T) {
 	}
 	if entries[2].Stream != "stderr" {
 		t.Errorf("got %q, want %q", entries[2].Stream, "stderr")
+	}
+}
+
+func TestFilesystemLogStore_Compression(t *testing.T) {
+	// Create temp directory
+	tmpDir, err := os.MkdirTemp("", "logstore-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp failed: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ls, err := logstore.NewFilesystemLogStore(tmpDir, nil)
+	if err != nil {
+		t.Fatalf("NewFilesystemLogStore failed: %v", err)
+	}
+	defer ls.Close()
+
+	ctx := context.Background()
+	jobID := "test-job-gzip"
+
+	// Write some log data (make it big enough to see compression benefit)
+	testData := strings.Repeat("This is a test log line that should compress well!\n", 100)
+	if err := ls.AppendChunk(ctx, jobID, "stdout", []byte(testData)); err != nil {
+		t.Fatalf("AppendChunk failed: %v", err)
+	}
+
+	// Check uncompressed file exists before finalize
+	uncompressedPath := filepath.Join(tmpDir, jobID+".log")
+	if _, err := os.Stat(uncompressedPath); os.IsNotExist(err) {
+		t.Fatalf("uncompressed file should exist before finalize")
+	}
+
+	// Finalize (should compress)
+	returnedSize, err := ls.Finalize(ctx, jobID)
+	if err != nil {
+		t.Fatalf("Finalize failed: %v", err)
+	}
+
+	// Verify compression happened
+	compressedPath := filepath.Join(tmpDir, jobID+".log.gz")
+	if _, err := os.Stat(compressedPath); os.IsNotExist(err) {
+		t.Fatalf("compressed file should exist after finalize")
+	}
+	if _, err := os.Stat(uncompressedPath); !os.IsNotExist(err) {
+		t.Fatalf("uncompressed file should be deleted after finalize")
+	}
+
+	// Check compression ratio and returned size
+	compressedInfo, _ := os.Stat(compressedPath)
+	rawSize := len(testData) + 100 // approximate NDJSON overhead
+	compressedSize := compressedInfo.Size()
+
+	// Verify returned size matches actual file size
+	if returnedSize != compressedSize {
+		t.Errorf("returned size %d doesn't match actual file size %d", returnedSize, compressedSize)
+	}
+	ratio := float64(rawSize) / float64(compressedSize)
+	t.Logf("Compression: %d bytes -> %d bytes (%.1fx)", rawSize, compressedSize, ratio)
+	if ratio < 2 {
+		t.Errorf("expected at least 2x compression, got %.1fx", ratio)
+	}
+
+	// Verify we can still read the logs correctly
+	reader, err := ls.GetLogs(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetLogs failed: %v", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll failed: %v", err)
+	}
+
+	// Parse NDJSON and verify content
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Errorf("expected 1 entry, got %d", len(lines))
+	}
+
+	var entry logstore.LogEntry
+	if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if entry.Data != testData {
+		t.Errorf("data mismatch: got %d bytes, want %d bytes", len(entry.Data), len(testData))
+	}
+	if entry.Stream != "stdout" {
+		t.Errorf("stream mismatch: got %q, want %q", entry.Stream, "stdout")
 	}
 }
 

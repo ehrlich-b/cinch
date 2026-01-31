@@ -26,8 +26,11 @@ func (s *SQLiteLogStore) AppendChunk(ctx context.Context, jobID, stream string, 
 }
 
 // Finalize is a no-op for SQLite (logs are written immediately).
-func (s *SQLiteLogStore) Finalize(ctx context.Context, jobID string) error {
-	return nil
+// Returns 0 for size since SQLite logs aren't compressed.
+func (s *SQLiteLogStore) Finalize(ctx context.Context, jobID string) (int64, error) {
+	// For SQLite, we could calculate size from the logs, but it's not compressed
+	// so we return 0 (SQLite is only for dev/self-hosted where quota doesn't apply)
+	return 0, nil
 }
 
 // GetLogs returns logs as newline-delimited JSON.

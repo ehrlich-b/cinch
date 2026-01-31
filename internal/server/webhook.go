@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ehrlich-b/cinch/internal/forge"
+	"github.com/ehrlich-b/cinch/internal/logstore"
 	"github.com/ehrlich-b/cinch/internal/protocol"
 	"github.com/ehrlich-b/cinch/internal/storage"
 )
@@ -22,11 +25,17 @@ type WebhookHandler struct {
 	baseURL    string // Base URL for job links (e.g., "https://cinch.example.com")
 	log        *slog.Logger
 	githubApp  *GitHubAppHandler
+	logStore   logstore.LogStore
 }
 
 // SetGitHubApp sets the GitHub App handler for installation-based status posting.
 func (h *WebhookHandler) SetGitHubApp(gh *GitHubAppHandler) {
 	h.githubApp = gh
+}
+
+// SetLogStore sets the log store for fetching logs (for Check Run output).
+func (h *WebhookHandler) SetLogStore(ls logstore.LogStore) {
+	h.logStore = ls
 }
 
 // NewWebhookHandler creates a new webhook handler.
@@ -422,10 +431,18 @@ func (h *WebhookHandler) PostJobStatus(ctx context.Context, jobID string, state 
 		}
 
 		// Fetch logs for the check run output
-		logs, _ := h.storage.GetLogs(ctx, jobID)
 		var logText string
-		for _, log := range logs {
-			logText += log.Data
+		if h.logStore != nil {
+			if reader, err := h.logStore.GetLogs(ctx, jobID); err == nil {
+				defer reader.Close()
+				scanner := bufio.NewScanner(reader)
+				for scanner.Scan() {
+					var entry logstore.LogEntry
+					if err := json.Unmarshal(scanner.Bytes(), &entry); err == nil {
+						logText += entry.Data
+					}
+				}
+			}
 		}
 
 		title := "Build " + state

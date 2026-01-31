@@ -21,8 +21,9 @@ type LogStore interface {
 	AppendChunk(ctx context.Context, jobID, stream string, data []byte) error
 
 	// Finalize flushes remaining buffer and marks job logs as complete.
-	// For R2: concatenates chunks into final.log
-	Finalize(ctx context.Context, jobID string) error
+	// For R2: concatenates chunks into final.log (gzip compressed).
+	// Returns the final compressed size in bytes for storage tracking.
+	Finalize(ctx context.Context, jobID string) (sizeBytes int64, err error)
 
 	// GetLogs returns logs as a streaming reader.
 	// Returns newline-delimited JSON log entries.

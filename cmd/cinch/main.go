@@ -240,6 +240,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	wsHandler.SetGitHubApp(githubAppHandler)
 	wsHandler.SetWorkerNotifier(dispatcher)
 	webhookHandler.SetGitHubApp(githubAppHandler)
+	webhookHandler.SetLogStore(logStore)
 	dispatcher.SetGitHubApp(githubAppHandler)
 	logStreamHandler.SetLogStore(logStore)
 	apiHandler.SetLogStore(logStore)
