@@ -152,7 +152,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 		log.Warn("GitHub OAuth not configured - auth disabled")
 	}
 
-	// Create log store (R2 in production, SQLite in development)
+	// Create log store
+	// Priority: R2 (if configured) > Filesystem (default for self-hosted)
 	var logStore logstore.LogStore
 	r2Config := logstore.R2Config{
 		AccountID:       os.Getenv("CINCH_R2_ACCOUNT_ID"),
@@ -161,6 +162,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		Bucket:          os.Getenv("CINCH_R2_BUCKET"),
 	}
 	if r2Config.AccountID != "" && r2Config.Bucket != "" {
+		// Production: use R2 for log storage
 		var err error
 		logStore, err = logstore.NewR2LogStore(r2Config, log)
 		if err != nil {
@@ -169,8 +171,18 @@ func runServer(cmd *cobra.Command, args []string) error {
 		defer logStore.Close()
 		log.Info("using R2 for log storage", "bucket", r2Config.Bucket)
 	} else {
-		logStore = logstore.NewSQLiteLogStore(store)
-		log.Info("using SQLite for log storage")
+		// Self-hosted: use filesystem for log storage
+		logDir := os.Getenv("CINCH_LOG_DIR")
+		if logDir == "" {
+			logDir = logstore.DefaultLogDir()
+		}
+		var err error
+		logStore, err = logstore.NewFilesystemLogStore(logDir, log)
+		if err != nil {
+			return fmt.Errorf("create filesystem log store: %w", err)
+		}
+		defer logStore.Close()
+		log.Info("using filesystem for log storage", "dir", logDir)
 	}
 
 	// Create components

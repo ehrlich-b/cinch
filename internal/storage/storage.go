@@ -39,6 +39,7 @@ type Storage interface {
 	GetRepoByOwnerName(ctx context.Context, forge, owner, name string) (*Repo, error)
 	ListRepos(ctx context.Context) ([]*Repo, error)
 	UpdateRepoPrivate(ctx context.Context, id string, private bool) error
+	UpdateRepoSecrets(ctx context.Context, id string, secrets map[string]string) error
 	DeleteRepo(ctx context.Context, id string) error
 
 	// Tokens
@@ -186,10 +187,12 @@ type Repo struct {
 	CloneURL      string
 	HTMLURL       string
 	WebhookSecret string
-	ForgeToken    string // Token for API calls (status posting, cloning private repos)
-	Build         string // Build command (e.g., "make check") - runs on branches/PRs
-	Release       string // Release command (e.g., "make release") - runs on tags
-	Private       bool   // Whether the repo is private
+	ForgeToken    string            // Token for API calls (status posting, cloning private repos)
+	Build         string            // Build command (e.g., "make check") - runs on branches/PRs
+	Release       string            // Release command (e.g., "make release") - runs on tags
+	Workers       []string          // Worker labels for fan-out (e.g., ["linux-amd64", "linux-arm64"])
+	Secrets       map[string]string // Environment secrets injected into jobs (encrypted at rest)
+	Private       bool              // Whether the repo is private
 	CreatedAt     time.Time
 }
 
