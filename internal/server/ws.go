@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -410,6 +411,9 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 	worker.OwnerID = reg.OwnerID
 	worker.OwnerName = reg.OwnerName
 
+	ctx := context.Background()
+	var ownerUser *storage.User
+
 	// If owner info not in registration, try to extract from worker ID
 	// Worker IDs for JWT-authenticated workers are "user:email:hostname"
 	if worker.OwnerName == "" && len(worker.ID) > 5 && worker.ID[:5] == "user:" {
@@ -425,17 +429,42 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 		// Look up user by email to get their GitHub username
 		// This is critical for the trust model: job.Author is a GitHub username,
 		// so worker.OwnerName must also be the GitHub username to match
-		ctx := context.Background()
 		if user, err := h.storage.GetUserByEmail(ctx, email); err == nil && user != nil {
 			worker.OwnerName = user.Name // GitHub username
+			ownerUser = user
 		} else {
 			// Fallback to email if user not found (shouldn't happen for valid tokens)
 			worker.OwnerName = email
 		}
 	}
 
+	// Check worker limit for this user
+	if ownerUser != nil {
+		workerCount, err := h.storage.CountWorkersByOwner(ctx, worker.OwnerName)
+		if err != nil {
+			h.log.Warn("failed to count workers", "error", err)
+		} else {
+			// Limits: Free = 10, Pro = 1000
+			limit := 10
+			if ownerUser.HasPro() {
+				limit = 1000
+			}
+			if workerCount >= limit {
+				h.log.Info("worker limit reached", "owner", worker.OwnerName, "count", workerCount, "limit", limit)
+				errMsg := fmt.Sprintf("Worker limit reached (%d/%d). ", workerCount, limit)
+				if limit == 10 {
+					errMsg += "Free tier: 10 workers. Get Pro for 1000 at cinch.sh/account"
+				} else {
+					errMsg += "Contact support for higher limits."
+				}
+				msg, _ := protocol.Encode(protocol.TypeAuthFail, protocol.AuthFail{Error: errMsg})
+				worker.Send <- msg
+				return
+			}
+		}
+	}
+
 	// Ensure worker exists in database (for FK constraint)
-	ctx := context.Background()
 	dbWorker, err := h.storage.GetWorker(ctx, worker.ID)
 	if err != nil {
 		// Create worker record with owner info

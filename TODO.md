@@ -45,10 +45,10 @@ See `design/17-billing-and-teams.md` for full model.
 ```
 
 **Graceful Error Handling (MVP):**
-- [ ] **Private repo 402 → helpful message** - "Private repos require Pro" with upgrade link
+- ✅ **Private repo → visible error** - Creates job, shows error in GitHub/GitLab status
 - [ ] **Storage quota exceeded** - Usage breakdown, link to manage
 - [ ] **Seat limit reached** - "Team at capacity (5/5 seats). Add seats at cinch.sh/billing"
-- [ ] **Worker limit reached** - "Free: 10 workers. Upgrade for 1000."
+- ✅ **Worker limit reached** - Free: 10, Pro: 1000, shows error on connect
 - [ ] **Log retention warning** - Show "logs expire in X days" for free tier
 
 **Stripe Integration (post-launch):**

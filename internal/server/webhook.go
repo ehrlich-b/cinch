@@ -148,14 +148,6 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check if private repo can run builds (requires Pro)
-	if err := h.checkPrivateRepoAccess(ctx, repo); err != nil {
-		h.log.Info("private repo blocked", "repo", event.Repo.FullName(), "error", err)
-		// Return 402 Payment Required to signal billing issue
-		http.Error(w, err.Error(), http.StatusPaymentRequired)
-		return
-	}
-
 	// Create job
 	job, err := h.createJob(ctx, repo, event)
 	if err != nil {
@@ -172,6 +164,24 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"author", event.Sender,
 		"trust_level", job.TrustLevel,
 	)
+
+	// Check if private repo can run builds (requires Pro)
+	if err := h.checkPrivateRepoAccess(ctx, repo); err != nil {
+		h.log.Info("private repo blocked", "repo", event.Repo.FullName(), "error", err)
+		// Create a visible error - fail the job with a helpful message
+		errMsg := "Private repos require Pro. Get Pro free at cinch.sh/account"
+		exitCode := 1
+		if updateErr := h.storage.UpdateJobStatus(ctx, job.ID, storage.JobStatusFailed, &exitCode); updateErr != nil {
+			h.log.Error("failed to update job status", "error", updateErr)
+		}
+		// Post failed status to GitHub/GitLab so user sees it
+		if statusErr := h.postStatus(ctx, matchedForge, repo, event.Commit, job.ID, forge.StatusError, errMsg); statusErr != nil {
+			h.log.Warn("failed to post billing error status", "error", statusErr)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprintf(w, `{"job_id": %q, "error": "billing_required"}`, job.ID)
+		return
+	}
 
 	// Post pending status
 	if err := h.postStatus(ctx, matchedForge, repo, event.Commit, job.ID, forge.StatusPending, "Build queued"); err != nil {
@@ -244,14 +254,6 @@ func (h *WebhookHandler) handlePullRequest(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// Check if private repo can run builds (requires Pro)
-	if err := h.checkPrivateRepoAccess(ctx, repo); err != nil {
-		h.log.Info("private repo blocked", "repo", prEvent.Repo.FullName(), "error", err)
-		// Return 402 Payment Required to signal billing issue
-		http.Error(w, err.Error(), http.StatusPaymentRequired)
-		return
-	}
-
 	// Create job for PR
 	job, err := h.createPRJob(ctx, repo, prEvent)
 	if err != nil {
@@ -270,6 +272,24 @@ func (h *WebhookHandler) handlePullRequest(w http.ResponseWriter, r *http.Reques
 		"is_fork", prEvent.IsFork,
 		"trust_level", job.TrustLevel,
 	)
+
+	// Check if private repo can run builds (requires Pro)
+	if err := h.checkPrivateRepoAccess(ctx, repo); err != nil {
+		h.log.Info("private repo blocked", "repo", prEvent.Repo.FullName(), "error", err)
+		// Create a visible error - fail the job with a helpful message
+		errMsg := "Private repos require Pro. Get Pro free at cinch.sh/account"
+		exitCode := 1
+		if updateErr := h.storage.UpdateJobStatus(ctx, job.ID, storage.JobStatusFailed, &exitCode); updateErr != nil {
+			h.log.Error("failed to update job status", "error", updateErr)
+		}
+		// Post failed status to GitHub/GitLab so user sees it
+		if statusErr := h.postStatus(ctx, matchedForge, repo, prEvent.Commit, job.ID, forge.StatusError, errMsg); statusErr != nil {
+			h.log.Warn("failed to post billing error status", "error", statusErr)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprintf(w, `{"job_id": %q, "error": "billing_required"}`, job.ID)
+		return
+	}
 
 	// Post pending status - different message for fork PRs awaiting contributor CI
 	statusMsg := "Build queued"
