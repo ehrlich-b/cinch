@@ -55,7 +55,7 @@ export function LandingPage({ auth, onNavigate }: Props) {
 
           <div className="forge-logos">
             <img src={githubLogo} alt="GitHub" className="forge-logo github" />
-            <img src={gitlabLogo} alt="GitLab" className="forge-logo" />
+            <img src={gitlabLogo} alt="GitLab" className="forge-logo gitlab" />
             <img src={forgejoLogo} alt="Codeberg" className="forge-logo" />
             <span className="forge-label">+ self-hosted forges</span>
           </div>
@@ -80,7 +80,7 @@ export function LandingPage({ auth, onNavigate }: Props) {
             <div className="why-card">
               <div className="why-icon">🔧</div>
               <h3>Dead Simple</h3>
-              <p>One command in config. No YAML pipelines, no plugins, no complexity.</p>
+              <p>One command to build, one to release. Cinch handles the rest.</p>
             </div>
             <div className="why-card">
               <div className="why-icon">🔀</div>
@@ -166,7 +166,7 @@ export function LandingPage({ auth, onNavigate }: Props) {
             </div>
             <div className="plan-card featured">
               <div className="plan-name">Pro</div>
-              <div className="plan-price">${yearly ? '48' : '5'}<span className="period">/seat/{yearly ? 'yr' : 'mo'}</span></div>
+              <div className="plan-price">${yearly ? '4' : '5'}<span className="period">/seat/mo</span></div>
               <div className="plan-note">Private repos + more</div>
               <ul className="plan-features-list">
                 <li>Private repositories</li>
