@@ -797,9 +797,9 @@ tr.clickable {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 28px 24px;
+  padding: 24px 20px;
   text-align: center;
-  width: 280px;
+  width: 180px;
 }
 
 .step-card .step-icon {
