@@ -222,9 +222,15 @@ cinch run                      # Run build locally
 cinch run "make test"          # Run specific command
 cinch run --bare-metal         # Skip container
 
-# Monitoring
+# Monitoring & Jobs
 cinch status                   # Build status for current repo
-cinch logs JOB_ID              # Stream logs
+cinch jobs                     # List recent jobs
+cinch jobs --failed            # List failed jobs only
+cinch jobs --pending           # List pending jobs
+cinch logs JOB_ID              # Stream logs from job
+cinch logs --last              # Logs from most recent job
+cinch retry JOB_ID             # Retry a failed job
+cinch cancel JOB_ID            # Cancel pending/running job
 
 # Multi-forge
 cinch connect gitlab           # Add GitLab account
