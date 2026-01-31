@@ -91,9 +91,15 @@ cinch run                   # Run build locally (uses .cinch.yaml)
 cinch run "make test"       # Run specific command
 cinch run --bare-metal      # Skip container
 
-# Status
+# Status & Jobs
 cinch status                # Show build status for current repo
+cinch jobs                  # List recent jobs
+cinch jobs --failed         # List failed jobs only
+cinch jobs --pending        # List pending jobs
 cinch logs JOB_ID           # Stream logs from a job
+cinch logs --last           # Logs from most recent job
+cinch retry JOB_ID          # Retry a failed job
+cinch cancel JOB_ID         # Cancel a pending/running job
 
 # Releases (used in CI, not manually)
 cinch release dist/*        # Upload release assets to forge

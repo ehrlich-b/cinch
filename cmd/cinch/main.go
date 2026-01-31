@@ -60,6 +60,9 @@ func main() {
 		installCmd(),
 		statusCmd(),
 		logsCmd(),
+		jobsCmd(),
+		retryCmd(),
+		cancelCmd(),
 		configCmd(),
 		tokenCmd(),
 		loginCmd(),
@@ -1200,12 +1203,19 @@ func allSameForge(jobs []cli.JobStatus) bool {
 
 func logsCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "logs <job-id>",
+		Use:   "logs [job-id]",
 		Short: "Stream logs from a job",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runLogs,
+		Long: `Stream logs from a job.
+
+Examples:
+  cinch logs j_abc123         # logs for specific job
+  cinch logs --last           # logs from most recent job
+  cinch logs -f j_abc123      # follow live logs`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runLogs,
 	}
 	cmd.Flags().BoolP("follow", "f", false, "Follow log output (stream live)")
+	cmd.Flags().Bool("last", false, "Show logs from most recent job")
 	cmd.Flags().String("server", "https://cinch.sh", "Server URL")
 	return cmd
 }
@@ -1213,7 +1223,7 @@ func logsCmd() *cobra.Command {
 func runLogs(cmd *cobra.Command, args []string) error {
 	serverURL, _ := cmd.Flags().GetString("server")
 	follow, _ := cmd.Flags().GetBool("follow")
-	jobID := args[0]
+	last, _ := cmd.Flags().GetBool("last")
 
 	// Load credentials
 	cfg, err := cli.LoadConfig()
@@ -1224,6 +1234,40 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	sc := cfg.GetServerConfig(serverURL)
 	if sc == nil || sc.Token == "" {
 		return fmt.Errorf("not logged in (run 'cinch login' first)")
+	}
+
+	var jobID string
+	if len(args) > 0 {
+		jobID = args[0]
+	} else if last {
+		// Fetch most recent job
+		req, err := http.NewRequest("GET", serverURL+"/api/jobs?limit=1", nil)
+		if err != nil {
+			return fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+sc.Token)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("request failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		var result struct {
+			Jobs []struct {
+				ID string `json:"id"`
+			} `json:"jobs"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
+		if len(result.Jobs) == 0 {
+			return fmt.Errorf("no jobs found")
+		}
+		jobID = result.Jobs[0].ID
+		fmt.Printf("Showing logs for %s\n\n", jobID)
+	} else {
+		return fmt.Errorf("specify a job ID or use --last")
 	}
 
 	// Handle interrupt
@@ -1243,6 +1287,261 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		JobID:     jobID,
 		Follow:    follow,
 	}, os.Stdout)
+}
+
+func jobsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "jobs",
+		Short: "List jobs",
+		Long: `List jobs with optional filtering.
+
+Examples:
+  cinch jobs                  # list recent jobs
+  cinch jobs --failed         # list failed jobs only
+  cinch jobs --pending        # list pending jobs only
+  cinch jobs --limit 50       # list more jobs`,
+		RunE: runJobs,
+	}
+	cmd.Flags().Bool("failed", false, "Show only failed jobs")
+	cmd.Flags().Bool("pending", false, "Show only pending jobs")
+	cmd.Flags().Bool("running", false, "Show only running jobs")
+	cmd.Flags().Int("limit", 20, "Number of jobs to show")
+	cmd.Flags().String("server", "https://cinch.sh", "Server URL")
+	return cmd
+}
+
+func runJobs(cmd *cobra.Command, args []string) error {
+	serverURL, _ := cmd.Flags().GetString("server")
+	failed, _ := cmd.Flags().GetBool("failed")
+	pending, _ := cmd.Flags().GetBool("pending")
+	running, _ := cmd.Flags().GetBool("running")
+	limit, _ := cmd.Flags().GetInt("limit")
+
+	// Load credentials
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	sc := cfg.GetServerConfig(serverURL)
+	if sc == nil || sc.Token == "" {
+		return fmt.Errorf("not logged in (run 'cinch login' first)")
+	}
+
+	// Build query
+	query := fmt.Sprintf("%s/api/jobs?limit=%d", serverURL, limit)
+	if failed {
+		query += "&status=failed"
+	} else if pending {
+		query += "&status=pending"
+	} else if running {
+		query += "&status=running"
+	}
+
+	req, err := http.NewRequest("GET", query, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+sc.Token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server error: %s", string(body))
+	}
+
+	var result struct {
+		Jobs []struct {
+			ID        string `json:"id"`
+			Repo      string `json:"repo"`
+			Commit    string `json:"commit"`
+			Branch    string `json:"branch"`
+			Tag       string `json:"tag"`
+			Status    string `json:"status"`
+			Duration  int    `json:"duration"`
+			ExitCode  int    `json:"exit_code"`
+			CreatedAt string `json:"created_at"`
+		} `json:"jobs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	if len(result.Jobs) == 0 {
+		fmt.Println("No jobs found")
+		return nil
+	}
+
+	// Print jobs
+	for _, job := range result.Jobs {
+		ref := job.Branch
+		if job.Tag != "" {
+			ref = job.Tag
+		}
+		if ref == "" {
+			ref = job.Commit[:8]
+		}
+
+		// Status indicator
+		var status string
+		switch job.Status {
+		case "success":
+			status = "\033[32m✓\033[0m"
+		case "failed":
+			status = "\033[31m✗\033[0m"
+		case "running":
+			status = "\033[33m●\033[0m"
+		case "pending", "queued":
+			status = "\033[90m○\033[0m"
+		default:
+			status = "?"
+		}
+
+		// Duration
+		dur := ""
+		if job.Duration > 0 {
+			dur = fmt.Sprintf(" %ds", job.Duration/1000)
+		}
+
+		fmt.Printf("%s %s %s @ %s%s\n", status, job.ID, job.Repo, ref, dur)
+	}
+
+	return nil
+}
+
+func retryCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "retry <job-id>",
+		Short: "Retry a failed job",
+		Long: `Retry a failed or cancelled job.
+
+Examples:
+  cinch retry j_abc123        # retry a specific job
+  cinch jobs --failed         # list failed jobs to find IDs`,
+		Args: cobra.ExactArgs(1),
+		RunE: runRetry,
+	}
+	cmd.Flags().String("server", "https://cinch.sh", "Server URL")
+	return cmd
+}
+
+func runRetry(cmd *cobra.Command, args []string) error {
+	serverURL, _ := cmd.Flags().GetString("server")
+	jobID := args[0]
+
+	// Load credentials
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	sc := cfg.GetServerConfig(serverURL)
+	if sc == nil || sc.Token == "" {
+		return fmt.Errorf("not logged in (run 'cinch login' first)")
+	}
+
+	// POST to retry endpoint
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/jobs/%s/run", serverURL, jobID), nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+sc.Token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		JobID string `json:"job_id"`
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(body, &result)
+
+	if resp.StatusCode != http.StatusOK {
+		if result.Error != "" {
+			return fmt.Errorf("retry failed: %s", result.Error)
+		}
+		return fmt.Errorf("retry failed: %s", string(body))
+	}
+
+	if result.JobID != "" {
+		fmt.Printf("Created new job: %s\n", result.JobID)
+	} else {
+		fmt.Printf("Retried job %s\n", jobID)
+	}
+
+	return nil
+}
+
+func cancelCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cancel <job-id>",
+		Short: "Cancel a pending or running job",
+		Long: `Cancel a pending or running job.
+
+Examples:
+  cinch cancel j_abc123       # cancel a specific job
+  cinch jobs --pending        # list pending jobs to find IDs`,
+		Args: cobra.ExactArgs(1),
+		RunE: runCancel,
+	}
+	cmd.Flags().String("server", "https://cinch.sh", "Server URL")
+	return cmd
+}
+
+func runCancel(cmd *cobra.Command, args []string) error {
+	serverURL, _ := cmd.Flags().GetString("server")
+	jobID := args[0]
+
+	// Load credentials
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	sc := cfg.GetServerConfig(serverURL)
+	if sc == nil || sc.Token == "" {
+		return fmt.Errorf("not logged in (run 'cinch login' first)")
+	}
+
+	// POST to cancel endpoint
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/jobs/%s/cancel", serverURL, jobID), nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+sc.Token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(body, &result)
+
+	if resp.StatusCode != http.StatusOK {
+		if result.Error != "" {
+			return fmt.Errorf("cancel failed: %s", result.Error)
+		}
+		return fmt.Errorf("cancel failed: %s", string(body))
+	}
+
+	fmt.Printf("Cancelled job %s\n", jobID)
+	return nil
 }
 
 func configCmd() *cobra.Command {
