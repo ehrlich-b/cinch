@@ -251,12 +251,9 @@ go:     go1.22.0
 
 ## Environment Variables
 
-| Variable | Description | Used by |
-|----------|-------------|---------|
-| `CINCH_SERVER` | Default server URL | worker, status, logs |
-| `CINCH_TOKEN` | Auth token | worker |
-| `CINCH_DB` | Database path/URL | server |
-| `CINCH_LOG_LEVEL` | Log level | all |
+See `CLAUDE.md` for the complete list of server and job environment variables.
+
+**Note:** The CLI uses `~/.cinch/config` for credentials (saved by `cinch login`), not environment variables.
 
 ## Config File
 

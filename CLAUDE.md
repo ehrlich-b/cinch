@@ -53,6 +53,10 @@ container: none             # Bare metal (no container)
 
 **Key insight:** `build:` runs `make build` - the SAME command you run locally. No new syntax to learn.
 
+**Default timeout:** 30 minutes (configurable via `timeout:` field).
+
+**Footgun warning:** Don't use `build: true` - YAML parses that as boolean. Use `build: "true"` or better yet, an actual command.
+
 ## CLI Commands
 
 ```bash
@@ -61,9 +65,23 @@ cinch login                 # Auth via browser, saves to ~/.cinch/config
 cinch logout                # Remove credentials
 cinch whoami                # Show current auth status
 
+# Forge connection (after login)
+cinch connect gitlab        # Connect GitLab account
+cinch connect codeberg      # Connect Codeberg account
+cinch connect forgejo       # Connect self-hosted Forgejo
+
 # Worker
 cinch worker                # Start worker (uses saved credentials)
+cinch worker -s ADDR        # Connect to self-hosted server
 cinch worker --labels linux-amd64,docker  # With labels for routing
+
+# Worker daemon (background service)
+cinch daemon start          # Start worker as background daemon
+cinch daemon stop           # Stop the daemon
+cinch daemon status         # Check daemon status
+cinch daemon install        # Install as system service (launchd/systemd)
+cinch daemon uninstall      # Remove system service
+cinch daemon logs           # View daemon logs
 
 # Local development
 cinch run                   # Run build locally (uses .cinch.yaml)
@@ -81,10 +99,12 @@ cinch release dist/*        # Upload release assets to forge
 cinch repo add              # Add repo to Cinch
 cinch repo list             # List connected repos
 
-# Token management (for advanced use cases)
-cinch token create          # Create worker token
-cinch token list            # List tokens
-cinch token revoke TOKEN    # Revoke a token
+# Config validation
+cinch config validate       # Validate .cinch.yaml
+
+# Installation
+cinch install               # Install cinch binary to PATH
+cinch install --with-daemon # Install and set up daemon
 ```
 
 ## Environment Variables in Jobs
@@ -108,6 +128,44 @@ GITHUB_TOKEN=ghs_xxx            # GitHub
 GITLAB_TOKEN=glpat-xxx          # GitLab
 GITEA_TOKEN=xxx                 # Forgejo/Gitea
 CINCH_FORGE_TOKEN=xxx           # Always set (same as forge-specific)
+CI_JOB_TOKEN=xxx                # GitLab compatibility (same as GITLAB_TOKEN)
+```
+
+## Server Environment Variables
+
+For self-hosting `cinch server`:
+
+```bash
+# Core server config
+CINCH_ADDR=:8080                # Listen address (default :8080)
+CINCH_DATA_DIR=/var/lib/cinch   # Data directory for SQLite, logs
+CINCH_BASE_URL=https://ci.example.com    # Public URL for webhooks
+CINCH_WS_BASE_URL=wss://ci.example.com   # WebSocket URL (usually same host)
+CINCH_JWT_SECRET=xxx            # CRITICAL: Secret for encrypting tokens
+CINCH_LOG_DIR=/var/log/cinch    # Log storage directory
+
+# R2 log storage (optional, for cloud log storage)
+CINCH_R2_ACCOUNT_ID=xxx
+CINCH_R2_ACCESS_KEY_ID=xxx
+CINCH_R2_SECRET_ACCESS_KEY=xxx
+CINCH_R2_BUCKET=cinch-logs
+
+# GitHub App (for GitHub integration)
+CINCH_GITHUB_APP_ID=123456
+CINCH_GITHUB_APP_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----...
+CINCH_GITHUB_APP_WEBHOOK_SECRET=xxx
+CINCH_GITHUB_APP_CLIENT_ID=Iv1.xxx
+CINCH_GITHUB_APP_CLIENT_SECRET=xxx
+
+# GitLab OAuth (for GitLab integration)
+CINCH_GITLAB_CLIENT_ID=xxx
+CINCH_GITLAB_CLIENT_SECRET=xxx
+CINCH_GITLAB_URL=https://gitlab.com  # Or self-hosted URL
+
+# Forgejo/Gitea OAuth (for Forgejo/Codeberg integration)
+CINCH_FORGEJO_CLIENT_ID=xxx
+CINCH_FORGEJO_CLIENT_SECRET=xxx
+CINCH_FORGEJO_URL=https://codeberg.org  # Or self-hosted URL
 ```
 
 ## Cinch's Own CI (.cinch.yaml)

@@ -197,7 +197,7 @@ CINCH_COMMIT=abc1234567890  # Commit SHA
 
 # Job context
 CINCH_JOB_ID=j_abc123
-CINCH_REPO=owner/repo
+CINCH_REPO=https://github.com/owner/repo.git  # Clone URL, not owner/repo
 CINCH_FORGE=github          # or gitlab, forgejo, gitea
 
 # Forge token (for API access)
