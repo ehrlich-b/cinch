@@ -10,23 +10,10 @@ interface Props {
   onNavigate: (page: Page) => void
 }
 
-export function LandingPage({ auth, setAuth, onNavigate }: Props) {
-  const [givingPro, setGivingPro] = useState(false)
+export function LandingPage({ auth, onNavigate }: Props) {
   const [showForgeSelector, setShowForgeSelector] = useState(false)
   const [copied, setCopied] = useState(false)
-
-  const handleGivePro = async () => {
-    setGivingPro(true)
-    try {
-      const res = await fetch('/api/give-me-pro', { method: 'POST' })
-      if (res.ok) {
-        setAuth({ ...auth, isPro: true })
-      }
-    } catch (e) {
-      console.error('Failed to give pro:', e)
-    }
-    setGivingPro(false)
-  }
+  const [yearly, setYearly] = useState(false)
 
   const handleCopy = () => {
     navigator.clipboard.writeText('curl -sSL https://cinch.sh/install.sh | sh')
@@ -75,34 +62,6 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
         </section>
       </div>
 
-      <section className="how-it-works-section" id="how-it-works">
-        <div className="container">
-          <h2>How It Works</h2>
-          <div className="steps-row">
-            <div className="step-card">
-              <div className="step-icon">1</div>
-              <h3>Install</h3>
-              <code>curl -sSL https://cinch.sh/install.sh | sh</code>
-              <p>One command. No dependencies.</p>
-            </div>
-            <div className="step-arrow">→</div>
-            <div className="step-card">
-              <div className="step-icon">2</div>
-              <h3>Login</h3>
-              <code>cinch login</code>
-              <p>Opens browser, saves credentials.</p>
-            </div>
-            <div className="step-arrow">→</div>
-            <div className="step-card">
-              <div className="step-icon">3</div>
-              <h3>Run</h3>
-              <code>cinch worker</code>
-              <p>Builds run on your machine.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <section className="why-section" id="why">
         <div className="container">
           <h2>Why Cinch?</h2>
@@ -132,7 +91,7 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
           <div className="config-example">
             <div className="config-file">
               <div className="config-filename">.cinch.yaml</div>
-              <pre className="config-content">build: make build</pre>
+              <pre className="config-content">build: make build{'\n'}release: make release</pre>
             </div>
             <p className="config-caption">That's it. The same <code>make build</code> you run locally.</p>
           </div>
@@ -142,18 +101,52 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
       <section className="social-proof-section">
         <div className="container">
           <p className="social-proof-text">Cinch builds itself with Cinch</p>
-          <img
-            src="https://cinch.sh/badge/github/ehrlich-b/cinch"
-            alt="Cinch build status"
-            className="social-proof-badge"
-          />
+          <div className="social-proof-badges">
+            <img src="https://cinch.sh/badge/github/ehrlich-b/cinch" alt="GitHub build" />
+            <img src="https://cinch.sh/badge/gitlab/ehrlich-b/cinch" alt="GitLab build" />
+            <img src="https://cinch.sh/badge/forgejo/ehrlich-b/cinch" alt="Codeberg build" />
+          </div>
+        </div>
+      </section>
+
+      <section className="how-it-works-section" id="how-it-works">
+        <div className="container">
+          <h2>How It Works</h2>
+          <div className="steps-row">
+            <div className="step-card">
+              <div className="step-icon">1</div>
+              <h3>Install</h3>
+              <code>curl -sSL https://cinch.sh/install.sh | sh</code>
+              <p>One command. No dependencies.</p>
+            </div>
+            <div className="step-arrow">→</div>
+            <div className="step-card">
+              <div className="step-icon">2</div>
+              <h3>Login</h3>
+              <code>cinch login</code>
+              <p>Opens browser, saves credentials.</p>
+            </div>
+            <div className="step-arrow">→</div>
+            <div className="step-card">
+              <div className="step-icon">3</div>
+              <h3>Run</h3>
+              <code>cinch worker</code>
+              <p>Builds run on your machine.</p>
+            </div>
+          </div>
         </div>
       </section>
 
       <section className="pricing-section" id="pricing">
         <div className="container">
           <h2>Pricing</h2>
-          <p className="pricing-subtitle">Free during beta. MIT licensed.</p>
+          <div className="pricing-toggle">
+            <span className={!yearly ? 'active' : ''}>Monthly</span>
+            <button className="toggle-switch" onClick={() => setYearly(!yearly)}>
+              <span className={`toggle-knob ${yearly ? 'yearly' : ''}`} />
+            </button>
+            <span className={yearly ? 'active' : ''}>Yearly <span className="save-badge">Save 20%</span></span>
+          </div>
           <div className="pricing-grid-landing">
             <div className="plan-card">
               <div className="plan-name">Free</div>
@@ -165,11 +158,16 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
                 <li>100 MB log storage</li>
                 <li>7-day retention</li>
               </ul>
+              <div className="plan-cta">
+                <button className="btn-pro" onClick={() => setShowForgeSelector(true)}>
+                  Get Started
+                </button>
+              </div>
             </div>
             <div className="plan-card featured">
               <div className="plan-name">Pro</div>
-              <div className="plan-price"><s className="old-price">$5</s> $0<span className="period">/seat/mo</span></div>
-              <div className="plan-note">Free during beta</div>
+              <div className="plan-price">${yearly ? '48' : '5'}<span className="period">/seat/{yearly ? 'yr' : 'mo'}</span></div>
+              <div className="plan-note">Private repos + more</div>
               <ul className="plan-features-list">
                 <li>Private repositories</li>
                 <li>1000 workers</li>
@@ -177,17 +175,9 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
                 <li>90-day retention</li>
               </ul>
               <div className="plan-cta">
-                {auth.isPro ? (
-                  <div className="pro-status">You have Pro</div>
-                ) : auth.authenticated ? (
-                  <button className="btn-pro" onClick={handleGivePro} disabled={givingPro}>
-                    {givingPro ? 'Activating...' : 'Get Pro Free'}
-                  </button>
-                ) : (
-                  <button className="btn-pro" onClick={() => setShowForgeSelector(true)}>
-                    Get Started
-                  </button>
-                )}
+                <button className="btn-pro" onClick={() => setShowForgeSelector(true)}>
+                  Get Started
+                </button>
               </div>
             </div>
             <div className="plan-card">
