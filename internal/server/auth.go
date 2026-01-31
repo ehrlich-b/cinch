@@ -51,6 +51,13 @@ type AuthConfig struct {
 	WsBaseURL          string // e.g., "wss://ws.cinch.sh" - defaults to BaseURL if not set
 }
 
+// deviceVerifyAttempt tracks rate limiting for device code verification
+type deviceVerifyAttempt struct {
+	Count     int
+	ResetAt   time.Time
+	BlockedAt time.Time // If blocked, when the block expires
+}
+
 // AuthHandler handles authentication routes.
 type AuthHandler struct {
 	config  AuthConfig
@@ -60,6 +67,10 @@ type AuthHandler struct {
 	// Device auth state (in-memory, keyed by device_code)
 	deviceCodes   map[string]*deviceCode
 	deviceCodesMu sync.RWMutex
+
+	// Rate limiting for device code verification (keyed by IP)
+	deviceVerifyAttempts   map[string]*deviceVerifyAttempt
+	deviceVerifyAttemptsMu sync.Mutex
 }
 
 // AuthStorage interface for auth (subset of full storage.Storage)
@@ -75,10 +86,11 @@ func NewAuthHandler(cfg AuthConfig, store AuthStorage, log *slog.Logger) *AuthHa
 		log = slog.Default()
 	}
 	return &AuthHandler{
-		config:      cfg,
-		storage:     store,
-		log:         log,
-		deviceCodes: make(map[string]*deviceCode),
+		config:               cfg,
+		storage:              store,
+		log:                  log,
+		deviceCodes:          make(map[string]*deviceCode),
+		deviceVerifyAttempts: make(map[string]*deviceVerifyAttempt),
 	}
 }
 
@@ -975,6 +987,14 @@ func (h *AuthHandler) handleDeviceVerify(w http.ResponseWriter, r *http.Request)
 	userCode := r.URL.Query().Get("code")
 
 	if r.Method == http.MethodPost {
+		// Rate limit verification attempts by IP
+		ip := ExtractClientIP(r)
+		if blocked, retryAfter := h.checkDeviceVerifyRateLimit(ip); blocked {
+			h.log.Warn("device verify rate limited", "ip", ip, "retry_after", retryAfter)
+			h.renderDeviceVerifyPage(w, userCode, fmt.Sprintf("Too many attempts. Try again in %d seconds.", retryAfter))
+			return
+		}
+
 		// Handle form submission
 		if err := r.ParseForm(); err == nil {
 			userCode = r.FormValue("code")
@@ -990,6 +1010,9 @@ func (h *AuthHandler) handleDeviceVerify(w http.ResponseWriter, r *http.Request)
 			}
 		}
 		h.deviceCodesMu.Unlock()
+
+		// Record the attempt (success or failure)
+		h.recordDeviceVerifyAttempt(ip, foundDeviceCode != "")
 
 		if foundDeviceCode == "" {
 			h.renderDeviceVerifyPage(w, userCode, "Invalid or expired code")
@@ -1020,6 +1043,84 @@ func (h *AuthHandler) handleDeviceVerify(w http.ResponseWriter, r *http.Request)
 
 	// GET - show the verification page
 	h.renderDeviceVerifyPage(w, userCode, "")
+}
+
+const (
+	// Device verify rate limiting: 10 attempts per minute, block for 5 minutes after exceeding
+	deviceVerifyMaxAttempts = 10
+	deviceVerifyWindow      = 1 * time.Minute
+	deviceVerifyBlockTime   = 5 * time.Minute
+)
+
+// checkDeviceVerifyRateLimit checks if an IP is rate limited for device verification.
+// Returns (blocked, retryAfterSeconds).
+func (h *AuthHandler) checkDeviceVerifyRateLimit(ip string) (bool, int) {
+	h.deviceVerifyAttemptsMu.Lock()
+	defer h.deviceVerifyAttemptsMu.Unlock()
+
+	attempt, exists := h.deviceVerifyAttempts[ip]
+	if !exists {
+		return false, 0
+	}
+
+	now := time.Now()
+
+	// Check if currently blocked
+	if !attempt.BlockedAt.IsZero() && now.Before(attempt.BlockedAt) {
+		return true, int(attempt.BlockedAt.Sub(now).Seconds()) + 1
+	}
+
+	// Clear block if expired
+	if !attempt.BlockedAt.IsZero() && now.After(attempt.BlockedAt) {
+		attempt.BlockedAt = time.Time{}
+		attempt.Count = 0
+		attempt.ResetAt = now.Add(deviceVerifyWindow)
+	}
+
+	// Reset count if window expired
+	if now.After(attempt.ResetAt) {
+		attempt.Count = 0
+		attempt.ResetAt = now.Add(deviceVerifyWindow)
+	}
+
+	return false, 0
+}
+
+// recordDeviceVerifyAttempt records a verification attempt for rate limiting.
+func (h *AuthHandler) recordDeviceVerifyAttempt(ip string, success bool) {
+	h.deviceVerifyAttemptsMu.Lock()
+	defer h.deviceVerifyAttemptsMu.Unlock()
+
+	now := time.Now()
+
+	attempt, exists := h.deviceVerifyAttempts[ip]
+	if !exists {
+		attempt = &deviceVerifyAttempt{
+			ResetAt: now.Add(deviceVerifyWindow),
+		}
+		h.deviceVerifyAttempts[ip] = attempt
+	}
+
+	// Reset if window expired
+	if now.After(attempt.ResetAt) {
+		attempt.Count = 0
+		attempt.ResetAt = now.Add(deviceVerifyWindow)
+	}
+
+	// Only count failed attempts toward the limit
+	if !success {
+		attempt.Count++
+		if attempt.Count >= deviceVerifyMaxAttempts {
+			attempt.BlockedAt = now.Add(deviceVerifyBlockTime)
+			h.log.Warn("device verify rate limit exceeded, blocking IP",
+				"ip", ip,
+				"attempts", attempt.Count,
+				"blocked_until", attempt.BlockedAt)
+		}
+	} else {
+		// Successful verification resets the counter
+		attempt.Count = 0
+	}
 }
 
 func (h *AuthHandler) renderDeviceVerifyPage(w http.ResponseWriter, userCode, message string) {

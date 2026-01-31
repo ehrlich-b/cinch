@@ -105,7 +105,8 @@ func (h *WorkerStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 func (h *WorkerStreamHandler) sendInitialState(conn *websocket.Conn, username string) error {
 	workers := h.hub.List()
 
-	for _, w := range workers {
+	for i := range workers {
+		w := &workers[i]
 		// Visibility filtering: personal workers only visible to owner
 		if !h.canUserSeeWorker(username, w) {
 			continue

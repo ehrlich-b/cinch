@@ -612,6 +612,14 @@ func (h *WSHandler) handleJobComplete(worker *WorkerConn, payload []byte) {
 		return
 	}
 
+	// Verify the job is actually assigned to this worker
+	if !h.hub.IsJobAssignedToWorker(worker.ID, complete.JobID) {
+		h.log.Warn("worker tried to complete unassigned job",
+			"worker_id", worker.ID,
+			"job_id", complete.JobID)
+		return
+	}
+
 	ctx := context.Background()
 
 	// Determine status based on exit code
@@ -692,6 +700,14 @@ func (h *WSHandler) handleJobError(worker *WorkerConn, payload []byte) {
 	jobErr, err := protocol.DecodePayload[protocol.JobError](payload)
 	if err != nil {
 		h.log.Warn("failed to decode JOB_ERROR", "worker_id", worker.ID, "error", err)
+		return
+	}
+
+	// Verify the job is actually assigned to this worker
+	if !h.hub.IsJobAssignedToWorker(worker.ID, jobErr.JobID) {
+		h.log.Warn("worker tried to report error for unassigned job",
+			"worker_id", worker.ID,
+			"job_id", jobErr.JobID)
 		return
 	}
 

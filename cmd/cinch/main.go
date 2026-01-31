@@ -369,6 +369,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Install script for curl | sh
 	mux.HandleFunc("/install.sh", server.InstallScriptHandler)
 
+	// AI agent skill guide for LLMs helping users
+	mux.HandleFunc("/SKILL.md", server.SkillHandler)
+
 	// Badge endpoints - public, CDN-friendly
 	mux.Handle("/badge/", badgeHandler)
 	mux.Handle("/api/badge/", badgeHandler)
