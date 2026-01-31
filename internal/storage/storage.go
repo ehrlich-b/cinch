@@ -73,6 +73,18 @@ type Storage interface {
 	UpdateJobLogSize(ctx context.Context, jobID string, sizeBytes int64) error
 	UpdateUserStorageUsed(ctx context.Context, userID string, deltaBytes int64) error
 
+	// Billing
+	UpdateUserTier(ctx context.Context, userID string, tier UserTier) error
+
+	// Org billing (Team Pro)
+	CreateOrgBilling(ctx context.Context, billing *OrgBilling) error
+	GetOrgBilling(ctx context.Context, forgeType ForgeType, forgeOrg string) (*OrgBilling, error)
+	UpdateOrgBillingSeatLimit(ctx context.Context, id string, seatLimit int) error
+	UpdateOrgBillingSeatsUsed(ctx context.Context, id string, seatsUsed int) error
+	IsOrgSeat(ctx context.Context, orgBillingID, userID string) (bool, error)
+	AddOrgSeat(ctx context.Context, orgBillingID, userID, forgeUsername string) error
+	ResetOrgSeats(ctx context.Context, orgBillingID string) error // Called at billing period start
+
 	// Lifecycle
 	Close() error
 }
@@ -214,6 +226,12 @@ func (u *User) StorageQuota() int64 {
 	return StorageQuotaFree
 }
 
+// HasPro returns true if user has Pro status (personal subscription or org seat).
+// For MVP, only checks personal tier. Org seat check will be added with team billing.
+func (u *User) HasPro() bool {
+	return u.Tier == UserTierPro
+}
+
 // IsOverQuota returns true if the user has exceeded their storage quota.
 func (u *User) IsOverQuota() bool {
 	return u.StorageUsedBytes >= u.StorageQuota()
@@ -254,4 +272,41 @@ type LogEntry struct {
 	Stream    string // "stdout" or "stderr"
 	Data      string
 	CreatedAt time.Time
+}
+
+// OrgBilling represents team/organization billing for Team Pro.
+// Storage quota = SeatLimit * 10GB (see StorageQuotaPro).
+type OrgBilling struct {
+	ID                       string
+	ForgeType                ForgeType // "github", "gitlab", "forgejo"
+	ForgeOrg                 string    // Org name on the forge (e.g., "acme")
+	OwnerUserID              string    // User who manages billing
+	StripeCustomerID         string    // Stripe customer ID (empty = stub)
+	StripeSubscriptionID     string    // Stripe subscription ID
+	StripeSubscriptionItemID string    // For quantity updates
+	SeatLimit                int       // High water mark seats
+	SeatsUsed                int       // Seats consumed this billing period
+	StorageUsedBytes         int64     // Total storage used by org repos
+	Status                   string    // "active", "past_due", "canceled"
+	PeriodStart              time.Time // Current billing period start
+	CreatedAt                time.Time
+}
+
+// StorageQuota returns the storage quota in bytes for this org.
+// Quota = seats × 10GB
+func (o *OrgBilling) StorageQuota() int64 {
+	return int64(o.SeatLimit) * StorageQuotaPro
+}
+
+// IsOverQuota returns true if the org has exceeded their storage quota.
+func (o *OrgBilling) IsOverQuota() bool {
+	return o.StorageUsedBytes >= o.StorageQuota()
+}
+
+// OrgSeat represents a user who has consumed a seat in the current billing period.
+type OrgSeat struct {
+	OrgBillingID  string
+	UserID        string
+	ForgeUsername string    // For admin display
+	ConsumedAt    time.Time // When seat was consumed
 }

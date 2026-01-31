@@ -25,6 +25,9 @@ export interface UserInfo {
   email?: string
   connected_forges: ConnectedForge[]
   created_at: string
+  tier: string // "free" or "pro"
+  storage_used_bytes: number
+  storage_quota_bytes: number
 }
 
 export interface GitLabProject {

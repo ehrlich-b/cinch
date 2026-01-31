@@ -236,6 +236,26 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 		h.log.Info("auto-created repo", "repo", event.Repository.FullName)
 	}
 
+	// Sync private flag from webhook event
+	if repo.Private != event.Repository.Private {
+		if err := h.storage.UpdateRepoPrivate(ctx, repo.ID, event.Repository.Private); err != nil {
+			h.log.Warn("failed to update repo private flag", "error", err)
+		} else {
+			h.log.Info("repo private flag updated", "repo", event.Repository.FullName, "private", event.Repository.Private)
+			repo.Private = event.Repository.Private
+		}
+	}
+
+	// Check if private repo can run builds (requires Pro)
+	if repo.Private {
+		billing, err := h.storage.GetOrgBilling(ctx, repo.ForgeType, repo.Owner)
+		if err != nil || billing == nil || billing.Status != "active" {
+			h.log.Info("private repo blocked", "repo", event.Repository.FullName)
+			http.Error(w, "private repos require Pro. Get Pro at cinch.sh/account", http.StatusPaymentRequired)
+			return
+		}
+	}
+
 	// Create job
 	installationID := event.Installation.ID
 	job := &storage.Job{
@@ -387,6 +407,26 @@ func (h *GitHubAppHandler) handlePullRequest(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		h.log.Info("auto-created repo", "repo", event.Repository.FullName)
+	}
+
+	// Sync private flag from webhook event
+	if repo.Private != event.Repository.Private {
+		if err := h.storage.UpdateRepoPrivate(ctx, repo.ID, event.Repository.Private); err != nil {
+			h.log.Warn("failed to update repo private flag", "error", err)
+		} else {
+			h.log.Info("repo private flag updated", "repo", event.Repository.FullName, "private", event.Repository.Private)
+			repo.Private = event.Repository.Private
+		}
+	}
+
+	// Check if private repo can run builds (requires Pro)
+	if repo.Private {
+		billing, err := h.storage.GetOrgBilling(ctx, repo.ForgeType, repo.Owner)
+		if err != nil || billing == nil || billing.Status != "active" {
+			h.log.Info("private repo blocked", "repo", event.Repository.FullName)
+			http.Error(w, "private repos require Pro. Get Pro at cinch.sh/account", http.StatusPaymentRequired)
+			return
+		}
 	}
 
 	// Detect fork: compare head repo to base repo

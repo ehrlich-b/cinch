@@ -185,6 +185,32 @@ func (s *SQLiteStorage) migrate() error {
 	// Storage tracking: add log size to jobs
 	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN log_size_bytes INTEGER NOT NULL DEFAULT 0")
 
+	// Org billing tables for Team Pro
+	_, _ = s.db.Exec(`CREATE TABLE IF NOT EXISTS org_billing (
+		id TEXT PRIMARY KEY,
+		forge_type TEXT NOT NULL,
+		forge_org TEXT NOT NULL,
+		owner_user_id TEXT NOT NULL,
+		stripe_customer_id TEXT NOT NULL DEFAULT '',
+		stripe_subscription_id TEXT NOT NULL DEFAULT '',
+		stripe_subscription_item_id TEXT NOT NULL DEFAULT '',
+		seat_limit INTEGER NOT NULL DEFAULT 5,
+		seats_used INTEGER NOT NULL DEFAULT 0,
+		storage_used_bytes INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL DEFAULT 'active',
+		period_start DATETIME,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(forge_type, forge_org)
+	)`)
+	_, _ = s.db.Exec(`CREATE TABLE IF NOT EXISTS org_seats (
+		org_billing_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		forge_username TEXT NOT NULL DEFAULT '',
+		consumed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (org_billing_id, user_id),
+		FOREIGN KEY (org_billing_id) REFERENCES org_billing(id)
+	)`)
+
 	// Drop UNIQUE constraint on users.name (email is the identity, not username)
 	// SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the table
 	if s.hasUniqueConstraintOnUsersName() {
@@ -1217,6 +1243,120 @@ func (s *SQLiteStorage) UpdateUserStorageUsed(ctx context.Context, userID string
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE users SET storage_used_bytes = storage_used_bytes + ? WHERE id = ?`,
 		deltaBytes, userID)
+	return err
+}
+
+// --- Billing ---
+
+// UpdateUserTier updates a user's subscription tier.
+func (s *SQLiteStorage) UpdateUserTier(ctx context.Context, userID string, tier UserTier) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET tier = ? WHERE id = ?`,
+		string(tier), userID)
+	return err
+}
+
+// CreateOrgBilling creates a new org billing record.
+func (s *SQLiteStorage) CreateOrgBilling(ctx context.Context, billing *OrgBilling) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO org_billing (id, forge_type, forge_org, owner_user_id, stripe_customer_id,
+		 stripe_subscription_id, stripe_subscription_item_id, seat_limit, seats_used,
+		 storage_used_bytes, status, period_start, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		billing.ID, string(billing.ForgeType), billing.ForgeOrg, billing.OwnerUserID,
+		billing.StripeCustomerID, billing.StripeSubscriptionID, billing.StripeSubscriptionItemID,
+		billing.SeatLimit, billing.SeatsUsed, billing.StorageUsedBytes, billing.Status,
+		billing.PeriodStart, billing.CreatedAt)
+	return err
+}
+
+// GetOrgBilling retrieves org billing by forge type and org name.
+func (s *SQLiteStorage) GetOrgBilling(ctx context.Context, forgeType ForgeType, forgeOrg string) (*OrgBilling, error) {
+	billing := &OrgBilling{}
+	var periodStart sql.NullTime
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, forge_type, forge_org, owner_user_id, stripe_customer_id,
+		        stripe_subscription_id, stripe_subscription_item_id, seat_limit, seats_used,
+		        storage_used_bytes, status, period_start, created_at
+		 FROM org_billing WHERE forge_type = ? AND forge_org = ?`,
+		string(forgeType), forgeOrg).Scan(
+		&billing.ID, &billing.ForgeType, &billing.ForgeOrg, &billing.OwnerUserID,
+		&billing.StripeCustomerID, &billing.StripeSubscriptionID, &billing.StripeSubscriptionItemID,
+		&billing.SeatLimit, &billing.SeatsUsed, &billing.StorageUsedBytes, &billing.Status,
+		&periodStart, &billing.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if periodStart.Valid {
+		billing.PeriodStart = periodStart.Time
+	}
+	return billing, nil
+}
+
+// UpdateOrgBillingSeatLimit updates the seat limit for an org.
+func (s *SQLiteStorage) UpdateOrgBillingSeatLimit(ctx context.Context, id string, seatLimit int) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE org_billing SET seat_limit = ? WHERE id = ?`,
+		seatLimit, id)
+	return err
+}
+
+// UpdateOrgBillingSeatsUsed updates the seats used count for an org.
+func (s *SQLiteStorage) UpdateOrgBillingSeatsUsed(ctx context.Context, id string, seatsUsed int) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE org_billing SET seats_used = ? WHERE id = ?`,
+		seatsUsed, id)
+	return err
+}
+
+// IsOrgSeat checks if a user has consumed a seat in the current billing period.
+func (s *SQLiteStorage) IsOrgSeat(ctx context.Context, orgBillingID, userID string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM org_seats WHERE org_billing_id = ? AND user_id = ?`,
+		orgBillingID, userID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// AddOrgSeat records that a user has consumed a seat this billing period.
+func (s *SQLiteStorage) AddOrgSeat(ctx context.Context, orgBillingID, userID, forgeUsername string) error {
+	// Use INSERT OR IGNORE to handle race conditions
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO org_seats (org_billing_id, user_id, forge_username, consumed_at)
+		 VALUES (?, ?, ?, ?)`,
+		orgBillingID, userID, forgeUsername, time.Now())
+	if err != nil {
+		return err
+	}
+
+	// Increment seats_used in org_billing (atomic with check)
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE org_billing SET seats_used = (SELECT COUNT(*) FROM org_seats WHERE org_billing_id = ?)
+		 WHERE id = ?`,
+		orgBillingID, orgBillingID)
+	return err
+}
+
+// ResetOrgSeats clears all seat consumption at the start of a new billing period.
+func (s *SQLiteStorage) ResetOrgSeats(ctx context.Context, orgBillingID string) error {
+	// Delete all seat records for this org
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM org_seats WHERE org_billing_id = ?`,
+		orgBillingID)
+	if err != nil {
+		return err
+	}
+
+	// Reset seats_used counter and update period_start
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE org_billing SET seats_used = 0, period_start = ? WHERE id = ?`,
+		time.Now(), orgBillingID)
 	return err
 }
 

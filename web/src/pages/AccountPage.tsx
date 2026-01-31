@@ -1,20 +1,22 @@
 import { useState, useEffect } from 'react'
 import { ErrorState } from '../components/ErrorState'
 import { ForgeIcon } from '../components/ForgeIcon'
-import { relativeTime } from '../utils/format'
+import { relativeTime, formatBytes } from '../utils/format'
 import type { UserInfo } from '../types'
 
 interface Props {
   onLogout: () => void
+  onTierChange?: () => void
 }
 
-export function AccountPage({ onLogout }: Props) {
+export function AccountPage({ onLogout, onTierChange }: Props) {
   const [user, setUser] = useState<UserInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [disconnecting, setDisconnecting] = useState<string | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [activatingPro, setActivatingPro] = useState(false)
 
   const fetchUser = () => {
     setLoading(true)
@@ -84,6 +86,22 @@ export function AccountPage({ onLogout }: Props) {
     }
   }
 
+  const handleActivatePro = async () => {
+    setActivatingPro(true)
+    try {
+      const res = await fetch('/api/give-me-pro', { method: 'POST' })
+      if (!res.ok) {
+        throw new Error('Failed to activate Pro')
+      }
+      fetchUser()
+      onTierChange?.()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to activate Pro')
+    } finally {
+      setActivatingPro(false)
+    }
+  }
+
   if (loading) return <div className="loading">Loading...</div>
   if (error) return <ErrorState message={error} onRetry={fetchUser} />
   if (!user) return null
@@ -116,6 +134,42 @@ export function AccountPage({ onLogout }: Props) {
             <span className="profile-value">{new Date(user.created_at).toLocaleDateString()}</span>
           </div>
         </div>
+      </section>
+
+      <section className="account-section billing-section">
+        <h3>Subscription</h3>
+        <div className="profile-info">
+          <div className="profile-row">
+            <span className="profile-label">Plan</span>
+            <span className="profile-value">
+              {user.tier === 'pro' ? (
+                <span className="tier-badge tier-pro">Pro</span>
+              ) : (
+                <span className="tier-badge tier-free">Free</span>
+              )}
+            </span>
+          </div>
+          <div className="profile-row">
+            <span className="profile-label">Storage</span>
+            <span className="profile-value">
+              {formatBytes(user.storage_used_bytes)} / {formatBytes(user.storage_quota_bytes)}
+            </span>
+          </div>
+        </div>
+        {user.tier !== 'pro' && (
+          <div className="upgrade-cta">
+            <button
+              className="btn-primary btn-give-me-pro"
+              onClick={handleActivatePro}
+              disabled={activatingPro}
+            >
+              {activatingPro ? 'Activating...' : 'Give Me Pro (Free During Beta)'}
+            </button>
+            <p className="upgrade-desc">
+              Pro unlocks private repos, 10GB storage, and 90-day log retention.
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="account-section">
