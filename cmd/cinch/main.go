@@ -69,6 +69,7 @@ func main() {
 		logoutCmd(),
 		whoamiCmd(),
 		repoCmd(),
+		secretsCmd(),
 		connectCmd(),
 		gitlabCmd(), // deprecated, kept for backwards compatibility
 	)
@@ -2255,6 +2256,267 @@ After installation, optionally sets up the daemon as a system service.`,
 	cmd.Flags().IntP("concurrency", "n", 1, "Daemon concurrency (number of parallel jobs)")
 
 	return cmd
+}
+
+func secretsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "secrets",
+		Short: "Manage repository secrets",
+	}
+	cmd.AddCommand(secretsListCmd())
+	cmd.AddCommand(secretsSetCmd())
+	cmd.AddCommand(secretsDeleteCmd())
+	return cmd
+}
+
+func secretsListCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List secret names for current repo",
+		Long: `List the names of secrets configured for the current repository.
+
+Note: Only secret names are shown, not values. Values are never exposed via the API.
+
+Examples:
+  cinch secrets list`,
+		RunE: runSecretsList,
+	}
+	cmd.Flags().String("server", "https://cinch.sh", "Server URL")
+	return cmd
+}
+
+func runSecretsList(cmd *cobra.Command, args []string) error {
+	serverURL, _ := cmd.Flags().GetString("server")
+
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	sc := cfg.GetServerConfig(serverURL)
+	if sc == nil || sc.Token == "" {
+		return fmt.Errorf("not logged in (run 'cinch login' first)")
+	}
+
+	// Get repo info from git
+	repos, err := cli.DetectRepos()
+	if err != nil {
+		return fmt.Errorf("detect repo: %w", err)
+	}
+	if len(repos) == 0 {
+		return fmt.Errorf("no git remotes found")
+	}
+
+	// Use first repo (usually origin)
+	repo := repos[0]
+	apiURL := fmt.Sprintf("%s/api/repos/%s/%s/%s/secrets", serverURL, repo.Forge, repo.Owner, repo.Name)
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+sc.Token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Keys []string `json:"keys"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	if len(result.Keys) == 0 {
+		fmt.Printf("No secrets configured for %s/%s\n", repo.Owner, repo.Name)
+		return nil
+	}
+
+	fmt.Printf("Secrets for %s/%s:\n", repo.Owner, repo.Name)
+	for _, key := range result.Keys {
+		fmt.Printf("  %s\n", key)
+	}
+	return nil
+}
+
+func secretsSetCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "set <KEY=VALUE> [KEY=VALUE...]",
+		Short: "Set secrets for current repo",
+		Long: `Set one or more secrets for the current repository.
+
+Secrets are injected as environment variables during builds.
+
+Examples:
+  cinch secrets set NPM_TOKEN=npm_xxx
+  cinch secrets set AWS_ACCESS_KEY_ID=xxx AWS_SECRET_ACCESS_KEY=yyy
+  cinch secrets set "DEPLOY_KEY=-----BEGIN RSA PRIVATE KEY-----..."`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: runSecretsSet,
+	}
+	cmd.Flags().String("server", "https://cinch.sh", "Server URL")
+	return cmd
+}
+
+func runSecretsSet(cmd *cobra.Command, args []string) error {
+	serverURL, _ := cmd.Flags().GetString("server")
+
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	sc := cfg.GetServerConfig(serverURL)
+	if sc == nil || sc.Token == "" {
+		return fmt.Errorf("not logged in (run 'cinch login' first)")
+	}
+
+	// Parse KEY=VALUE pairs
+	secrets := make(map[string]string)
+	for _, arg := range args {
+		idx := strings.Index(arg, "=")
+		if idx == -1 {
+			return fmt.Errorf("invalid format %q: expected KEY=VALUE", arg)
+		}
+		key := arg[:idx]
+		value := arg[idx+1:]
+		if key == "" {
+			return fmt.Errorf("invalid format %q: key cannot be empty", arg)
+		}
+		secrets[key] = value
+	}
+
+	// Get repo info from git
+	repos, err := cli.DetectRepos()
+	if err != nil {
+		return fmt.Errorf("detect repo: %w", err)
+	}
+	if len(repos) == 0 {
+		return fmt.Errorf("no git remotes found")
+	}
+
+	// Use first repo (usually origin)
+	repo := repos[0]
+	apiURL := fmt.Sprintf("%s/api/repos/%s/%s/%s/secrets", serverURL, repo.Forge, repo.Owner, repo.Name)
+
+	body, err := json.Marshal(map[string]any{"secrets": secrets})
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequest("PUT", apiURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+sc.Token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Keys []string `json:"keys"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	fmt.Printf("Updated %d secret(s) for %s/%s:\n", len(result.Keys), repo.Owner, repo.Name)
+	for _, key := range result.Keys {
+		fmt.Printf("  %s\n", key)
+	}
+	return nil
+}
+
+func secretsDeleteCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "delete <KEY> [KEY...]",
+		Short: "Delete secrets from current repo",
+		Long: `Delete one or more secrets from the current repository.
+
+Examples:
+  cinch secrets delete NPM_TOKEN
+  cinch secrets delete AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: runSecretsDelete,
+	}
+	cmd.Flags().String("server", "https://cinch.sh", "Server URL")
+	return cmd
+}
+
+func runSecretsDelete(cmd *cobra.Command, args []string) error {
+	serverURL, _ := cmd.Flags().GetString("server")
+
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	sc := cfg.GetServerConfig(serverURL)
+	if sc == nil || sc.Token == "" {
+		return fmt.Errorf("not logged in (run 'cinch login' first)")
+	}
+
+	// Get repo info from git
+	repos, err := cli.DetectRepos()
+	if err != nil {
+		return fmt.Errorf("detect repo: %w", err)
+	}
+	if len(repos) == 0 {
+		return fmt.Errorf("no git remotes found")
+	}
+
+	// Use first repo (usually origin)
+	repo := repos[0]
+	apiURL := fmt.Sprintf("%s/api/repos/%s/%s/%s/secrets", serverURL, repo.Forge, repo.Owner, repo.Name)
+
+	// Set keys to empty string to delete
+	secrets := make(map[string]string)
+	for _, key := range args {
+		secrets[key] = ""
+	}
+
+	body, err := json.Marshal(map[string]any{"secrets": secrets})
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequest("PUT", apiURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+sc.Token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	fmt.Printf("Deleted %d secret(s) from %s/%s\n", len(args), repo.Owner, repo.Name)
+	return nil
 }
 
 func connectCmd() *cobra.Command {

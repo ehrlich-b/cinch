@@ -77,11 +77,10 @@ release: make release  # runs on tag pushes
 
 ### "How do I add secrets?"
 
-Via the web UI at cinch.sh, or via API:
+Via the CLI (from inside your repo directory):
 ` + "```bash" + `
-curl -X PUT https://cinch.sh/api/repos/github.com/owner/repo/secrets \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"secrets": {"NPM_TOKEN": "xxx", "DEPLOY_KEY": "yyy"}}'
+cinch secrets set NPM_TOKEN=xxx DEPLOY_KEY=yyy
+cinch secrets list  # verify they're set
 ` + "```" + `
 
 Secrets are injected as environment variables during the build.
@@ -231,6 +230,11 @@ cinch logs JOB_ID              # Stream logs from job
 cinch logs --last              # Logs from most recent job
 cinch retry JOB_ID             # Retry a failed job
 cinch cancel JOB_ID            # Cancel pending/running job
+
+# Secrets
+cinch secrets list             # List secret names for current repo
+cinch secrets set KEY=VALUE    # Set a secret
+cinch secrets delete KEY       # Delete a secret
 
 # Multi-forge
 cinch connect gitlab           # Add GitLab account

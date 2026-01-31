@@ -167,7 +167,22 @@ Each forge sends webhooks to a specific endpoint:
 | GitLab | `https://ci.example.com/webhooks/gitlab` |
 | Forgejo/Gitea | `https://ci.example.com/webhooks/forgejo` |
 
-**Important:** Webhooks must be able to reach your server. If self-hosting behind a firewall, ensure the forge can reach your webhook endpoint (or use a tunnel like ngrok for development).
+**Important:** Webhooks must be able to reach your server. If self-hosting behind a firewall, you have several options:
+
+### Option 1: Public IP / Port Forwarding
+If your server has a public IP or you can configure port forwarding on your router, expose port 443 (or your chosen port) and point your domain's DNS at it.
+
+### Option 2: Tunnel Services
+For development or home setups without a public IP:
+
+- **Cloudflare Tunnel** (free): `cloudflared tunnel --url http://localhost:8080`
+- **ngrok** (free tier available): `ngrok http 8080`
+- **Tailscale Funnel** (free): `tailscale funnel 8080`
+
+These create a public URL that forwards to your local Cinch server.
+
+### Option 3: VPS Reverse Proxy
+Run a small VPS (e.g., $5/month DigitalOcean droplet) as a reverse proxy. Your home server connects outbound to the VPS, and webhooks hit the VPS's public IP.
 
 ## Reverse Proxy
 
