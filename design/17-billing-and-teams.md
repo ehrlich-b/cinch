@@ -1,6 +1,6 @@
 # Design 17: Billing & Team Onboarding
 
-## Status: Draft
+## Status: MVP
 
 ## Problem
 
@@ -9,101 +9,187 @@ A team lead with a credit card wants to onboard their team to Cinch. Today:
 - No way to pay for a "team"
 - No billing entity that spans multiple users
 
-The worker visibility design (16) solves who can see/use workers. This design solves who pays.
+## Core Insights
 
-## Core Insight
+1. **Pro status belongs to the USER, not the repo.** If your employer pays for your seat, you get Pro everywhere—work AND home.
 
-**Pro status belongs to the USER, not the repo or job.**
+2. **High Water Mark (HWM), not metered.** You set your seat limit. If you exceed it, builds block until you add seats. No surprise bills.
 
-The only thing Pro unlocks is: **private repos**. That's it. Workers are BYOW (bring your own worker).
+3. **Quota follows repo owner.** Org repos use org quota. Personal repos use personal quota. Pro status just unlocks the door.
 
-If you have Pro status, you can use private repos - both at work AND at home. Your employer doesn't see your personal repos, they just pay for your seat.
+## Pricing
 
-## Pricing Tiers
+| Tier | Price | Storage | Log Retention |
+|------|-------|---------|---------------|
+| Free | $0 | 100 MB | 7 days |
+| Personal Pro | $5/mo or $48/yr | 10 GB | 90 days |
+| Team Pro | $5/seat/mo or $48/seat/yr | 10 GB × seats | 90 days |
 
-### Free ($0 forever)
+**Yearly = 20% off, requires commitment.** You set seat count, pay upfront. Stripe handles proration if you add seats mid-year.
 
-For open source and self-hosters.
+**Monthly = flexibility.** Change seats anytime. No commitment.
 
-- Public repos only
-- Self-hosted control plane option
-- BYOW (bring your own workers)
-- 7-day log retention
+## How It Works
 
-### Personal Pro ($4/mo yearly, $5/mo monthly)
-
-For indie devs with private projects.
-
-```
-You pay $4-5/month
-  ↓
-Your Cinch account has Pro status
-  ↓
-You can use private repos (yours, or any you have access to)
-```
-
-- Private repos
-- 30-day log retention
-
-### Team Pro ($10/seat yearly, $12/seat monthly)
-
-For organizations. Gives Pro status to all org members.
+### Team Pro Flow
 
 ```
-Org admin sets up Team Pro for github.com/acme
-  ↓
-Cinch checks: who is a member of `acme` org on GitHub?
-  ↓
-All members get Pro status on their Cinch accounts
-  ↓
-Org pays per seat for each member who uses Cinch
+1. Team lead goes to cinch.sh/billing
+2. Selects org: github.com/acme
+3. Sets seat limit: 5
+4. Pays: $25/mo or $240/yr
+5. Done.
+
+When Alice (acme member) pushes to acme/backend:
+├── Is Alice already a seat this period?
+│   └── Yes → build runs
+│   └── No → seats_used < seat_limit?
+│       └── Yes → Alice becomes seat, build runs
+│       └── No → BLOCKED "Seat limit reached. Add seats."
+
+Alice now has Pro status everywhere:
+└── alice-c/personal-project (private) → works!
 ```
 
-**Yearly commitment:**
-- Commit to N seats at $10/seat/mo ($120/seat/year)
-- Pay upfront or monthly, locked rate
-- Overage (more than N seats): $12/seat/mo
+### Storage Quota
 
-**Monthly (no commitment):**
-- Pure metered at $12/seat/mo
-- Can go to $0 if no one uses it
+| Repo | Quota Source |
+|------|--------------|
+| `acme/backend` | Org pool: `seat_limit × 10GB` |
+| `alice-c/crypto` | Alice's personal: `10GB` |
 
-**Features:**
-- Private repos for all org members
-- 90-day log retention
-- Priority support
+Pro status (however acquired) unlocks private repos. Quota is based on **repo owner**.
 
-### Managed Runners (Future)
+### Personal Pro Flow
 
-For teams who don't want BYOW. Separate pricing TBD.
+```
+1. Solo dev goes to cinch.sh/billing
+2. Subscribes: $5/mo or $48/yr
+3. Done.
 
-- Cinch-hosted runners
-- Per runner-hour or per runner/month
-- This is where the real margin is
+All their private repos work. 10GB storage.
+```
 
-### Competitive Comparison
+## Stripe Integration
 
-| Service | Per Seat | Notes |
-|---------|----------|-------|
-| Buildkite | $15/mo | + compute costs |
-| CircleCI | $15/mo | + compute costs |
-| **Cinch Team (yearly)** | $10/mo | BYOW, no compute costs |
-| **Cinch Team (monthly)** | $12/mo | BYOW, no compute costs |
+**No metered billing.** Just quantity-based subscriptions.
 
-**Key insight:** Team Pro is just "Personal Pro for everyone in the org, billed to one card."
+### Products & Prices
 
-## How Pro Status Works
+```
+Product: Cinch Pro
+├── price_personal_monthly  → $5/mo, quantity=1
+├── price_personal_yearly   → $48/yr, quantity=1
+├── price_team_monthly      → $5/seat/mo, quantity=N
+└── price_team_yearly       → $48/seat/yr, quantity=N
+```
+
+### Checkout Session
 
 ```go
-func hasPro(user *User) bool {
-    // Has personal Pro subscription?
-    if hasSubscription(user.ID, "personal_pro") {
+// Team Pro checkout
+session, _ := stripe.CheckoutSessions.Create(&stripe.CheckoutSessionParams{
+    Mode: stripe.String("subscription"),
+    LineItems: []*stripe.CheckoutSessionLineItemParams{{
+        Price:    stripe.String("price_team_monthly"),
+        Quantity: stripe.Int64(seatLimit),  // HWM
+    }},
+    SuccessURL: stripe.String("https://cinch.sh/billing?success=1"),
+    CancelURL:  stripe.String("https://cinch.sh/billing"),
+    Metadata: map[string]string{
+        "forge_type": "github",
+        "forge_org":  "acme",
+        "user_id":    user.ID,
+    },
+})
+```
+
+### Updating Seats
+
+```go
+// User bumps from 5 to 6 seats
+stripe.Subscriptions.Update(subID, &stripe.SubscriptionParams{
+    Items: []*stripe.SubscriptionItemsParams{{
+        ID:       stripe.String(itemID),
+        Quantity: stripe.Int64(6),
+    }},
+    ProrationBehavior: stripe.String("create_prorations"),
+})
+```
+
+Stripe handles proration automatically.
+
+### Webhooks
+
+```go
+switch event.Type {
+case "checkout.session.completed":
+    // Create org_billing or update user.stripe_subscription_id
+
+case "invoice.paid":
+    // Mark subscription active, reset seats_used for new period
+
+case "customer.subscription.updated":
+    // Sync seat_limit from Stripe quantity
+
+case "customer.subscription.deleted":
+    // Mark inactive, users lose Pro status
+}
+```
+
+## Data Model
+
+```sql
+-- Org billing (Team Pro)
+CREATE TABLE org_billing (
+    id TEXT PRIMARY KEY,
+    forge_type TEXT NOT NULL,           -- 'github', 'gitlab', 'forgejo'
+    forge_org TEXT NOT NULL,            -- 'acme'
+    owner_user_id TEXT NOT NULL,        -- who manages billing
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    stripe_subscription_item_id TEXT,   -- for quantity updates
+    seat_limit INT NOT NULL DEFAULT 5,  -- HWM
+    seats_used INT NOT NULL DEFAULT 0,  -- current period
+    storage_used_bytes BIGINT DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',  -- 'active', 'past_due', 'canceled'
+    period_start TIMESTAMP,             -- for seat reset
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(forge_type, forge_org)
+);
+
+-- Track who's consumed a seat this billing period
+CREATE TABLE org_seats (
+    org_billing_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    forge_username TEXT NOT NULL,       -- for admin display
+    consumed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (org_billing_id, user_id),
+    FOREIGN KEY (org_billing_id) REFERENCES org_billing(id)
+);
+
+-- Personal Pro (add to existing users table)
+ALTER TABLE users ADD COLUMN stripe_customer_id TEXT;
+ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT;
+ALTER TABLE users ADD COLUMN storage_used_bytes BIGINT DEFAULT 0;
+-- tier already exists: 'free' or 'pro'
+```
+
+## Core Logic
+
+### Check Pro Status
+
+```go
+func (u *User) HasPro(ctx context.Context, store Storage) bool {
+    // Personal Pro subscription?
+    if u.Tier == UserTierPro {
         return true
     }
 
-    // Member of an org with Team Pro?
-    for _, org := range getUserForgeOrgs(user) {
-        if hasSubscription(org.ID, "team_pro") {
+    // Seat in any active org?
+    orgs, _ := store.ListOrgSeatsForUser(ctx, u.ID)
+    for _, seat := range orgs {
+        if seat.OrgStatus == "active" {
             return true
         }
     }
@@ -112,491 +198,151 @@ func hasPro(user *User) bool {
 }
 ```
 
-When a job is created for a private repo:
+### Job Dispatch Gate
+
 ```go
-func canRunPrivateRepo(user *User) bool {
-    return hasPro(user)
-}
-```
-
-## What a "Seat" Is
-
-A seat is a unique org member who triggers at least one job in a billing period.
-
-- Alice pushes to `acme/backend` → Alice is a seat
-- Alice pushes again → still 1 seat
-- Bob pushes to `acme/frontend` → now 2 seats
-- Alice pushes to `alice/personal-project` → still 2 seats (personal repos don't count toward org)
-
-Counting happens at end of billing period:
-```go
-func countSeats(org *Org, period BillingPeriod) int {
-    members := getOrgMembers(org)  // Query GitHub/GitLab API
-
-    activeCount := 0
-    for _, member := range members {
-        if hasJobsInPeriod(member, period) {
-            activeCount++
-        }
+func canRunJob(ctx context.Context, job *Job, triggeredBy *User, repo *Repo) error {
+    // Public repos always allowed
+    if !repo.Private {
+        return nil
     }
-    return activeCount
+
+    // Private repo - determine quota source
+    billing, _ := store.GetOrgBilling(ctx, repo.ForgeType, repo.Owner)
+
+    if billing != nil {
+        // Org repo - must have Team Pro
+        if billing.Status != "active" {
+            return errors.New("org subscription inactive")
+        }
+
+        // Check/consume seat
+        if !store.IsOrgSeat(ctx, billing.ID, triggeredBy.ID) {
+            if billing.SeatsUsed >= billing.SeatLimit {
+                return fmt.Errorf("seat limit reached (%d/%d). Add seats at cinch.sh/billing",
+                    billing.SeatsUsed, billing.SeatLimit)
+            }
+            store.AddOrgSeat(ctx, billing.ID, triggeredBy.ID, triggeredBy.Name)
+        }
+
+        // Check org storage quota
+        quota := int64(billing.SeatLimit) * 10 * 1024 * 1024 * 1024  // 10GB per seat
+        if billing.StorageUsedBytes >= quota {
+            return errors.New("org storage quota exceeded")
+        }
+
+        return nil
+    }
+
+    // Personal repo - user must have Pro
+    if !triggeredBy.HasPro(ctx, store) {
+        return errors.New("private repos require Pro. Upgrade at cinch.sh/billing")
+    }
+
+    // Check personal storage quota
+    if triggeredBy.StorageUsedBytes >= 10*1024*1024*1024 {
+        return errors.New("personal storage quota exceeded")
+    }
+
+    return nil
 }
 ```
 
-## User Stories
-
-### Solo Developer
-
-```
-1. Visit cinch.sh, login with GitHub
-2. Try to add private repo → "Upgrade to Pro for private repos"
-3. Click upgrade → choose $4/mo yearly or $5/mo monthly
-4. Done. Private repos work.
-```
-
-### Team Lead Onboarding
-
-```
-1. Visit cinch.sh, login with GitHub
-2. Go to Billing → "Set up Team Pro"
-3. Select org: github.com/acme
-4. Add payment method
-5. Done. All acme org members now have Pro.
-```
-
-### Team Member Experience
-
-```
-1. Run `cinch login` → authenticates with GitHub
-2. Run `cinch worker` → worker starts
-3. Push to acme/backend (private) → job runs
-4. Push to personal/side-project (private) → job runs (you have Pro!)
-
-Bob never sees billing UI. Acme pays for his seat.
-```
-
-### Multi-Forge Individual
-
-```
-1. Login, link GitHub + GitLab + Codeberg
-2. Subscribe to Personal Pro ($4/mo yearly or $5/mo)
-3. All your private repos on all forges work
-4. One Cinch account, one bill, all forges
-```
-
-## What Org Admins See vs Don't See
-
-**Org admins CAN see:**
-- Seat count (12 users this month)
-- List of usernames (alice, bob, charlie)
-- Total jobs on org repos
-- Monthly cost
-
-**Org admins CANNOT see:**
-- Your personal repos
-- Your personal job history
-- Your home worker
-- Anything outside org repos
-
-The org just pays for your Pro status. They don't manage you.
-
-## Stripe Integration
-
-### Products & Prices
-
-```
-Product: Cinch Pro
-├── Price: personal_pro_monthly
-│   └── $5/month, fixed
-├── Price: personal_pro_yearly
-│   └── $48/year ($4/mo effective), fixed
-├── Price: team_pro_seat_yearly
-│   └── $120/seat/year ($10/mo), licensed (committed quantity)
-├── Price: team_pro_seat_monthly
-│   └── $12/seat/month, metered (no commitment)
-└── Price: team_pro_seat_overage
-    └── $12/seat/month, metered (for yearly plans exceeding commitment)
-```
-
-### Personal Pro Subscription
+### Storage Tracking
 
 ```go
-// Monthly
-subscription, _ := stripe.Subscriptions.Create(&stripe.SubscriptionParams{
-    Customer: user.StripeCustomerID,
-    Items: []*stripe.SubscriptionItemsParams{{
-        Price: "price_personal_pro_monthly",  // $5/month
-    }},
-})
+func trackJobStorage(ctx context.Context, job *Job, logSizeBytes int64) {
+    repo, _ := store.GetRepo(ctx, job.RepoID)
 
-// Yearly
-subscription, _ := stripe.Subscriptions.Create(&stripe.SubscriptionParams{
-    Customer: user.StripeCustomerID,
-    Items: []*stripe.SubscriptionItemsParams{{
-        Price: "price_personal_pro_yearly",  // $48/year
-    }},
-})
-```
-
-### Team Pro Subscription (Yearly Commitment)
-
-```go
-// Org commits to N seats for the year
-subscription, _ := stripe.Subscriptions.Create(&stripe.SubscriptionParams{
-    Customer: org.StripeCustomerID,
-    Items: []*stripe.SubscriptionItemsParams{
-        {
-            Price:    "price_team_pro_seat_yearly",  // $120/seat/year
-            Quantity: committedSeats,                 // e.g., 10
-        },
-        {
-            Price: "price_team_pro_seat_overage",    // $12/seat/mo for extras
-        },
-    },
-})
-```
-
-### Team Pro Subscription (Monthly, No Commitment)
-
-```go
-// Pure metered, can go to $0
-subscription, _ := stripe.Subscriptions.Create(&stripe.SubscriptionParams{
-    Customer: org.StripeCustomerID,
-    Items: []*stripe.SubscriptionItemsParams{{
-        Price: "price_team_pro_seat_monthly",  // $12/seat/month metered
-    }},
-})
-```
-
-### Reporting Seat Usage
-
-```go
-func reportTeamUsage(org *Org) {
-    period := getCurrentBillingPeriod(org)
-    actualSeats := countSeats(org, period)
-
-    if org.Plan == "team_yearly" {
-        // Only report overage beyond committed seats
-        overage := max(0, actualSeats - org.CommittedSeats)
-        if overage > 0 {
-            stripe.UsageRecords.Create(&stripe.UsageRecordParams{
-                SubscriptionItem: org.OverageSubscriptionItemID,
-                Quantity:         overage,
-                Timestamp:        period.End,
-                Action:           "set",
-            })
-        }
+    billing, _ := store.GetOrgBilling(ctx, repo.ForgeType, repo.Owner)
+    if billing != nil {
+        // Org repo - update org storage
+        store.UpdateOrgStorageUsed(ctx, billing.ID, logSizeBytes)
     } else {
-        // Monthly plan: report all seats
-        stripe.UsageRecords.Create(&stripe.UsageRecordParams{
-            SubscriptionItem: org.StripeSubscriptionItemID,
-            Quantity:         actualSeats,
-            Timestamp:        period.End,
-            Action:           "set",
-        })
+        // Personal repo - update user storage
+        store.UpdateUserStorageUsed(ctx, job.TriggeredByUserID, logSizeBytes)
     }
-}
-```
-
-## Data Model
-
-### Tables
-
-```sql
--- Personal Pro subscriptions
-CREATE TABLE subscriptions (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    plan TEXT NOT NULL,  -- 'personal_pro'
-    stripe_subscription_id TEXT,
-    status TEXT NOT NULL,  -- 'active', 'canceled', 'past_due'
-    current_period_start TIMESTAMP,
-    current_period_end TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Team Pro billing accounts (one per org)
-CREATE TABLE org_billing (
-    id TEXT PRIMARY KEY,
-    forge_type TEXT NOT NULL,  -- 'github', 'gitlab', 'forgejo'
-    forge_org_id TEXT NOT NULL,
-    forge_org_name TEXT NOT NULL,
-    owner_user_id TEXT NOT NULL,  -- Cinch user who manages billing
-    stripe_customer_id TEXT,
-    stripe_subscription_id TEXT,
-    status TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(forge_type, forge_org_id)
-);
-
--- Track seats per billing period
-CREATE TABLE org_billing_seats (
-    org_billing_id TEXT NOT NULL,
-    period_start DATE NOT NULL,
-    user_id TEXT NOT NULL,
-    forge_username TEXT NOT NULL,
-    first_job_at TIMESTAMP,
-    last_job_at TIMESTAMP,
-    job_count INTEGER DEFAULT 0,
-    PRIMARY KEY (org_billing_id, period_start, user_id)
-);
-```
-
-## API
-
-### GET /api/billing
-
-```json
-{
-  "pro": true,
-  "pro_source": "team",  // or "personal" or null
-  "personal_subscription": null,
-  "team_memberships": [
-    {
-      "org": "acme",
-      "forge": "github",
-      "has_billing": true,
-      "you_are_admin": false
-    }
-  ],
-  "managed_orgs": [
-    {
-      "id": "ob_123",
-      "org": "acme",
-      "forge": "github",
-      "plan": "team_yearly",
-      "committed_seats": 10,
-      "seats_this_month": 12,
-      "estimated_charge": "$124.00"
-    }
-  ]
-}
-```
-
-### POST /api/billing/personal
-
-Subscribe to Personal Pro:
-
-```json
-{}
-```
-
-Returns Stripe Checkout session URL.
-
-### POST /api/billing/team
-
-Set up Team Pro for an org:
-
-```json
-{
-  "forge_type": "github",
-  "forge_org": "acme"
-}
-```
-
-Requires: user is admin of org on forge.
-Returns Stripe Checkout session URL.
-
-### GET /api/billing/team/{id}/usage
-
-```json
-{
-  "org": "acme",
-  "period": "2024-01",
-  "plan": "team_yearly",
-  "committed_seats": 10,
-  "committed_charge": "$100.00",
-  "seats": [
-    {"username": "alice", "jobs": 145},
-    {"username": "bob", "jobs": 89},
-    {"username": "charlie", "jobs": 67}
-  ],
-  "total_seats": 12,
-  "total_jobs": 847,
-  "overage_seats": 2,
-  "overage_charge": "$24.00",
-  "total_charge": "$124.00"
 }
 ```
 
 ## Edge Cases
 
-### User Has Both Personal + Team Pro
+### Alice Leaves Acme
 
-Alice pays for Personal Pro AND is in an org with Team Pro.
+1. Alice is removed from `acme` org on GitHub
+2. Next billing period, she's not a seat
+3. She loses Pro status (unless she has Personal Pro)
+4. Her personal `storage_used_bytes` stays (data not deleted)
+5. New private repo builds → BLOCKED
+6. If she subscribes to Personal Pro → she's back
 
-```go
-func hasPro(user) bool {
-    // Check both - either grants Pro
-    return hasPersonalPro(user) || hasTeamPro(user)
-}
-```
-
-Alice's personal subscription is wasted money. Show a warning:
-"You have Personal Pro but you're also covered by Acme's Team Pro. Consider canceling your personal subscription."
-
-### User in Multiple Orgs with Team Pro
+### User in Multiple Orgs
 
 Alice is in `acme` (Team Pro) and `widgets` (Team Pro).
-
-- She has Pro status (either org grants it)
-- She's counted as a seat in BOTH orgs if she triggers jobs in both
+- She has Pro status
+- She consumes a seat in BOTH if she triggers builds in both
 - Both orgs pay for her
+- Her personal repos use her personal 10GB quota
 
-This is fine. She's using both orgs' CI.
+### Seat Reset
 
-### Org Member Who Never Uses Cinch
-
-Bob is in `acme` org but never pushes code or triggers jobs.
-
-- Bob is NOT counted as a seat
-- Acme doesn't pay for Bob
-- If Bob ever uses Cinch, he automatically has Pro (and becomes a seat)
-
-### Personal Repos of Team Members
-
-Alice is in `acme` (Team Pro). She also has `alice/personal-project` (private).
-
-- Alice has Pro status (from Acme)
-- She can use her personal private repo
-- Personal repo jobs don't count toward Acme's seat usage
-- Acme only pays for jobs on `acme/*` repos
-
-Wait, that's tricky. Let me reconsider...
-
-Actually, simpler: **Seats are org members who use Cinch at all.**
-
-- Alice is in `acme` and uses Cinch → she's a seat, Acme pays
-- Doesn't matter if she uses personal repos or org repos
-- Acme is paying for her Pro status, period
-
-This is how GitHub seats work - you pay per user, not per repo usage.
-
-### Org Removes Team Pro
-
-Acme cancels their Team Pro subscription.
-
-- All Acme members lose Pro status (unless they have personal Pro)
-- Private repo jobs start failing: "Private repos require Pro"
-- Grace period? Maybe 7 days before hard cutoff
-
-### Admin Leaves Org
-
-Alice (billing admin) leaves Acme.
-
-- Another org admin can claim billing management
-- If no admins claim it, billing continues (Stripe has the card)
-- Eventually: send warning emails, then suspend
+At start of each billing period:
+1. `seats_used` resets to 0
+2. `org_seats` rows deleted (or marked historical)
+3. First build by each user re-consumes a seat
 
 ## Web UI
 
-### Billing Page (Has Pro via Team)
+### Billing Page (Team Admin)
 
 ```
-Account
+Billing
 
-Pro Status: ✓ Active
-  via Acme Corp Team Pro
+Team Pro: github.com/acme
+├── Status: Active
+├── Seats: 4/5 used
+├── Storage: 12.3 GB / 50 GB
+├── Next billing: Feb 15, 2026
+└── [Add Seats] [Manage Payment] [View Usage]
 
-──────────────────────────────
-
-Team Billing (you manage)
-
-┌────────────────────────────────────┐
-│ Acme Corp          Team Pro Yearly │
-│ github.com/acme                    │
-│                                    │
-│ Committed: 10 seats @ $10/mo       │
-│ Active: 12 seats (+2 overage)      │
-│ Est. charge: $124.00               │
-│                                    │
-│ [View Usage] [Manage Payment]      │
-└────────────────────────────────────┘
+Seat Usage This Period:
+├── alice (47 jobs)
+├── bob (23 jobs)
+├── charlie (12 jobs)
+└── dana (8 jobs)
 ```
 
 ### Billing Page (No Pro)
 
 ```
-Account
+Billing
 
-Pro Status: ✗ Free
-  Private repos unavailable
-  7-day log retention
+Status: Free
+├── Public repos only
+├── 7-day log retention
 
-──────────────────────────────
+[Upgrade to Personal Pro - $5/mo or $48/yr]
 
-[Upgrade to Personal Pro - $4/month yearly, $5/month]
-
-or
-
-Set up Team Pro for an organization:
-  [github.com/acme] [Set Up - $10/seat yearly, $12/seat monthly]
-```
-
-### Billing Page (Personal Pro)
-
-```
-Account
-
-Pro Status: ✓ Active
-  Personal Pro - $4/month (yearly)
-
-[Manage Subscription] [Cancel]
+Or set up Team Pro for an organization:
+├── github.com/acme [Set Up]
+└── github.com/widgets [Set Up]
 ```
 
 ## Implementation Order
 
-1. **Database schema** - subscriptions, org_billing, org_billing_seats
-2. **hasPro() logic** - check personal + team subscriptions
-3. **Private repo gate** - require Pro for private repos
-4. **Stripe integration** - personal monthly/yearly, team monthly/yearly
-5. **Seat counting** - query forge API for org members
-6. **Usage reporting** - report overage seats to Stripe monthly
-7. **Commitment management** - UI to set/change committed seats
-8. **Billing UI** - status, upgrade, usage dashboard
-9. **Warnings** - redundant subscriptions, payment failures, approaching commitment
+1. **Schema** - org_billing, org_seats, user columns
+2. **Stripe setup** - Products, prices, webhook endpoint
+3. **Checkout flow** - /api/billing/checkout
+4. **Webhook handler** - invoice.paid, subscription.updated, etc.
+5. **Pro status check** - HasPro() logic
+6. **Job gate** - Block private repos without Pro
+7. **Seat tracking** - Consume seats on job trigger
+8. **Storage tracking** - Update on job complete
+9. **Billing UI** - Status, upgrade, seat management
+10. **Seat reset** - Cron job at period start
 
-## Open Questions
+## Open Questions (Deferred)
 
-### 1. Free Trial?
-
-- 14-day Pro trial for new users?
-- Or just let them use public repos free forever?
-
-Proposal: No trial. Public repos are the trial.
-
-### 2. Minimum Commitment for Yearly Teams?
-
-Require minimum commitment for yearly discount?
-- e.g., "Yearly requires at least 5 seats"
-
-Proposal: No minimum. 1 seat = $10/mo yearly. Small teams shouldn't be punished.
-
-### 3. Enterprise?
-
-Custom pricing for large orgs (100+ seats)?
-
-Defer to later. Start with self-serve.
-
-### 4. Refunds?
-
-What if someone pays for Personal Pro, then their org gets Team Pro?
-
-Proposal: Prorate and refund remaining personal subscription automatically.
-
-### 5. Yearly Commitment Changes?
-
-Can you increase committed seats mid-year? Decrease?
-
-Proposal:
-- Increase: yes, prorated at yearly rate
-- Decrease: no, wait until renewal (or pay early termination)
-
-### 6. Log Retention by Tier?
-
-Current proposal:
-- Free: 7 days
-- Personal Pro: 30 days
-- Team Pro: 90 days
-
-Is this the right differentiation? Or should everyone get 30 days?
+1. **Grace period when subscription lapses?** - Probably 7 days warning, then block.
+2. **Can yearly users decrease seats?** - Yes, but no refund. Credit toward renewal.
+3. **Self-hosted billing?** - MIT license, no billing. Honor system for commercial use.

@@ -140,7 +140,6 @@ func (s *PostgresStorage) migrate() error {
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'free'`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_used_bytes BIGINT NOT NULL DEFAULT 0`,
 		`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS log_size_bytes BIGINT NOT NULL DEFAULT 0`,
-		`ALTER TABLE repos ADD COLUMN IF NOT EXISTS owner_user_id TEXT`,
 	}
 	for _, stmt := range alterStatements {
 		_, _ = s.db.Exec(stmt)
@@ -156,7 +155,6 @@ func (s *PostgresStorage) migrate() error {
 	indexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_workers_owner_name ON workers(owner_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_repos_forge_owner_name ON repos(forge_type, owner, name)`,
-		`CREATE INDEX IF NOT EXISTS idx_repos_owner_user_id ON repos(owner_user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_jobs_repo_id ON jobs(repo_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_jobs_author ON jobs(author)`,
@@ -1170,58 +1168,6 @@ func (s *PostgresStorage) UpdateUserStorageUsed(ctx context.Context, userID stri
 		`UPDATE users SET storage_used_bytes = storage_used_bytes + $1 WHERE id = $2`,
 		deltaBytes, userID)
 	return err
-}
-
-// GetUserByRepoID finds the user who owns a repo (for quota checks).
-// Returns nil if no owner is set (legacy repos).
-func (s *PostgresStorage) GetUserByRepoID(ctx context.Context, repoID string) (*User, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.name, u.email, u.emails, u.github_connected_at,
-			u.gitlab_credentials, u.gitlab_credentials_at,
-			u.forgejo_credentials, u.forgejo_credentials_at,
-			u.tier, u.storage_used_bytes, u.created_at
-		FROM users u
-		JOIN repos r ON r.owner_user_id = u.id
-		WHERE r.id = $1
-	`, repoID)
-
-	var u User
-	var emails string
-	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
-	var tier sql.NullString
-	var storageUsed sql.NullInt64
-
-	err := row.Scan(&u.ID, &u.Name, &u.Email, &emails, &githubConnectedAt,
-		&u.GitLabCredentials, &gitlabCredentialsAt,
-		&u.ForgejoCredentials, &forgejoCredentialsAt,
-		&tier, &storageUsed, &u.CreatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil // No owner set (legacy repo)
-		}
-		return nil, err
-	}
-
-	u.Emails = parseEmailsJSON(emails)
-	if githubConnectedAt.Valid {
-		u.GitHubConnectedAt = githubConnectedAt.Time
-	}
-	if gitlabCredentialsAt.Valid {
-		u.GitLabCredentialsAt = gitlabCredentialsAt.Time
-	}
-	if forgejoCredentialsAt.Valid {
-		u.ForgejoCredentialsAt = forgejoCredentialsAt.Time
-	}
-	if tier.Valid {
-		u.Tier = UserTier(tier.String)
-	} else {
-		u.Tier = UserTierFree
-	}
-	if storageUsed.Valid {
-		u.StorageUsedBytes = storageUsed.Int64
-	}
-
-	return &u, nil
 }
 
 // --- Logs ---

@@ -72,7 +72,6 @@ type Storage interface {
 	// Storage quota
 	UpdateJobLogSize(ctx context.Context, jobID string, sizeBytes int64) error
 	UpdateUserStorageUsed(ctx context.Context, userID string, deltaBytes int64) error
-	GetUserByRepoID(ctx context.Context, repoID string) (*User, error) // Find repo owner for quota checks
 
 	// Lifecycle
 	Close() error
@@ -224,7 +223,7 @@ func (u *User) IsOverQuota() bool {
 type Repo struct {
 	ID            string
 	ForgeType     ForgeType
-	Owner         string // e.g., "user" or "org"
+	Owner         string // e.g., "user" or "org" (forge owner, not Cinch user)
 	Name          string // e.g., "repo"
 	CloneURL      string
 	HTMLURL       string
