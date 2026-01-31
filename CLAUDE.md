@@ -22,10 +22,13 @@ curl -sSL https://cinch.sh/install.sh | sh
 # 2. Login (opens browser, saves credentials to ~/.cinch/config)
 cinch login
 
-# 3. Start a worker (uses saved credentials - NO TOKEN FLAG NEEDED)
+# 3. Add your repo (sets up webhooks)
+cinch repo add
+
+# 4. Start a worker (uses saved credentials - NO TOKEN FLAG NEEDED)
 cinch worker
 
-# That's it. Push to a connected repo and builds run.
+# That's it. Push and builds run.
 ```
 
 **NEVER tell users to use `--token=xxx`** - the normal flow is `cinch login` then `cinch worker` with no flags.
@@ -71,9 +74,9 @@ cinch connect codeberg      # Connect Codeberg account
 cinch connect forgejo       # Connect self-hosted Forgejo
 
 # Worker
-cinch worker                # Start worker (uses saved credentials)
-cinch worker -s ADDR        # Connect to self-hosted server
-cinch worker --labels linux-amd64,docker  # With labels for routing
+cinch worker                # Start worker (foreground, ctrl+c to stop)
+cinch worker --labels gpu   # With labels for job routing
+cinch worker --shared       # Shared mode: run collaborator code
 
 # Worker daemon (background service)
 cinch daemon start          # Start worker as background daemon

@@ -133,8 +133,10 @@ export CINCH_JWT_SECRET=$(openssl rand -hex 32)
 # 2. Start server
 cinch server --port 8080
 
-# 3. Point workers at your server
-cinch worker -s http://your-server:8080
+# 3. Login to your server and start worker
+cinch login --server http://your-server:8080
+cinch repo add
+cinch worker
 ` + "```" + `
 
 See https://cinch.sh/docs/self-hosting for full setup including forge OAuth.
@@ -197,14 +199,15 @@ CINCH_FORGE_TOKEN=xxx     # Always set (same as forge-specific)
 
 ` + "```bash" + `
 # Authentication
-cinch login                    # Auth via browser
+cinch login                    # Auth via browser (saves to ~/.cinch/config)
+cinch login --server URL       # Auth with self-hosted server
 cinch logout                   # Clear credentials
 cinch whoami                   # Show current user
 
 # Worker
 cinch worker                   # Start worker (foreground)
-cinch worker -s URL            # Connect to self-hosted server
 cinch worker --labels a,b      # Start with labels
+cinch worker --shared          # Run collaborator code (shared mode)
 
 # Daemon (background worker)
 cinch daemon start             # Start background worker

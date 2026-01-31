@@ -8,7 +8,6 @@
 
 - [ ] **Remove services from README** - Services syntax is shown but not wired up. Confuses first-time users. Services are v2 consideration.
 - [ ] **Add `cinch secrets` CLI** - Currently secrets require raw curl to API. Need `cinch secrets set KEY` and `cinch secrets list`.
-- [ ] **README pricing: mention beta is free** - Pricing section says "$5/seat/month" without noting it's free during beta. Users may bounce on price.
 - [ ] **Deep documentation** - Self-hosting guide needs webhook ingress details
 
 ## Security (remaining)

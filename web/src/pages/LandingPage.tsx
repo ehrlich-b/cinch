@@ -117,21 +117,18 @@ export function LandingPage({ auth, onNavigate }: Props) {
               <div className="step-icon">1</div>
               <h3>Install</h3>
               <code>curl cinch.sh | sh</code>
-              <p>One command</p>
             </div>
             <div className="step-arrow">→</div>
             <div className="step-card">
               <div className="step-icon">2</div>
-              <h3>Login</h3>
-              <code>cinch login</code>
-              <p>Opens browser</p>
+              <h3>Setup</h3>
+              <code>cinch login && cinch repo add</code>
             </div>
             <div className="step-arrow">→</div>
             <div className="step-card">
               <div className="step-icon">3</div>
               <h3>Run</h3>
-              <code>cinch worker -s</code>
-              <p>Builds run locally</p>
+              <code>cinch worker</code>
             </div>
           </div>
         </div>

@@ -57,8 +57,8 @@ export function JobsPage({ onSelectJob }: Props) {
       <p>Push to a connected repo to trigger your first build.</p>
       <div className="empty-steps">
         <div className="empty-step">
-          <strong>1. Start a worker</strong>
-          <code>cinch login && cinch worker</code>
+          <strong>1. Add repo & start worker</strong>
+          <code>cinch repo add && cinch worker</code>
         </div>
         <div className="empty-step">
           <strong>2. Add .cinch.yaml to your repo</strong>

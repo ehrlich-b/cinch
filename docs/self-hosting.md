@@ -13,8 +13,10 @@ export CINCH_JWT_SECRET=$(openssl rand -hex 32)
 # 2. Start the server
 cinch server --port 8080
 
-# 3. In another terminal, start a worker
-cinch worker -s http://localhost:8080
+# 3. In another terminal, login and start a worker
+cinch login --server http://localhost:8080
+cinch repo add
+cinch worker
 ```
 
 For production, you'll want to configure forge integrations (GitHub/GitLab/Forgejo) and run behind a reverse proxy with TLS.
@@ -358,7 +360,7 @@ volumes:
 
 1. Check that `CINCH_BASE_URL` and `CINCH_WS_BASE_URL` are correct
 2. Verify WebSocket upgrade is working through your reverse proxy
-3. Check worker logs: `cinch worker -s https://ci.example.com --log-level debug`
+3. Check worker logs: `cinch worker --verbose` (after `cinch login --server URL`)
 
 ### Webhooks not received
 
