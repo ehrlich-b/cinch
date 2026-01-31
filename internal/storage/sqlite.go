@@ -45,8 +45,6 @@ func NewSQLite(dsn string, encryptionSecret string) (*SQLiteStorage, error) {
 			return nil, fmt.Errorf("enable WAL: %w", err)
 		}
 	}
-	// Limit concurrent connections - SQLite handles concurrency internally with WAL
-	db.SetMaxOpenConns(1)
 
 	var cipher *crypto.Cipher
 	if encryptionSecret != "" {
