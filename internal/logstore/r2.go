@@ -2,6 +2,7 @@ package logstore
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -215,10 +216,11 @@ func (s *R2LogStore) flush(ctx context.Context, jobID string) error {
 }
 
 // Finalize flushes remaining buffer, concatenates chunks into final.log, and cleans up.
-func (s *R2LogStore) Finalize(ctx context.Context, jobID string) error {
+// Returns the final compressed size in bytes for storage tracking.
+func (s *R2LogStore) Finalize(ctx context.Context, jobID string) (int64, error) {
 	// Flush any remaining buffer
 	if err := s.flush(ctx, jobID); err != nil {
-		return err
+		return 0, err
 	}
 
 	// Get chunk count
@@ -235,35 +237,11 @@ func (s *R2LogStore) Finalize(ctx context.Context, jobID string) error {
 
 	if chunkCount == 0 {
 		// No chunks written, nothing to finalize
-		return nil
+		return 0, nil
 	}
 
-	// If only one chunk, just rename it to final.log
-	if chunkCount == 1 {
-		// Copy chunk_000 to final.log
-		srcKey := fmt.Sprintf("logs/%s/chunk_000.log", jobID)
-		dstKey := fmt.Sprintf("logs/%s/final.log", jobID)
-
-		_, err := s.client.CopyObject(ctx, &s3.CopyObjectInput{
-			Bucket:     aws.String(s.bucket),
-			CopySource: aws.String(s.bucket + "/" + srcKey),
-			Key:        aws.String(dstKey),
-		})
-		if err != nil {
-			return fmt.Errorf("copy to final: %w", err)
-		}
-
-		// Delete original chunk
-		_, _ = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
-			Bucket: aws.String(s.bucket),
-			Key:    aws.String(srcKey),
-		})
-
-		return nil
-	}
-
-	// Multiple chunks: concatenate into final.log
-	var finalContent bytes.Buffer
+	// Collect all chunk content
+	var rawContent bytes.Buffer
 	for i := 0; i < chunkCount; i++ {
 		key := fmt.Sprintf("logs/%s/chunk_%03d.log", jobID, i)
 		resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
@@ -274,20 +252,33 @@ func (s *R2LogStore) Finalize(ctx context.Context, jobID string) error {
 			s.log.Warn("failed to read chunk during finalize", "job_id", jobID, "chunk", i, "error", err)
 			continue
 		}
-		_, _ = io.Copy(&finalContent, resp.Body)
+		_, _ = io.Copy(&rawContent, resp.Body)
 		resp.Body.Close()
 	}
 
-	// Upload final.log
+	// Gzip compress before storing (text logs compress ~10:1)
+	var compressed bytes.Buffer
+	gw := gzip.NewWriter(&compressed)
+	if _, err := gw.Write(rawContent.Bytes()); err != nil {
+		return 0, fmt.Errorf("gzip compress: %w", err)
+	}
+	if err := gw.Close(); err != nil {
+		return 0, fmt.Errorf("gzip close: %w", err)
+	}
+
+	compressedSize := int64(compressed.Len())
+
+	// Upload compressed final.log with Content-Encoding for transparent browser decompression
 	finalKey := fmt.Sprintf("logs/%s/final.log", jobID)
 	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(s.bucket),
-		Key:         aws.String(finalKey),
-		Body:        bytes.NewReader(finalContent.Bytes()),
-		ContentType: aws.String("application/x-ndjson"),
+		Bucket:          aws.String(s.bucket),
+		Key:             aws.String(finalKey),
+		Body:            bytes.NewReader(compressed.Bytes()),
+		ContentType:     aws.String("application/x-ndjson"),
+		ContentEncoding: aws.String("gzip"),
 	})
 	if err != nil {
-		return fmt.Errorf("upload final.log: %w", err)
+		return 0, fmt.Errorf("upload final.log: %w", err)
 	}
 
 	// Delete chunks
@@ -299,12 +290,13 @@ func (s *R2LogStore) Finalize(ctx context.Context, jobID string) error {
 		})
 	}
 
-	s.log.Debug("finalized job logs", "job_id", jobID, "chunks", chunkCount, "size", finalContent.Len())
-	return nil
+	s.log.Debug("finalized job logs", "job_id", jobID, "chunks", chunkCount,
+		"raw_size", rawContent.Len(), "compressed_size", compressedSize)
+	return compressedSize, nil
 }
 
 // GetLogs returns logs as a streaming reader.
-// If job is complete (final.log exists), returns that.
+// If job is complete (final.log exists), returns that (decompressed if gzipped).
 // Otherwise, concatenates available chunks (for in-progress jobs).
 func (s *R2LogStore) GetLogs(ctx context.Context, jobID string) (io.ReadCloser, error) {
 	// Try final.log first
@@ -314,6 +306,17 @@ func (s *R2LogStore) GetLogs(ctx context.Context, jobID string) (io.ReadCloser, 
 		Key:    aws.String(finalKey),
 	})
 	if err == nil {
+		// Check if content is gzip-compressed (new format)
+		// Content-Encoding header is set on compressed files
+		if resp.ContentEncoding != nil && *resp.ContentEncoding == "gzip" {
+			gr, err := gzip.NewReader(resp.Body)
+			if err != nil {
+				resp.Body.Close()
+				return nil, fmt.Errorf("gzip reader: %w", err)
+			}
+			return &gzipReadCloser{gr: gr, underlying: resp.Body}, nil
+		}
+		// Uncompressed (legacy format) - return as-is
 		return resp.Body, nil
 	}
 
@@ -424,4 +427,19 @@ func (s *R2LogStore) Close() error {
 	close(s.done)
 	s.wg.Wait()
 	return nil
+}
+
+// gzipReadCloser wraps a gzip.Reader and its underlying io.ReadCloser.
+type gzipReadCloser struct {
+	gr         *gzip.Reader
+	underlying io.ReadCloser
+}
+
+func (g *gzipReadCloser) Read(p []byte) (int, error) {
+	return g.gr.Read(p)
+}
+
+func (g *gzipReadCloser) Close() error {
+	g.gr.Close()
+	return g.underlying.Close()
 }

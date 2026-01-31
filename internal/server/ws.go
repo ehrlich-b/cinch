@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ehrlich-b/cinch/internal/logstore"
@@ -30,7 +31,22 @@ const (
 
 	// Maximum message size allowed from peer.
 	maxMessageSize = 1 << 20 // 1MB
+
+	// Token cache TTL - tokens rarely change, so cache for 5 minutes
+	tokenCacheTTL = 5 * time.Minute
 )
+
+// tokenCacheEntry holds a cached token lookup result.
+type tokenCacheEntry struct {
+	workerID  string
+	expiresAt time.Time
+}
+
+// tokenCache caches token hash -> worker ID lookups to reduce DB queries.
+var tokenCache = struct {
+	sync.RWMutex
+	entries map[string]tokenCacheEntry
+}{entries: make(map[string]tokenCacheEntry)}
 
 // workerUpgrader allows all origins - workers connect from user machines
 var workerUpgrader = websocket.Upgrader{
@@ -214,21 +230,39 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // validateToken checks the token and returns the worker ID.
 func (h *WSHandler) validateToken(ctx context.Context, token string) (string, error) {
-	// First try database token lookup (for worker tokens)
 	hash := hashToken(token)
+
+	// Check cache first
+	tokenCache.RLock()
+	if entry, ok := tokenCache.entries[hash]; ok && time.Now().Before(entry.expiresAt) {
+		tokenCache.RUnlock()
+		return entry.workerID, nil
+	}
+	tokenCache.RUnlock()
+
+	// Try database token lookup (for worker tokens)
 	tok, err := h.storage.GetTokenByHash(ctx, hash)
 	if err == nil {
 		// Return worker ID if bound, or token ID as worker ID
+		workerID := tok.ID
 		if tok.WorkerID != nil {
-			return *tok.WorkerID, nil
+			workerID = *tok.WorkerID
 		}
-		return tok.ID, nil
+		// Cache the result
+		tokenCache.Lock()
+		tokenCache.entries[hash] = tokenCacheEntry{
+			workerID:  workerID,
+			expiresAt: time.Now().Add(tokenCacheTTL),
+		}
+		tokenCache.Unlock()
+		return workerID, nil
 	}
 
 	// If database lookup failed and we have a JWT validator, try JWT
 	if h.jwtValidator != nil {
 		if email := h.jwtValidator.ValidateUserToken(token); email != "" {
 			// Use email as worker ID prefix for user tokens
+			// Don't cache JWTs - they have their own expiry handling
 			return "user:" + email, nil
 		}
 	}
@@ -575,10 +609,17 @@ func (h *WSHandler) handleJobComplete(worker *WorkerConn, payload []byte) {
 		}
 	}
 
-	// Finalize logs (flush buffers, concatenate chunks)
+	// Finalize logs (flush buffers, concatenate chunks, compress)
 	if h.logStore != nil {
-		if err := h.logStore.Finalize(ctx, complete.JobID); err != nil {
+		logSize, err := h.logStore.Finalize(ctx, complete.JobID)
+		if err != nil {
 			h.log.Warn("failed to finalize logs", "job_id", complete.JobID, "error", err)
+		} else if logSize > 0 {
+			// Track storage usage
+			if err := h.storage.UpdateJobLogSize(ctx, complete.JobID, logSize); err != nil {
+				h.log.Warn("failed to update job log size", "job_id", complete.JobID, "error", err)
+			}
+			// TODO: Update user's total storage when quota enforcement is enabled
 		}
 	}
 
@@ -641,10 +682,16 @@ func (h *WSHandler) handleJobError(worker *WorkerConn, payload []byte) {
 		}
 	}
 
-	// Finalize logs (flush buffers)
+	// Finalize logs (flush buffers, compress)
 	if h.logStore != nil {
-		if err := h.logStore.Finalize(ctx, jobErr.JobID); err != nil {
+		logSize, err := h.logStore.Finalize(ctx, jobErr.JobID)
+		if err != nil {
 			h.log.Warn("failed to finalize logs", "job_id", jobErr.JobID, "error", err)
+		} else if logSize > 0 {
+			// Track storage usage
+			if err := h.storage.UpdateJobLogSize(ctx, jobErr.JobID, logSize); err != nil {
+				h.log.Warn("failed to update job log size", "job_id", jobErr.JobID, "error", err)
+			}
 		}
 	}
 
