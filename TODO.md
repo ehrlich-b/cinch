@@ -8,31 +8,13 @@
 
 ## Launch Blockers
 
-### Landing Page (PRIORITY)
+### Landing Page - DONE
 
-The homepage needs to explain what Cinch is in 10 seconds. Current page doesn't.
-
-**Copy structure (above the fold):**
-```
-HEADLINE: "GitHub is charging $0.008/min for runners. Use your own hardware instead."
-SUBHEAD: "Cinch runs CI on your machines. One config file, any git forge, zero cloud bills."
-
-[Install command]     [View Demo]
-curl -sSL https://cinch.sh/install.sh | sh
-
-HOW IT WORKS (3 steps, icons):
-1. Install → one curl command
-2. Login → cinch login (opens browser)
-3. Run → cinch worker (builds run on your machine)
-
-SUPPORTED FORGES: [GitHub] [GitLab] [Codeberg] [Self-hosted]
-```
-
-- [ ] **Hero section** - Headline + subhead + install command
-- [ ] **How it works** - 3 visual steps
-- [ ] **Pricing section** - Free (public) / Pro ($5/seat) / Self-hosted (free)
-- [ ] **Why Cinch** - "Same Makefile locally and in CI" value prop
-- [ ] **Social proof** - Badge from a real repo, or "used by X repos"
+- ✅ **Hero section** - Headline + subhead + install command + forge logos
+- ✅ **How it works** - 3 visual steps with arrows
+- ✅ **Pricing section** - Free / Pro / Self-hosted
+- ✅ **Why Cinch** - 4 value props + config example
+- ✅ **Social proof** - Badge from cinch repo
 
 ### Remaining Blockers
 

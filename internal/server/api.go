@@ -1666,9 +1666,9 @@ type userResponse struct {
 	ConnectedForges []connectedForge `json:"connected_forges"`
 	CreatedAt       time.Time        `json:"created_at"`
 	// Billing/quota
-	Tier             string `json:"tier"`               // "free" or "pro"
-	StorageUsedBytes int64  `json:"storage_used_bytes"` // Total storage used
-	StorageQuotaBytes int64 `json:"storage_quota_bytes"` // Total storage quota
+	Tier              string `json:"tier"`                // "free" or "pro"
+	StorageUsedBytes  int64  `json:"storage_used_bytes"`  // Total storage used
+	StorageQuotaBytes int64  `json:"storage_quota_bytes"` // Total storage quota
 }
 
 func (h *APIHandler) getUser(w http.ResponseWriter, r *http.Request) {
@@ -1722,13 +1722,13 @@ func (h *APIHandler) getUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := userResponse{
-		ID:              user.ID,
-		Name:            user.Name,
-		Email:           user.Email,
-		ConnectedForges: forges,
-		CreatedAt:       user.CreatedAt,
-		Tier:            string(user.Tier),
-		StorageUsedBytes: user.StorageUsedBytes,
+		ID:                user.ID,
+		Name:              user.Name,
+		Email:             user.Email,
+		ConnectedForges:   forges,
+		CreatedAt:         user.CreatedAt,
+		Tier:              string(user.Tier),
+		StorageUsedBytes:  user.StorageUsedBytes,
 		StorageQuotaBytes: user.StorageQuota(),
 	}
 
