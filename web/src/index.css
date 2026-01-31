@@ -747,8 +747,8 @@ tr.clickable {
 }
 
 .forge-logo {
-  height: 24px;
-  width: 24px;
+  height: 32px;
+  width: 32px;
   opacity: 0.7;
   filter: grayscale(100%);
   transition: all 0.2s;
@@ -795,7 +795,7 @@ tr.clickable {
   border-radius: 12px;
   padding: 28px 24px;
   text-align: center;
-  width: 200px;
+  width: 240px;
 }
 
 .step-card .step-icon {
@@ -934,6 +934,17 @@ tr.clickable {
   height: 24px;
 }
 
+.social-proof-badges {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.social-proof-badges img {
+  height: 24px;
+}
+
 /* Self-host button */
 .btn-selfhost {
   display: block;
@@ -1069,8 +1080,59 @@ tr.clickable {
   font-size: 32px;
   font-weight: 700;
   text-align: center;
-  margin-bottom: 8px;
+  margin-bottom: 24px;
   color: var(--text);
+}
+
+.pricing-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 48px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.pricing-toggle span.active {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.toggle-switch {
+  width: 48px;
+  height: 26px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  cursor: pointer;
+  position: relative;
+  padding: 0;
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 50%;
+  transition: left 0.2s;
+}
+
+.toggle-knob.yearly {
+  left: 25px;
+}
+
+.save-badge {
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
 }
 
 .pricing-subtitle {
