@@ -173,8 +173,12 @@ export function WorkersPage() {
           <code>curl -sSL https://cinch.sh/install.sh | sh</code>
         </div>
         <div className="empty-step">
-          <strong>Login & Run</strong>
-          <code>cinch login && cinch worker</code>
+          <strong>Login & Add Repo</strong>
+          <code>cinch login && cinch repo add</code>
+        </div>
+        <div className="empty-step">
+          <strong>Start Worker</strong>
+          <code>cinch worker</code>
         </div>
       </div>
     </div>

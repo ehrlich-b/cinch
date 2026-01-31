@@ -465,29 +465,29 @@ func runServer(cmd *cobra.Command, args []string) error {
 func workerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "worker",
-		Short: "View jobs from the daemon",
-		Long: `Connect to the daemon and stream job events.
+		Short: "Start a worker to run CI jobs",
+		Long: `Start a worker that connects to cinch.sh and runs CI jobs.
 
-The daemon must be running (via 'cinch daemon start') or use -s for standalone mode.
+By default, runs in standalone mode (foreground). If a daemon is running,
+connects to it instead. Use 'cinch daemon start' for background operation.
 
 Worker modes:
   personal (default): Only runs YOUR code (your pushes, your PRs)
   shared:             Runs collaborator code, defers to their personal workers
 
 Examples:
-  cinch worker                 # connect to daemon, watch jobs
+  cinch worker                 # start worker (foreground)
   cinch worker -v              # include full build logs
-  cinch worker --job j_abc123  # follow specific job
-  cinch worker -s              # standalone: temp daemon + viewer
-  cinch worker -s --shared     # shared mode: run team collaborator code`,
+  cinch worker --shared        # shared mode: run team collaborator code
+  cinch worker --labels gpu    # with labels for job routing`,
 		RunE: runWorker,
 	}
 	cmd.Flags().BoolP("verbose", "v", false, "Show full job logs")
-	cmd.Flags().BoolP("standalone", "s", false, "Standalone mode: spawn temp daemon")
+	cmd.Flags().BoolP("standalone", "s", false, "Force standalone mode even if daemon running")
 	cmd.Flags().Bool("shared", false, "Shared mode: run collaborator code (default: personal mode)")
 	cmd.Flags().String("job", "", "Follow specific job ID")
 	cmd.Flags().String("socket", "", "Daemon socket path")
-	cmd.Flags().StringSlice("labels", nil, "Worker labels (standalone mode only)")
+	cmd.Flags().StringSlice("labels", nil, "Worker labels for job routing")
 	return cmd
 }
 
@@ -502,19 +502,14 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		socketPath = cli.DefaultDaemonConfig().SocketPath
 	}
 
-	// Standalone mode: spawn a temp daemon with concurrency=1
-	if standalone {
-		labels, _ := cmd.Flags().GetStringSlice("labels")
-		return runStandaloneWorker(verbose, labels, shared)
-	}
-
-	// Check if daemon is running
-	if daemon.IsDaemonRunning(socketPath) {
+	// Check if daemon is running first
+	if daemon.IsDaemonRunning(socketPath) && !standalone {
 		return runDaemonClient(socketPath, jobID, verbose)
 	}
 
-	// No daemon running - tell user how to start one
-	return fmt.Errorf("no daemon running\n\nStart a daemon:  cinch daemon start\nOr standalone:   cinch worker -s")
+	// Default to standalone mode (spawn temp daemon with concurrency=1)
+	labels, _ := cmd.Flags().GetStringSlice("labels")
+	return runStandaloneWorker(verbose, labels, shared)
 }
 
 // runDirectWorker starts a worker that connects directly to the server.

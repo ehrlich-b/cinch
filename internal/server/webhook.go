@@ -294,7 +294,7 @@ func (h *WebhookHandler) handlePullRequest(w http.ResponseWriter, r *http.Reques
 	// Post pending status - different message for fork PRs awaiting contributor CI
 	statusMsg := "Build queued"
 	if job.Status == storage.JobStatusPendingContributor {
-		statusMsg = "Awaiting contributor CI - run `cinch worker -s` to provide results"
+		statusMsg = "Awaiting contributor CI - run `cinch worker` to provide results"
 	}
 	if err := h.postStatus(ctx, matchedForge, repo, prEvent.Commit, job.ID, forge.StatusPending, statusMsg); err != nil {
 		h.log.Warn("failed to post pending status", "error", err)

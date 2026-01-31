@@ -33,21 +33,32 @@ export function SuccessPage({ onContinue }: Props) {
           <div className="setup-step">
             <div className="step-number">2</div>
             <div className="step-content">
-              <h3>Login & Start Worker</h3>
+              <h3>Login & Add Repo</h3>
               <div className="code-block">
-                <code>cinch login && cinch worker --all</code>
-                <button className="copy-btn" onClick={() => copyToClipboard('cinch login && cinch worker --all')}>
+                <code>cinch login && cinch repo add</code>
+                <button className="copy-btn" onClick={() => copyToClipboard('cinch login && cinch repo add')}>
                   Copy
                 </button>
               </div>
-              <p className="step-note">
-                The <code>--all</code> flag builds all your connected repos. Leave it running!
-              </p>
             </div>
           </div>
 
           <div className="setup-step">
             <div className="step-number">3</div>
+            <div className="step-content">
+              <h3>Start Worker</h3>
+              <div className="code-block">
+                <code>cinch worker</code>
+                <button className="copy-btn" onClick={() => copyToClipboard('cinch worker')}>
+                  Copy
+                </button>
+              </div>
+              <p className="step-note">Leave it running to receive builds.</p>
+            </div>
+          </div>
+
+          <div className="setup-step">
+            <div className="step-number">4</div>
             <div className="step-content">
               <h3>Push Code</h3>
               <p>
