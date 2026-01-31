@@ -27,6 +27,7 @@ type Storage interface {
 	CreateWorker(ctx context.Context, worker *Worker) error
 	GetWorker(ctx context.Context, id string) (*Worker, error)
 	ListWorkers(ctx context.Context) ([]*Worker, error)
+	CountWorkersByOwner(ctx context.Context, ownerName string) (int, error)
 	UpdateWorkerLastSeen(ctx context.Context, id string) error
 	UpdateWorkerStatus(ctx context.Context, id string, status WorkerStatus) error
 	UpdateWorkerOwner(ctx context.Context, id, ownerName, mode string) error

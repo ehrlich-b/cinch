@@ -578,6 +578,14 @@ func (s *PostgresStorage) ListWorkers(ctx context.Context) ([]*Worker, error) {
 	return workers, rows.Err()
 }
 
+func (s *PostgresStorage) CountWorkersByOwner(ctx context.Context, ownerName string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM workers WHERE owner_name = $1`,
+		ownerName).Scan(&count)
+	return count, err
+}
+
 func (s *PostgresStorage) UpdateWorkerLastSeen(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE workers SET last_seen = $1 WHERE id = $2`,

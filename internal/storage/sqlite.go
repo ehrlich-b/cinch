@@ -618,6 +618,14 @@ func (s *SQLiteStorage) ListWorkers(ctx context.Context) ([]*Worker, error) {
 	return workers, rows.Err()
 }
 
+func (s *SQLiteStorage) CountWorkersByOwner(ctx context.Context, ownerName string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM workers WHERE owner_name = ?`,
+		ownerName).Scan(&count)
+	return count, err
+}
+
 func (s *SQLiteStorage) UpdateWorkerLastSeen(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE workers SET last_seen = ? WHERE id = ?`,
