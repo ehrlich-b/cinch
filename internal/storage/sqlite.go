@@ -158,6 +158,10 @@ func (s *SQLiteStorage) migrate() error {
 
 	// Add private column to repos
 	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
+	// Add workers column to repos (comma-separated labels for fan-out)
+	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN workers TEXT NOT NULL DEFAULT ''")
+	// Add secrets column to repos (encrypted JSON map of env vars)
+	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN secrets TEXT NOT NULL DEFAULT ''")
 	// Index for efficient forge/owner/name lookups
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_repos_forge_owner_name ON repos(forge_type, owner, name)")
 
@@ -623,31 +627,53 @@ func (s *SQLiteStorage) CreateRepo(ctx context.Context, repo *Repo) error {
 		return fmt.Errorf("encrypt forge_token: %w", err)
 	}
 
+	// Convert workers slice to comma-separated string
+	workers := strings.Join(repo.Workers, ",")
+
+	// Convert and encrypt secrets map to JSON
+	var secretsJSON string
+	if len(repo.Secrets) > 0 {
+		secretsBytes, err := json.Marshal(repo.Secrets)
+		if err != nil {
+			return fmt.Errorf("marshal secrets: %w", err)
+		}
+		secretsJSON, err = s.encrypt(string(secretsBytes))
+		if err != nil {
+			return fmt.Errorf("encrypt secrets: %w", err)
+		}
+	}
+
 	// Use upsert to handle re-onboarding: if repo exists, update token and webhook secret
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO repos (id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, private, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO repos (id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(clone_url) DO UPDATE SET
 		 	webhook_secret = excluded.webhook_secret,
 		 	forge_token = excluded.forge_token,
+		 	workers = excluded.workers,
 		 	private = excluded.private`,
 		repo.ID, repo.ForgeType, repo.Owner, repo.Name, repo.CloneURL, repo.HTMLURL,
-		webhookSecret, forgeToken, repo.Build, repo.Release, repo.Private, repo.CreatedAt)
+		webhookSecret, forgeToken, repo.Build, repo.Release, workers, secretsJSON, repo.Private, repo.CreatedAt)
 	return err
 }
 
 func (s *SQLiteStorage) GetRepo(ctx context.Context, id string) (*Repo, error) {
 	repo := &Repo{}
+	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
 		 FROM repos WHERE id = ?`, id).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
-		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.Private, &repo.CreatedAt)
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	// Parse workers from comma-separated string
+	if workers != "" {
+		repo.Workers = strings.Split(workers, ",")
 	}
 	// Decrypt secrets
 	if repo.WebhookSecret, err = s.decrypt(repo.WebhookSecret); err != nil {
@@ -655,22 +681,39 @@ func (s *SQLiteStorage) GetRepo(ctx context.Context, id string) (*Repo, error) {
 	}
 	if repo.ForgeToken, err = s.decrypt(repo.ForgeToken); err != nil {
 		return nil, fmt.Errorf("decrypt forge_token: %w", err)
+	}
+	// Decrypt and parse secrets map
+	if secretsJSON != "" {
+		decrypted, err := s.decrypt(secretsJSON)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt secrets: %w", err)
+		}
+		if decrypted != "" {
+			if err := json.Unmarshal([]byte(decrypted), &repo.Secrets); err != nil {
+				return nil, fmt.Errorf("unmarshal secrets: %w", err)
+			}
+		}
 	}
 	return repo, nil
 }
 
 func (s *SQLiteStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string) (*Repo, error) {
 	repo := &Repo{}
+	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
 		 FROM repos WHERE clone_url = ?`, cloneURL).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
-		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.Private, &repo.CreatedAt)
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	// Parse workers from comma-separated string
+	if workers != "" {
+		repo.Workers = strings.Split(workers, ",")
 	}
 	// Decrypt secrets
 	if repo.WebhookSecret, err = s.decrypt(repo.WebhookSecret); err != nil {
@@ -679,12 +722,24 @@ func (s *SQLiteStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string) 
 	if repo.ForgeToken, err = s.decrypt(repo.ForgeToken); err != nil {
 		return nil, fmt.Errorf("decrypt forge_token: %w", err)
 	}
+	// Decrypt and parse secrets map
+	if secretsJSON != "" {
+		decrypted, err := s.decrypt(secretsJSON)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt secrets: %w", err)
+		}
+		if decrypted != "" {
+			if err := json.Unmarshal([]byte(decrypted), &repo.Secrets); err != nil {
+				return nil, fmt.Errorf("unmarshal secrets: %w", err)
+			}
+		}
+	}
 	return repo, nil
 }
 
 func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
 		 FROM repos ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -694,9 +749,14 @@ func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 	var repos []*Repo
 	for rows.Next() {
 		repo := &Repo{}
+		var workers, secretsJSON string
 		if err := rows.Scan(&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL,
-			&repo.HTMLURL, &repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.Private, &repo.CreatedAt); err != nil {
+			&repo.HTMLURL, &repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt); err != nil {
 			return nil, err
+		}
+		// Parse workers from comma-separated string
+		if workers != "" {
+			repo.Workers = strings.Split(workers, ",")
 		}
 		// Decrypt secrets
 		if repo.WebhookSecret, err = s.decrypt(repo.WebhookSecret); err != nil {
@@ -704,6 +764,18 @@ func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 		}
 		if repo.ForgeToken, err = s.decrypt(repo.ForgeToken); err != nil {
 			return nil, fmt.Errorf("decrypt forge_token: %w", err)
+		}
+		// Decrypt and parse secrets map
+		if secretsJSON != "" {
+			decrypted, err := s.decrypt(secretsJSON)
+			if err != nil {
+				return nil, fmt.Errorf("decrypt secrets: %w", err)
+			}
+			if decrypted != "" {
+				if err := json.Unmarshal([]byte(decrypted), &repo.Secrets); err != nil {
+					return nil, fmt.Errorf("unmarshal secrets: %w", err)
+				}
+			}
 		}
 		repos = append(repos, repo)
 	}
@@ -717,16 +789,21 @@ func (s *SQLiteStorage) DeleteRepo(ctx context.Context, id string) error {
 
 func (s *SQLiteStorage) GetRepoByOwnerName(ctx context.Context, forge, owner, name string) (*Repo, error) {
 	repo := &Repo{}
+	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
 		 FROM repos WHERE forge_type = ? AND owner = ? AND name = ?`, forge, owner, name).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
-		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &repo.Private, &repo.CreatedAt)
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	// Parse workers from comma-separated string
+	if workers != "" {
+		repo.Workers = strings.Split(workers, ",")
 	}
 	// Decrypt secrets
 	if repo.WebhookSecret, err = s.decrypt(repo.WebhookSecret); err != nil {
@@ -735,6 +812,18 @@ func (s *SQLiteStorage) GetRepoByOwnerName(ctx context.Context, forge, owner, na
 	if repo.ForgeToken, err = s.decrypt(repo.ForgeToken); err != nil {
 		return nil, fmt.Errorf("decrypt forge_token: %w", err)
 	}
+	// Decrypt and parse secrets map
+	if secretsJSON != "" {
+		decrypted, err := s.decrypt(secretsJSON)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt secrets: %w", err)
+		}
+		if decrypted != "" {
+			if err := json.Unmarshal([]byte(decrypted), &repo.Secrets); err != nil {
+				return nil, fmt.Errorf("unmarshal secrets: %w", err)
+			}
+		}
+	}
 	return repo, nil
 }
 
@@ -742,6 +831,25 @@ func (s *SQLiteStorage) UpdateRepoPrivate(ctx context.Context, id string, privat
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE repos SET private = ? WHERE id = ?`,
 		private, id)
+	return err
+}
+
+func (s *SQLiteStorage) UpdateRepoSecrets(ctx context.Context, id string, secrets map[string]string) error {
+	// Convert and encrypt secrets map to JSON
+	var secretsJSON string
+	if len(secrets) > 0 {
+		secretsBytes, err := json.Marshal(secrets)
+		if err != nil {
+			return fmt.Errorf("marshal secrets: %w", err)
+		}
+		secretsJSON, err = s.encrypt(string(secretsBytes))
+		if err != nil {
+			return fmt.Errorf("encrypt secrets: %w", err)
+		}
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE repos SET secrets = ? WHERE id = ?`,
+		secretsJSON, id)
 	return err
 }
 

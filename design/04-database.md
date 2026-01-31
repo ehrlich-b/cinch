@@ -2,7 +2,15 @@
 
 ## Overview
 
-Cinch uses SQLite for self-hosted deployments and Postgres for the hosted service. Schema is designed to work with both.
+Cinch supports both SQLite (self-hosted) and Postgres (hosted service). Schema is designed to work with both.
+
+**Selection logic:**
+- `DATABASE_URL` set → Postgres
+- Otherwise → SQLite at `$CINCH_DATA_DIR/cinch.db`
+
+**Hosted service:** Uses Fly Postgres. Single instance, vertical scaling.
+
+**Self-hosted:** SQLite by default. Zero config, embedded in binary.
 
 ## Tables
 

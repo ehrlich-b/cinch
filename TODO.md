@@ -18,16 +18,25 @@ Separate WebSocket from HTTP so we can proxy HTTP through Cloudflare without hit
 - [x] **Server: include ws_url in login response** - tells clients where to connect
 - [x] **Client: save ws_url from login** - store in ~/.cinch/config alongside url
 - [x] **Client: connect to ws_url** - worker uses ws_url instead of deriving from url
-- [ ] **Fly: add ws.cinch.sh cert** - `fly certs create ws.cinch.sh`
-- [ ] **Cloudflare: ws.cinch.sh DNS only** - gray cloud, direct to Fly
+- [x] **Fly: add ws.cinch.sh cert** - `fly certs create ws.cinch.sh`
+- [x] **Cloudflare: ws.cinch.sh DNS only** - gray cloud, direct to Fly
+
+### Worker Resilience (MVP)
+
+Workers must survive server restarts gracefully.
+
+- [x] **Finish job on disconnect** - worker completes current job even if server goes away
+- [x] **Reconnect with backoff** - exponential backoff with jitter (1s → 60s max)
+- [x] **Report result on reconnect** - pending results stored to ~/.cinch/pending/, flushed on reconnect
+- [x] **Heartbeat tolerance** - already implemented: 90s pong timeout (3 missed heartbeats)
 
 ### Self-Hosting MVP (MUST)
 
-- [ ] **Filesystem log store default** - logs on disk by default (not SQLite tables)
-- [ ] **Object storage path** - optional S3/R2 log store (self-host friendly config)
+- [x] **Filesystem log store default** - logs stored to ~/.cinch/logs/ (NDJSON format)
+- [x] **Object storage path** - R2 for hosted, filesystem default for self-hosted, CINCH_LOG_DIR configurable
 - [ ] **Public webhook ingress guidance** - clear setup + base URL required for webhooks/OAuth
-- [ ] **Secrets (minimal)** - repo-level env secrets injection for jobs
-- [ ] **Labels/worker targeting** - wire `config.Workers` into job dispatch (MVP requirement)
+- [x] **Secrets (minimal)** - repo-level env secrets injection for jobs
+- [x] **Labels/worker targeting** - wire `config.Workers` into job dispatch (MVP requirement)
 
 ### Postgres Support (MVP)
 
@@ -37,15 +46,6 @@ Single web server + single Postgres instance. Vertical scaling only.
 - [ ] **DATABASE_URL config** - connect to Postgres when set, SQLite otherwise
 - [ ] **Schema migrations** - Postgres-compatible schema with proper types (TIMESTAMPTZ, JSONB)
 - [ ] **Deploy Fly Postgres** - `fly postgres create` for hosted service
-
-### Worker Resilience (MVP)
-
-Workers must survive server restarts gracefully.
-
-- [ ] **Finish job on disconnect** - worker completes current job even if server goes away
-- [ ] **Reconnect with backoff** - exponential backoff with jitter (1s → 30s max)
-- [ ] **Report result on reconnect** - "hey, I finished job X while you were away"
-- [ ] **Heartbeat tolerance** - server doesn't mark worker offline for 60s+ of no contact
 
 ### GitHub App Public
 

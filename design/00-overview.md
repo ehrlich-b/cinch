@@ -242,14 +242,18 @@ cinch/
 
 ## Scaling Considerations
 
+Cinch uses **vertical scaling** for simplicity. See `design/11-scaling.md` for details.
+
 **Self-hosted (SQLite):**
 - Single server instance
 - Multiple workers connect to it
 - Good for: individual developers, small teams, homelab
 
 **Hosted (Postgres):**
-- Multiple server instances behind load balancer
-- Sticky sessions for WebSocket (or Redis pub/sub)
-- Good for: multi-tenant SaaS
+- Single server instance + Fly Postgres
+- Scale up machines as needed
+- Good for: SaaS, larger teams
 
-For v0.1, focus on self-hosted/SQLite. Multi-instance is a v0.3+ concern.
+**Capacity:** Way more than you'd expect. A single beefy server handles 100k+ workers, millions of jobs. See `design/11-scaling.md`.
+
+Horizontal scaling is explicitly unplanned until proven necessary.

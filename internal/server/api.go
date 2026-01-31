@@ -129,13 +129,23 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a forge/owner/repo path (forge contains a dot like github.com)
 		parts := strings.SplitN(repoPath, "/", 4)
 		if len(parts) >= 3 && strings.Contains(parts[0], ".") {
-			// This is /repos/{forge}/{owner}/{repo}[/jobs]
+			// This is /repos/{forge}/{owner}/{repo}[/jobs|/secrets]
 			forge, owner, repoName := parts[0], parts[1], parts[2]
 			if len(parts) == 4 && parts[3] == "jobs" {
 				// /repos/{forge}/{owner}/{repo}/jobs
 				if r.Method == http.MethodGet {
 					h.listRepoJobs(w, r, forge, owner, repoName)
 				} else {
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
+			} else if len(parts) == 4 && parts[3] == "secrets" {
+				// /repos/{forge}/{owner}/{repo}/secrets
+				switch r.Method {
+				case http.MethodGet:
+					h.listRepoSecrets(w, r, forge, owner, repoName)
+				case http.MethodPut:
+					h.updateRepoSecrets(w, r, forge, owner, repoName)
+				default:
 					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				}
 			} else if len(parts) == 3 {
@@ -149,15 +159,27 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "not found", http.StatusNotFound)
 			}
 		} else {
-			// This is /repos/{id} (legacy)
-			repoID := repoPath
-			switch r.Method {
-			case http.MethodGet:
-				h.getRepo(w, r, repoID)
-			case http.MethodDelete:
-				h.deleteRepo(w, r, repoID)
-			default:
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			// This is /repos/{id} (legacy) or /repos/{id}/secrets
+			if strings.HasSuffix(repoPath, "/secrets") {
+				repoID := strings.TrimSuffix(repoPath, "/secrets")
+				switch r.Method {
+				case http.MethodGet:
+					h.listRepoSecretsById(w, r, repoID)
+				case http.MethodPut:
+					h.updateRepoSecretsById(w, r, repoID)
+				default:
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
+			} else {
+				repoID := repoPath
+				switch r.Method {
+				case http.MethodGet:
+					h.getRepo(w, r, repoID)
+				case http.MethodDelete:
+					h.deleteRepo(w, r, repoID)
+				default:
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
 			}
 		}
 
@@ -1325,6 +1347,160 @@ func (h *APIHandler) listRepoJobs(w http.ResponseWriter, r *http.Request, forge,
 	}
 
 	h.writeJSON(w, map[string]any{"jobs": resp})
+}
+
+// --- Secrets ---
+
+type secretsResponse struct {
+	Keys []string `json:"keys"` // Only expose key names, not values
+}
+
+type updateSecretsRequest struct {
+	Secrets map[string]string `json:"secrets"`
+}
+
+func (h *APIHandler) listRepoSecrets(w http.ResponseWriter, r *http.Request, forge, owner, repoName string) {
+	forgeType := forgeDomainToType(forge)
+	repo, err := h.storage.GetRepoByOwnerName(r.Context(), forgeType, owner, repoName)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "repo not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get repo", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Require authentication and ownership
+	if !h.requireRepoOwner(w, r, repo) {
+		return
+	}
+
+	// Return only the keys, not the values
+	keys := make([]string, 0, len(repo.Secrets))
+	for k := range repo.Secrets {
+		keys = append(keys, k)
+	}
+	h.writeJSON(w, secretsResponse{Keys: keys})
+}
+
+func (h *APIHandler) updateRepoSecrets(w http.ResponseWriter, r *http.Request, forge, owner, repoName string) {
+	forgeType := forgeDomainToType(forge)
+	repo, err := h.storage.GetRepoByOwnerName(r.Context(), forgeType, owner, repoName)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "repo not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get repo", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Require authentication and ownership
+	if !h.requireRepoOwner(w, r, repo) {
+		return
+	}
+
+	var req updateSecretsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.storage.UpdateRepoSecrets(r.Context(), repo.ID, req.Secrets); err != nil {
+		h.log.Error("failed to update secrets", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the keys of the updated secrets
+	keys := make([]string, 0, len(req.Secrets))
+	for k := range req.Secrets {
+		keys = append(keys, k)
+	}
+	h.writeJSON(w, secretsResponse{Keys: keys})
+}
+
+func (h *APIHandler) listRepoSecretsById(w http.ResponseWriter, r *http.Request, repoID string) {
+	repo, err := h.storage.GetRepo(r.Context(), repoID)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "repo not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get repo", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Require authentication and ownership
+	if !h.requireRepoOwner(w, r, repo) {
+		return
+	}
+
+	keys := make([]string, 0, len(repo.Secrets))
+	for k := range repo.Secrets {
+		keys = append(keys, k)
+	}
+	h.writeJSON(w, secretsResponse{Keys: keys})
+}
+
+func (h *APIHandler) updateRepoSecretsById(w http.ResponseWriter, r *http.Request, repoID string) {
+	repo, err := h.storage.GetRepo(r.Context(), repoID)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "repo not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get repo", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Require authentication and ownership
+	if !h.requireRepoOwner(w, r, repo) {
+		return
+	}
+
+	var req updateSecretsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.storage.UpdateRepoSecrets(r.Context(), repo.ID, req.Secrets); err != nil {
+		h.log.Error("failed to update secrets", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	keys := make([]string, 0, len(req.Secrets))
+	for k := range req.Secrets {
+		keys = append(keys, k)
+	}
+	h.writeJSON(w, secretsResponse{Keys: keys})
+}
+
+// requireRepoOwner checks if the current user owns the repo. Returns false if not authorized.
+func (h *APIHandler) requireRepoOwner(w http.ResponseWriter, r *http.Request, repo *storage.Repo) bool {
+	if h.auth == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	user := h.auth.GetUser(r)
+	if user == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	// Check if user is the repo owner (simple ownership model for MVP)
+	// TODO: check collaborator status via forge API
+	if user != repo.Owner {
+		http.Error(w, "forbidden: only repo owner can manage secrets", http.StatusForbidden)
+		return false
+	}
+	return true
 }
 
 // --- Tokens ---

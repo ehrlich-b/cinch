@@ -2,12 +2,16 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -312,7 +316,7 @@ func (w *Worker) connect() error {
 	return nil
 }
 
-// reconnect attempts to reconnect with exponential backoff.
+// reconnect attempts to reconnect with exponential backoff and jitter.
 func (w *Worker) reconnect() error {
 	delay := minReconnectDelay
 
@@ -323,8 +327,12 @@ func (w *Worker) reconnect() error {
 		default:
 		}
 
-		w.log.Info("attempting reconnect", "delay", delay)
-		time.Sleep(delay)
+		// Add jitter (0-50% of delay) to prevent thundering herd
+		jitter := time.Duration(rand.Int63n(int64(delay / 2)))
+		actualDelay := delay + jitter
+
+		w.log.Info("attempting reconnect", "delay", actualDelay)
+		time.Sleep(actualDelay)
 
 		if err := w.connect(); err != nil {
 			w.log.Warn("reconnect failed", "error", err)
@@ -333,6 +341,11 @@ func (w *Worker) reconnect() error {
 				delay = maxReconnectDelay
 			}
 			continue
+		}
+
+		// Flush any pending results from previous session
+		if err := w.flushPendingResults(); err != nil {
+			w.log.Warn("failed to flush pending results", "error", err)
 		}
 
 		return nil
@@ -362,6 +375,7 @@ func (w *Worker) sendRegister() error {
 }
 
 // send encodes and sends a message.
+// For critical messages (job completion/error), stores to disk if disconnected.
 func (w *Worker) send(msgType string, payload any) error {
 	msg, err := protocol.Encode(msgType, payload)
 	if err != nil {
@@ -372,10 +386,26 @@ func (w *Worker) send(msgType string, payload any) error {
 	defer w.connLock.Unlock()
 
 	if w.conn == nil {
+		// Store critical messages for later delivery
+		if isCriticalMessage(msgType) {
+			if storeErr := w.storePendingResult(msgType, payload); storeErr != nil {
+				w.log.Warn("failed to store pending result", "type", msgType, "error", storeErr)
+			}
+		}
 		return errors.New("not connected")
 	}
 
 	return w.conn.WriteMessage(websocket.TextMessage, msg)
+}
+
+// isCriticalMessage returns true for messages that must be delivered.
+func isCriticalMessage(msgType string) bool {
+	switch msgType {
+	case protocol.TypeJobComplete, protocol.TypeJobError:
+		return true
+	default:
+		return false
+	}
 }
 
 // readLoop reads and handles messages from server.
@@ -890,4 +920,127 @@ func (w *Worker) runInContainer(ctx context.Context, jobID string, source *conta
 	}
 
 	return docker.Run(ctx, command)
+}
+
+// pendingResultsDir returns the directory for storing pending results.
+func pendingResultsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".cinch", "pending")
+}
+
+// pendingResult represents a stored message waiting to be sent.
+type pendingResult struct {
+	MsgType   string `json:"msg_type"`
+	Payload   any    `json:"payload"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+// storePendingResult saves a job result to disk for later delivery.
+// Only critical messages (job completion/error) should be stored.
+func (w *Worker) storePendingResult(msgType string, payload any) error {
+	dir := pendingResultsDir()
+	if dir == "" {
+		return errors.New("cannot determine pending results directory")
+	}
+
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create pending results dir: %w", err)
+	}
+
+	result := pendingResult{
+		MsgType:   msgType,
+		Payload:   payload,
+		Timestamp: time.Now().UnixNano(),
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("marshal pending result: %w", err)
+	}
+
+	filename := fmt.Sprintf("%d-%s.json", result.Timestamp, msgType)
+	path := filepath.Join(dir, filename)
+
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("write pending result: %w", err)
+	}
+
+	w.log.Info("stored pending result", "type", msgType, "file", filename)
+	return nil
+}
+
+// flushPendingResults sends any stored pending results after reconnecting.
+func (w *Worker) flushPendingResults() error {
+	dir := pendingResultsDir()
+	if dir == "" {
+		return nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No pending results
+		}
+		return fmt.Errorf("read pending results dir: %w", err)
+	}
+
+	if len(entries) == 0 {
+		return nil
+	}
+
+	// Sort by filename (which includes timestamp) to maintain order
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
+
+	w.log.Info("flushing pending results", "count", len(entries))
+
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			w.log.Warn("failed to read pending result", "file", entry.Name(), "error", err)
+			continue
+		}
+
+		var result pendingResult
+		if err := json.Unmarshal(data, &result); err != nil {
+			w.log.Warn("failed to unmarshal pending result", "file", entry.Name(), "error", err)
+			// Remove corrupted file
+			os.Remove(path)
+			continue
+		}
+
+		// Re-encode the message for sending
+		msg, err := protocol.Encode(result.MsgType, result.Payload)
+		if err != nil {
+			w.log.Warn("failed to encode pending result", "type", result.MsgType, "error", err)
+			os.Remove(path)
+			continue
+		}
+
+		// Send directly (don't use w.send() to avoid recursion)
+		w.connLock.Lock()
+		sendErr := w.conn.WriteMessage(websocket.TextMessage, msg)
+		w.connLock.Unlock()
+
+		if sendErr != nil {
+			w.log.Warn("failed to send pending result", "type", result.MsgType, "error", sendErr)
+			// Keep the file for next retry
+			return sendErr
+		}
+
+		// Successfully sent, remove the file
+		os.Remove(path)
+		w.log.Info("flushed pending result", "type", result.MsgType)
+	}
+
+	return nil
 }

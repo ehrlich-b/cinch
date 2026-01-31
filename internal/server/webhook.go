@@ -173,12 +173,14 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Job:      job,
 		Repo:     repo,
 		Forge:    matchedForge,
+		Labels:   repo.Workers, // Worker labels for fan-out
 		CloneURL: event.Repo.CloneURL,
 		Ref:      event.Ref,
 		Branch:   event.Branch,
 		Tag:      event.Tag,
 		Config: protocol.JobConfig{
 			Command: command,
+			Env:     repo.Secrets, // Inject repo secrets as env vars
 		},
 		CloneToken: repo.ForgeToken,
 	})
@@ -261,11 +263,13 @@ func (h *WebhookHandler) handlePullRequest(w http.ResponseWriter, r *http.Reques
 		Job:      job,
 		Repo:     repo,
 		Forge:    matchedForge,
+		Labels:   repo.Workers, // Worker labels for fan-out
 		CloneURL: prEvent.Repo.CloneURL,
 		Ref:      "refs/pull/" + fmt.Sprintf("%d", prEvent.Number) + "/head", // PR ref format
 		Branch:   prEvent.HeadBranch,
 		Config: protocol.JobConfig{
 			Command: command,
+			Env:     repo.Secrets, // Inject repo secrets as env vars
 		},
 		CloneToken: repo.ForgeToken,
 	})
