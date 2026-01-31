@@ -1,80 +1,50 @@
 # Cinch TODO
 
-**Last Updated:** 2026-01-30
-
-**Goal:** Someone besides me uses this by Sunday (2026-02-02)
+**Goal:** First external user by Sunday 2026-02-02
 
 ---
 
 ## Launch Blockers
 
-### Landing Page - DONE
+- [ ] **Remove services from README** - Services syntax is shown but not wired up. Confuses first-time users. Services are v2 consideration.
+- [ ] **Add `cinch secrets` CLI** - Currently secrets require raw curl to API. Need `cinch secrets set KEY` and `cinch secrets list`.
+- [ ] **README pricing: mention beta is free** - Pricing section says "$5/seat/month" without noting it's free during beta. Users may bounce on price.
+- [ ] **Deep documentation** - Self-hosting guide needs webhook ingress details
 
-- ✅ **Hero section** - Headline + subhead + install command + forge logos
-- ✅ **How it works** - 3 visual steps with arrows
-- ✅ **Pricing section** - Free / Pro / Self-hosted
-- ✅ **Why Cinch** - 4 value props + config example
-- ✅ **Social proof** - Badge from cinch repo
+## Security (remaining)
 
-### Remaining Blockers
-
-- ✅ **Make GitHub App public** - Now public, anyone can install
-- [ ] **Deep documentation** - Self-hosting guide, webhook ingress, full reference
-
-### Security (remaining)
-
-- ✅ **Git token in clone URL** - Now uses GIT_ASKPASS instead of embedding in URL
-- [ ] **Worker ID collision** - Duplicate IDs overwrite without cleanup.
+- [ ] **Token in WebSocket URL** - Low priority, v2 protocol change
+- [ ] **Worker ID collision** - Close old connection on re-register (tracked in REVIEW.md)
 
 ---
 
-## Billing & Fair Use
+## Billing (Post-Launch)
 
-**Status:** Infrastructure done, Stripe stubbed, free during beta.
+**Status:** Free during beta. Infrastructure ready, Stripe stubbed.
 
-See `design/17-billing-and-teams.md` for full model.
-
-**Pricing (post-beta):** Free (public only, 100MB) / Pro $5/seat/mo (private, 10GB×seats) / Self-hosted (free, unlimited)
-
-**Org Purchasing Flow (when Stripe ready):**
-```
-1. Account → "Add Organization" → select GitHub/GitLab org you admin
-2. Set seat count (5/10/25/custom)
-3. Stripe Checkout → webhook creates org_billing record
-4. Adjust seats anytime → Stripe quantity update
-```
-
-**Graceful Error Handling (MVP):**
-- ✅ **Private repo → visible error** - Creates job, shows error in GitHub/GitLab status
-- [ ] **Storage quota exceeded** - Usage breakdown, link to manage
-- [ ] **Seat limit reached** - "Team at capacity (5/5 seats). Add seats at cinch.sh/billing"
-- ✅ **Worker limit reached** - Free: 10, Pro: 1000, shows error on connect
-- [ ] **Log retention warning** - Show "logs expire in X days" for free tier
-
-**Stripe Integration (post-launch):**
-- [ ] Products/prices, checkout flow, webhook handler, seat tracking
-
-**Enforcement (post-launch):**
-- [ ] Storage quota check, storage tracking on complete, log retention cleanup, worker limit
+- [ ] Storage quota exceeded → usage breakdown UI
+- [ ] Seat limit reached → "Team at capacity" message
+- [ ] Log retention warning → "logs expire in X days" for free tier
+- [ ] Stripe integration (products, checkout, webhook handler)
 
 ---
 
-## Bugs to Fix
+## Bugs
 
-- [ ] **No container config should fail** - Error with helpful message instead of defaulting to ubuntu:22.04
-- [ ] **Container-first clarity** - If Docker missing, fail with "install Docker or set `container: none`"
+- [ ] Container config errors should fail with helpful message, not default to ubuntu:22.04
+- [ ] Missing Docker should fail with "install Docker or set `container: none`"
 
 ---
 
 ## After Launch
 
-### User Acquisition
+**User Acquisition:**
 - [ ] r/selfhosted post
 - [ ] awesome-selfhosted PR
 - [ ] Hacker News Show HN
-- [ ] One badge on someone else's repo
+- [ ] Badge on someone else's repo
 
-### Install Flow Polish
+**Polish:**
 - [ ] Zero to green checkmark without questions
 - [ ] Error messages that help
 
@@ -82,69 +52,20 @@ See `design/17-billing-and-teams.md` for full model.
 
 ## Ready When Needed
 
-### Postgres
-SQLite handles launch. Postgres implemented and tested, ready if needed.
-- [ ] Wire DATABASE_URL in main.go
-- [ ] Deploy Fly Postgres
-- [ ] Data migration
+- **Postgres:** Implemented and tested. Wire DATABASE_URL when needed.
 
 ---
 
-## Polish (Post-Launch)
+## Done (2026-01-23 → 2026-01-31)
 
-- [ ] Visual polish, badge design, light/dark toggle, loading skeletons
-- [ ] Branch protection docs (GitHub rulesets, GitLab/Forgejo)
-- [ ] `cinch daemon scale N`, Windows support
-- [ ] Artifacts feature
+Core: Single binary, webhooks, GitHub App, OAuth, job queue, log streaming, badges, Fly.io deployment.
 
----
+Forges: GitHub, GitLab, Forgejo/Gitea, Codeberg with multi-forge push.
 
-## Done
+Infrastructure: WebSocket split (ws.cinch.sh), worker reconnect/heartbeat, self-hosting (filesystem logs, secrets, labels), Postgres ready.
 
-### Infrastructure (2026-01-30)
-- ✅ WebSocket endpoint split (ws.cinch.sh)
-- ✅ Worker resilience (reconnect, pending results, heartbeat)
-- ✅ Self-hosting (filesystem logs, secrets, labels)
-- ✅ Security review (all CRITICAL/HIGH fixed, encryption at rest)
-- ✅ Billing infrastructure (tier model, org schema, private repo gate, "Give Me Pro" UI)
-- ✅ Postgres implementation (ready to deploy)
+Security: Rate limiting (device auth), job ownership verification, worker collision handling, thread-safe Hub.List(), encryption at rest, fork detection, GIT_ASKPASS for credentials.
 
-### MVP 1.9 - Polish (2026-01-29)
-- ✅ Retry jobs, `cinch status`, `cinch logs -f`, worker list, remote control, visibility model
+UI: Landing page, pricing section, worker list, job retry, `cinch status`, `cinch logs -f`.
 
-### MVP 1.8 - Worker Trust (2026-01-28)
-- ✅ Personal/shared modes, trust levels, fork PR approval
-
-### MVP 1.7 - PR Support (2026-01-28)
-- ✅ GitHub/GitLab/Forgejo PRs, status checks, UI
-
-### MVP 1.6 - Logs → R2 (2026-01-28)
-- ✅ R2 storage, streaming, retrieval
-
-### MVP 1.5 - Daemon (2026-01-28)
-- ✅ launchd/systemd, parallelism, graceful shutdown
-
-### MVP 1.4 - Forge Expansion (2026-01-27)
-- ✅ GitLab, Forgejo/Gitea, multi-forge push
-
-### MVP 1.0-1.3 - Core (2026-01-23-26)
-- ✅ Single binary, webhooks, GitHub App, OAuth, job queue, log streaming, badges, Fly.io
-
----
-
-## Architecture Reference
-
-```bash
-# Job environment variables
-CINCH_REF=refs/heads/main
-CINCH_BRANCH=main
-CINCH_COMMIT=abc1234567890
-CINCH_JOB_ID=j_abc123
-CINCH_FORGE=github
-CINCH_FORGE_TOKEN=xxx
-```
-
-```
-Cloudflare (CDN + R2) → Fly.io (single node) → SQLite/Postgres
-Workers connect via WebSocket, retry on disconnect.
-```
+Worker: Personal/shared modes, trust levels, fork PR approval, daemon (launchd/systemd).
