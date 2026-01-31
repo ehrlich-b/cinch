@@ -1409,15 +1409,28 @@ func (h *APIHandler) updateRepoSecrets(w http.ResponseWriter, r *http.Request, f
 		return
 	}
 
-	if err := h.storage.UpdateRepoSecrets(r.Context(), repo.ID, req.Secrets); err != nil {
+	// Merge with existing secrets: empty values delete the key
+	merged := make(map[string]string)
+	for k, v := range repo.Secrets {
+		merged[k] = v
+	}
+	for k, v := range req.Secrets {
+		if v == "" {
+			delete(merged, k)
+		} else {
+			merged[k] = v
+		}
+	}
+
+	if err := h.storage.UpdateRepoSecrets(r.Context(), repo.ID, merged); err != nil {
 		h.log.Error("failed to update secrets", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	// Return the keys of the updated secrets
-	keys := make([]string, 0, len(req.Secrets))
-	for k := range req.Secrets {
+	// Return the keys of all secrets after update
+	keys := make([]string, 0, len(merged))
+	for k := range merged {
 		keys = append(keys, k)
 	}
 	h.writeJSON(w, secretsResponse{Keys: keys})
@@ -1470,14 +1483,28 @@ func (h *APIHandler) updateRepoSecretsById(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := h.storage.UpdateRepoSecrets(r.Context(), repo.ID, req.Secrets); err != nil {
+	// Merge with existing secrets: empty values delete the key
+	merged := make(map[string]string)
+	for k, v := range repo.Secrets {
+		merged[k] = v
+	}
+	for k, v := range req.Secrets {
+		if v == "" {
+			delete(merged, k)
+		} else {
+			merged[k] = v
+		}
+	}
+
+	if err := h.storage.UpdateRepoSecrets(r.Context(), repo.ID, merged); err != nil {
 		h.log.Error("failed to update secrets", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	keys := make([]string, 0, len(req.Secrets))
-	for k := range req.Secrets {
+	// Return the keys of all secrets after update
+	keys := make([]string, 0, len(merged))
+	for k := range merged {
 		keys = append(keys, k)
 	}
 	h.writeJSON(w, secretsResponse{Keys: keys})

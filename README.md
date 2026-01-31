@@ -37,13 +37,6 @@ Add `.cinch.yaml` to your repo, push. Done.
 # .cinch.yaml
 build: make check
 release: make release  # optional: runs on tag pushes
-
-services:
-  postgres:
-    image: postgres:16
-    env:
-      POSTGRES_PASSWORD: postgres
-
 workers: [linux-amd64, linux-arm64]  # optional: fan-out to multiple platforms
 ```
 

@@ -6,9 +6,9 @@
 
 ## Launch Blockers
 
-- [ ] **Remove services from README** - Services syntax is shown but not wired up. Confuses first-time users. Services are v2 consideration.
-- [ ] **Add `cinch secrets` CLI** - Currently secrets require raw curl to API. Need `cinch secrets set KEY` and `cinch secrets list`.
-- [ ] **Deep documentation** - Self-hosting guide needs webhook ingress details
+- [x] **Remove services from README** - Services syntax is shown but not wired up. Confuses first-time users. Services are v2 consideration.
+- [x] **Add `cinch secrets` CLI** - `cinch secrets list`, `cinch secrets set KEY=VALUE`, `cinch secrets delete KEY`
+- [x] **Deep documentation** - Self-hosting guide has webhook ingress options (Cloudflare Tunnel, ngrok, Tailscale Funnel, VPS proxy)
 
 ## Security (remaining)
 

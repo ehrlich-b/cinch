@@ -108,6 +108,11 @@ cinch release dist/*        # Upload release assets to forge
 cinch repo add              # Add repo to Cinch
 cinch repo list             # List connected repos
 
+# Secrets management
+cinch secrets list          # List secret names for current repo
+cinch secrets set KEY=VALUE # Set a secret
+cinch secrets delete KEY    # Delete a secret
+
 # Config validation
 cinch config validate       # Validate .cinch.yaml
 
