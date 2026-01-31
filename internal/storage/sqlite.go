@@ -30,10 +30,14 @@ func NewSQLite(dsn string, encryptionSecret string) (*SQLiteStorage, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// Enable foreign keys and WAL mode for better performance
+	// Enable foreign keys, WAL mode, and busy timeout for better concurrency
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set busy timeout: %w", err)
 	}
 	if dsn != ":memory:" {
 		if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
@@ -41,6 +45,8 @@ func NewSQLite(dsn string, encryptionSecret string) (*SQLiteStorage, error) {
 			return nil, fmt.Errorf("enable WAL: %w", err)
 		}
 	}
+	// Limit concurrent connections - SQLite handles concurrency internally with WAL
+	db.SetMaxOpenConns(1)
 
 	var cipher *crypto.Cipher
 	if encryptionSecret != "" {
