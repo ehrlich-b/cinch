@@ -54,8 +54,8 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
 
       <div className="container">
         <section className="hero">
-          <h1>GitHub charges $0.008/min for runners.<br /><span>Use your own hardware instead.</span></h1>
-          <p className="tagline">Cinch runs CI on your machines. One config file, any git forge, zero cloud bills.</p>
+          <h1>CI that's a <span>cinch</span></h1>
+          <p className="tagline">Run CI on your own hardware. Free for public repos. Self-host the whole thing.</p>
 
           <div className="install-row">
             <div className="install-box">
@@ -64,15 +64,13 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
                 {copied ? 'Copied!' : 'Copy'}
               </button>
             </div>
-            <a href="https://github.com/ehrlich-b/cinch" className="demo-link">View on GitHub</a>
           </div>
 
           <div className="forge-logos">
-            <span className="forge-label">Works with:</span>
             <img src={githubLogo} alt="GitHub" className="forge-logo github" />
             <img src={gitlabLogo} alt="GitLab" className="forge-logo" />
             <img src={forgejoLogo} alt="Codeberg" className="forge-logo" />
-            <span className="forge-label">+ self-hosted</span>
+            <span className="forge-label">+ self-hosted forges</span>
           </div>
         </section>
       </div>
@@ -111,14 +109,14 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
           <p className="section-subtitle">Same Makefile locally and in CI. No translation layer.</p>
           <div className="why-grid">
             <div className="why-card">
-              <div className="why-icon">$</div>
-              <h3>Zero Cloud Bills</h3>
-              <p>GitHub Actions costs add up. Your laptop is already paid for.</p>
+              <div className="why-icon">🏠</div>
+              <h3>Your Hardware</h3>
+              <p>Run builds on your Mac, your server, your Raspberry Pi. You own it.</p>
             </div>
             <div className="why-card">
               <div className="why-icon">⚡</div>
               <h3>Instant Builds</h3>
-              <p>No waiting for shared runners. Your hardware is always available.</p>
+              <p>No waiting in queues. Your hardware is always available.</p>
             </div>
             <div className="why-card">
               <div className="why-icon">🔧</div>
@@ -127,8 +125,8 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
             </div>
             <div className="why-card">
               <div className="why-icon">🔀</div>
-              <h3>Multi-Forge</h3>
-              <p>GitHub, GitLab, Codeberg. One worker handles them all.</p>
+              <h3>Any Forge</h3>
+              <p>GitHub, GitLab, Codeberg, self-hosted. One worker handles them all.</p>
             </div>
           </div>
           <div className="config-example">
