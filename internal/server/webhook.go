@@ -148,6 +148,14 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Check if private repo can run builds (requires Pro)
+	if err := h.checkPrivateRepoAccess(ctx, repo); err != nil {
+		h.log.Info("private repo blocked", "repo", event.Repo.FullName(), "error", err)
+		// Return 402 Payment Required to signal billing issue
+		http.Error(w, err.Error(), http.StatusPaymentRequired)
+		return
+	}
+
 	// Create job
 	job, err := h.createJob(ctx, repo, event)
 	if err != nil {
@@ -234,6 +242,14 @@ func (h *WebhookHandler) handlePullRequest(w http.ResponseWriter, r *http.Reques
 			h.log.Info("repo private flag updated", "repo", prEvent.Repo.FullName(), "private", prEvent.Repo.Private)
 			repo.Private = prEvent.Repo.Private
 		}
+	}
+
+	// Check if private repo can run builds (requires Pro)
+	if err := h.checkPrivateRepoAccess(ctx, repo); err != nil {
+		h.log.Info("private repo blocked", "repo", prEvent.Repo.FullName(), "error", err)
+		// Return 402 Payment Required to signal billing issue
+		http.Error(w, err.Error(), http.StatusPaymentRequired)
+		return
 	}
 
 	// Create job for PR
@@ -405,6 +421,24 @@ func (h *WebhookHandler) postStatus(ctx context.Context, f forge.Forge, repo *st
 
 func generateJobID() string {
 	return fmt.Sprintf("j_%d", time.Now().UnixNano())
+}
+
+// checkPrivateRepoAccess checks if a private repo can trigger builds.
+// Returns an error if access should be denied (private repos require Pro).
+func (h *WebhookHandler) checkPrivateRepoAccess(ctx context.Context, repo *storage.Repo) error {
+	if !repo.Private {
+		return nil // Public repos always allowed
+	}
+
+	// Check if org has Team Pro billing
+	billing, err := h.storage.GetOrgBilling(ctx, repo.ForgeType, repo.Owner)
+	if err == nil && billing != nil && billing.Status == "active" {
+		return nil // Org has active billing
+	}
+
+	// For MVP, we don't have user-to-repo linking, so private repos require org billing
+	// In the future, we could also check if repo owner (as Cinch user) has personal Pro
+	return fmt.Errorf("private repos require Pro. Get Pro at cinch.sh/account")
 }
 
 // PostJobStatus implements StatusPoster interface.

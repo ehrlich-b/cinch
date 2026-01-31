@@ -1578,6 +1578,62 @@ img.forge-icon.github {
   font-weight: 500;
 }
 
+/* Tier badges */
+.tier-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.tier-free {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.tier-pro {
+  background: var(--success);
+  color: var(--bg);
+}
+
+/* Billing upgrade CTA */
+.upgrade-cta {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.btn-give-me-pro {
+  background: var(--success);
+  color: var(--bg);
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-give-me-pro:hover {
+  opacity: 0.9;
+}
+
+.btn-give-me-pro:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.upgrade-desc {
+  margin-top: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
 .connected-forges {
   display: flex;
   flex-direction: column;

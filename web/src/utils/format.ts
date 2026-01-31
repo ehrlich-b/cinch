@@ -32,3 +32,12 @@ export function renderAnsi(text: string): string {
   // eslint-disable-next-line no-control-regex
   return text.replace(/\x1b\[[0-9;]*m/g, '')
 }
+
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  const value = bytes / Math.pow(k, i)
+  return `${value.toFixed(i === 0 ? 0 : 1)} ${sizes[i]}`
+}

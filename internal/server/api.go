@@ -1621,8 +1621,34 @@ func (h *APIHandler) revokeToken(w http.ResponseWriter, r *http.Request, tokenID
 // --- Give Me Pro (Beta) ---
 
 func (h *APIHandler) giveMePro(w http.ResponseWriter, r *http.Request) {
-	// Free during beta - just return success
-	h.writeJSON(w, map[string]any{"ok": true, "message": "Pro activated! Free during beta."})
+	// Require authentication
+	email := h.auth.GetUser(r)
+	if email == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Get user
+	user, err := h.storage.GetUserByEmail(r.Context(), email)
+	if err != nil {
+		h.log.Error("failed to get user for give-me-pro", "error", err)
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	// Update tier to Pro
+	if err := h.storage.UpdateUserTier(r.Context(), user.ID, storage.UserTierPro); err != nil {
+		h.log.Error("failed to update user tier", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	h.log.Info("user upgraded to Pro", "user", email, "user_id", user.ID)
+	h.writeJSON(w, map[string]any{
+		"ok":      true,
+		"message": "Pro activated! Free during beta.",
+		"tier":    "pro",
+	})
 }
 
 // --- User/Account ---
@@ -1639,6 +1665,10 @@ type userResponse struct {
 	Email           string           `json:"email,omitempty"`
 	ConnectedForges []connectedForge `json:"connected_forges"`
 	CreatedAt       time.Time        `json:"created_at"`
+	// Billing/quota
+	Tier             string `json:"tier"`               // "free" or "pro"
+	StorageUsedBytes int64  `json:"storage_used_bytes"` // Total storage used
+	StorageQuotaBytes int64 `json:"storage_quota_bytes"` // Total storage quota
 }
 
 func (h *APIHandler) getUser(w http.ResponseWriter, r *http.Request) {
@@ -1697,6 +1727,9 @@ func (h *APIHandler) getUser(w http.ResponseWriter, r *http.Request) {
 		Email:           user.Email,
 		ConnectedForges: forges,
 		CreatedAt:       user.CreatedAt,
+		Tier:            string(user.Tier),
+		StorageUsedBytes: user.StorageUsedBytes,
+		StorageQuotaBytes: user.StorageQuota(),
 	}
 
 	h.writeJSON(w, resp)
