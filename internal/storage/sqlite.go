@@ -185,10 +185,6 @@ func (s *SQLiteStorage) migrate() error {
 	// Storage tracking: add log size to jobs
 	_, _ = s.db.Exec("ALTER TABLE jobs ADD COLUMN log_size_bytes INTEGER NOT NULL DEFAULT 0")
 
-	// Repo ownership: add owner_user_id for quota attribution
-	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN owner_user_id TEXT")
-	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_repos_owner_user_id ON repos(owner_user_id)")
-
 	// Drop UNIQUE constraint on users.name (email is the identity, not username)
 	// SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the table
 	if s.hasUniqueConstraintOnUsersName() {
@@ -1222,58 +1218,6 @@ func (s *SQLiteStorage) UpdateUserStorageUsed(ctx context.Context, userID string
 		`UPDATE users SET storage_used_bytes = storage_used_bytes + ? WHERE id = ?`,
 		deltaBytes, userID)
 	return err
-}
-
-// GetUserByRepoID finds the user who owns a repo (for quota checks).
-// Returns nil if no owner is set (legacy repos).
-func (s *SQLiteStorage) GetUserByRepoID(ctx context.Context, repoID string) (*User, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.name, u.email, u.emails, u.github_connected_at,
-			u.gitlab_credentials, u.gitlab_credentials_at,
-			u.forgejo_credentials, u.forgejo_credentials_at,
-			u.tier, u.storage_used_bytes, u.created_at
-		FROM users u
-		JOIN repos r ON r.owner_user_id = u.id
-		WHERE r.id = ?
-	`, repoID)
-
-	var u User
-	var emails string
-	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
-	var tier sql.NullString
-	var storageUsed sql.NullInt64
-
-	err := row.Scan(&u.ID, &u.Name, &u.Email, &emails, &githubConnectedAt,
-		&u.GitLabCredentials, &gitlabCredentialsAt,
-		&u.ForgejoCredentials, &forgejoCredentialsAt,
-		&tier, &storageUsed, &u.CreatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil // No owner set (legacy repo)
-		}
-		return nil, err
-	}
-
-	u.Emails = parseEmailsJSON(emails)
-	if githubConnectedAt.Valid {
-		u.GitHubConnectedAt = githubConnectedAt.Time
-	}
-	if gitlabCredentialsAt.Valid {
-		u.GitLabCredentialsAt = gitlabCredentialsAt.Time
-	}
-	if forgejoCredentialsAt.Valid {
-		u.ForgejoCredentialsAt = forgejoCredentialsAt.Time
-	}
-	if tier.Valid {
-		u.Tier = UserTier(tier.String)
-	} else {
-		u.Tier = UserTierFree
-	}
-	if storageUsed.Valid {
-		u.StorageUsedBytes = storageUsed.Int64
-	}
-
-	return &u, nil
 }
 
 // Helper functions for emails JSON

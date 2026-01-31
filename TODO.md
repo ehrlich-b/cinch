@@ -71,33 +71,50 @@ See `REVIEW.md` for full security audit. Critical issues must be fixed before la
 - [ ] **Git token in clone URL** - Token visible in process list. Use git credential helper.
 - [ ] **Worker ID collision** - Duplicate IDs overwrite without cleanup.
 
-### Fair Use Limits
+### Billing & Fair Use Limits (MVP)
 
-Prevent R2 abuse without restricting legitimate use. See `design/20-fair-use-limits.md`.
+Teams are primary users. See `design/17-billing-and-teams.md` and `design/20-fair-use-limits.md`.
 
-**Three tiers:**
-| Resource | Free | Pro ($5/seat) | Self-Hosted |
-|----------|------|---------------|-------------|
-| Storage quota | 100 MB | 10 GB | Unlimited |
+**Pricing:**
+- Personal Pro: $5/mo or $48/yr (20% off yearly)
+- Team Pro: $5/seat/mo or $48/seat/yr
+- Free: public repos only, 100MB storage, 7-day retention
+
+**Key concepts:**
+- High Water Mark (HWM) seats, not metered - you set limit, builds block if exceeded
+- Pro status belongs to the USER - if employer pays, you get Pro at home too
+- Quota follows REPO OWNER - org repos use org quota, personal repos use personal quota
+
+**Limits:**
+| Resource | Free | Pro | Self-Hosted |
+|----------|------|-----|-------------|
+| Private repos | ❌ | ✅ | ✅ |
+| Storage quota | 100 MB | 10 GB × seats | Unlimited |
 | Log retention | 7 days | 90 days | Unlimited |
 | Workers | 10 | 1000 | Unlimited |
-| Concurrent jobs | 5 | 100 | Unlimited |
-| Job timeout max | 1 hour | 6 hours | Unlimited |
 
 **Infrastructure (done):**
 - [x] **Log compression** - Gzip on finalize (~10-30x savings), backwards compatible
-- [x] **User tier model** - `tier` field: free/pro (self-hosted = no enforcement)
+- [x] **User tier model** - `tier` field: free/pro
 - [x] **Storage tracking fields** - `user.storage_used_bytes`, `job.log_size_bytes`
-- [x] **Storage interface methods** - `UpdateJobLogSize`, `UpdateUserStorageUsed`, `GetUserByRepoID`
+- [x] **Storage interface methods** - `UpdateJobLogSize`, `UpdateUserStorageUsed`
 - [x] **Size tracking on finalize** - `Finalize()` returns compressed size, stored in job
 
+**Billing (TODO):**
+- [ ] **Org billing schema** - `org_billing`, `org_seats` tables
+- [ ] **Stripe products/prices** - personal_monthly, personal_yearly, team_monthly, team_yearly
+- [ ] **Checkout flow** - `/api/billing/checkout` → Stripe Checkout
+- [ ] **Webhook handler** - `invoice.paid`, `subscription.updated`, `subscription.deleted`
+- [ ] **Pro status check** - `HasPro()` checks personal subscription + org seats
+- [ ] **Private repo gate** - Block private repos without Pro
+- [ ] **Seat tracking** - Consume seat on job trigger, block if over limit
+- [ ] **Billing UI** - Status, upgrade, seat management
+
 **Enforcement (TODO):**
-- [ ] **Quota check at job dispatch** - Block new jobs if user over quota
-- [ ] **Aggregate user storage** - Update `user.storage_used_bytes` on job complete
-- [ ] **Link repos to users** - Set `repos.owner_user_id` on repo create
-- [ ] **Log retention cleanup** - Background job to delete old logs
-- [ ] **Worker limit enforcement** - Reject registration when at limit
-- [ ] **Usage API endpoint** - `GET /api/account/usage`
+- [ ] **Storage quota check** - Block if org/user over quota
+- [ ] **Storage tracking on complete** - Update org or user storage based on repo owner
+- [ ] **Log retention cleanup** - Background job deletes old logs
+- [ ] **Worker limit check** - Reject registration when at limit
 
 ---
 
@@ -147,20 +164,6 @@ SQLite handles launch. Postgres is implemented and tested, ready to deploy if we
 
 ---
 
-## After First Users: Billing
-
-**Pricing decision: Keep it simple.**
-
-$5/seat/month. One SKU. No personal/team split, no yearly commitment complexity. A seat is anyone who triggers a build on a private repo. Public repos free forever. Self-hosted free forever.
-
-- [ ] Stripe checkout integration
-- [ ] Seat counting logic (unique pushers to private repos per billing period)
-- [ ] Public vs private repo detection
-- [ ] Billing page in web UI
-- [ ] Soft enforcement (warn, don't block)
-
----
-
 ## Polish (Post-Launch)
 
 ### Web UI
@@ -183,9 +186,7 @@ $5/seat/month. One SKU. No personal/team split, no yearly commitment complexity.
 - [ ] Cache volumes need docs + configurability
 
 ### Pro Features (Post-Launch)
-- [ ] **Artifacts (Pro only)** - Upload build artifacts, 10GB shared quota
-- [ ] **Extended log retention** - 90 days (vs 7 days free)
-- [ ] **Higher concurrency** - 100 concurrent jobs (vs 5 free)
+- [ ] **Artifacts** - Upload build artifacts, shared quota with logs
 
 ---
 
