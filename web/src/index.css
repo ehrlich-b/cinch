@@ -836,6 +836,9 @@ tr.clickable {
   font-size: 12px;
   margin-bottom: 12px;
   color: var(--text);
+}
+
+.step-card:first-child code {
   white-space: nowrap;
 }
 
