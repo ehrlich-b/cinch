@@ -799,6 +799,10 @@ tr.clickable {
   border-radius: 12px;
   padding: 24px 20px;
   text-align: center;
+  width: 180px;
+}
+
+.step-card:first-child {
   width: 200px;
 }
 
