@@ -799,7 +799,7 @@ tr.clickable {
   border-radius: 12px;
   padding: 24px 20px;
   text-align: center;
-  width: 180px;
+  width: 200px;
 }
 
 .step-card .step-icon {
@@ -832,7 +832,7 @@ tr.clickable {
   font-size: 12px;
   margin-bottom: 12px;
   color: var(--text);
-  word-break: break-all;
+  white-space: nowrap;
 }
 
 .step-card p {
