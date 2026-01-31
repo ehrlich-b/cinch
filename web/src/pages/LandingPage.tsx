@@ -13,6 +13,7 @@ interface Props {
 export function LandingPage({ auth, setAuth, onNavigate }: Props) {
   const [givingPro, setGivingPro] = useState(false)
   const [showForgeSelector, setShowForgeSelector] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const handleGivePro = async () => {
     setGivingPro(true)
@@ -27,16 +28,21 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
     setGivingPro(false)
   }
 
+  const handleCopy = () => {
+    navigator.clipboard.writeText('curl -sSL https://cinch.sh/install.sh | sh')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
   return (
     <div className="landing">
       <header className="landing-header">
         <div className="landing-header-inner">
           <span className="landing-logo">cinch</span>
           <nav className="landing-nav">
-            <a href="#features">Features</a>
-            <a href="#quickstart">Quick Start</a>
+            <a href="#how-it-works">How It Works</a>
             <a href="#pricing">Pricing</a>
-            <a href="https://github.com/ehrlich-b/cinch">Code</a>
+            <a href="https://github.com/ehrlich-b/cinch">GitHub</a>
             {auth.authenticated ? (
               <button className="landing-btn" onClick={() => onNavigate('jobs')}>Dashboard</button>
             ) : (
@@ -48,130 +54,157 @@ export function LandingPage({ auth, setAuth, onNavigate }: Props) {
 
       <div className="container">
         <section className="hero">
-          <h1>CI that's a <span>cinch</span></h1>
-          <p className="tagline">The exact <code>make build</code> you run locally. That's your CI.</p>
-
-          <div className="config-showcase">
-            <div className="config-file">
-              <div className="config-filename">.cinch.yaml</div>
-              <pre className="config-content">build: make build{'\n'}release: make release</pre>
-            </div>
-            <div className="config-file">
-              <div className="config-filename">Makefile</div>
-              <pre className="config-content">build:{'\n'}    go build -o bin/app{'\n'}{'\n'}release:{'\n'}    cinch release dist/*</pre>
-            </div>
-          </div>
-
-          <p className="hero-subtext">Your Makefile already works. We just run it on push.</p>
+          <h1>GitHub charges $0.008/min for runners.<br /><span>Use your own hardware instead.</span></h1>
+          <p className="tagline">Cinch runs CI on your machines. One config file, any git forge, zero cloud bills.</p>
 
           <div className="install-row">
             <div className="install-box">
               <code className="install-cmd">curl -sSL https://cinch.sh/install.sh | sh</code>
-              <button className="copy-btn" onClick={() => navigator.clipboard.writeText('curl -sSL https://cinch.sh/install.sh | sh')}>
-                Copy
+              <button className="copy-btn" onClick={handleCopy}>
+                {copied ? 'Copied!' : 'Copy'}
               </button>
             </div>
+            <a href="https://github.com/ehrlich-b/cinch" className="demo-link">View on GitHub</a>
           </div>
-          <p className="install-note">macOS and Linux. Windows via WSL.</p>
+
+          <div className="forge-logos">
+            <span className="forge-label">Works with:</span>
+            <img src={githubLogo} alt="GitHub" className="forge-logo github" />
+            <img src={gitlabLogo} alt="GitLab" className="forge-logo" />
+            <img src={forgejoLogo} alt="Codeberg" className="forge-logo" />
+            <span className="forge-label">+ self-hosted</span>
+          </div>
         </section>
       </div>
 
-      <section className="features-section" id="features">
+      <section className="how-it-works-section" id="how-it-works">
         <div className="container">
-          <h2>Why cinch?</h2>
-          <p className="section-subtitle">Your Makefile is the pipeline. We just invoke it.</p>
-          <div className="features-grid-landing">
-            <div className="feature-card">
-              <h3>Multi-Forge</h3>
-              <p>GitHub, GitLab, Codeberg. One worker, any forge. Self-hosted Forgejo and GitLab too.</p>
+          <h2>How It Works</h2>
+          <div className="steps-row">
+            <div className="step-card">
+              <div className="step-icon">1</div>
+              <h3>Install</h3>
+              <code>curl -sSL https://cinch.sh/install.sh | sh</code>
+              <p>One command. No dependencies.</p>
             </div>
-            <div className="feature-card">
-              <h3>Your Hardware</h3>
-              <p>Run builds on your Mac, your VM, your Raspberry Pi. No per-minute charges. No waiting in shared queues.</p>
+            <div className="step-arrow">→</div>
+            <div className="step-card">
+              <div className="step-icon">2</div>
+              <h3>Login</h3>
+              <code>cinch login</code>
+              <p>Opens browser, saves credentials.</p>
             </div>
-            <div className="feature-card">
-              <h3>Dead Simple</h3>
-              <p>One command in .cinch.yaml. No multi-step pipelines, no DAGs, no plugins. Just make ci.</p>
+            <div className="step-arrow">→</div>
+            <div className="step-card">
+              <div className="step-icon">3</div>
+              <h3>Run</h3>
+              <code>cinch worker</code>
+              <p>Builds run on your machine.</p>
             </div>
           </div>
         </div>
       </section>
 
-      <div className="container">
-        <section className="quickstart" id="quickstart">
-          <h2>Quick Start</h2>
-          <div className="steps">
-            <div className="step">
-              <div className="step-number">1</div>
-              <h3>Install & login</h3>
-              <p><code>curl -sSL https://cinch.sh/install.sh | sh</code> then <code>cinch login</code></p>
+      <section className="why-section" id="why">
+        <div className="container">
+          <h2>Why Cinch?</h2>
+          <p className="section-subtitle">Same Makefile locally and in CI. No translation layer.</p>
+          <div className="why-grid">
+            <div className="why-card">
+              <div className="why-icon">$</div>
+              <h3>Zero Cloud Bills</h3>
+              <p>GitHub Actions costs add up. Your laptop is already paid for.</p>
             </div>
-            <div className="step">
-              <div className="step-number">2</div>
-              <h3>Start a worker</h3>
-              <p><code>cinch worker</code> — runs on your Mac, Linux box, or Raspberry Pi.</p>
+            <div className="why-card">
+              <div className="why-icon">⚡</div>
+              <h3>Instant Builds</h3>
+              <p>No waiting for shared runners. Your hardware is always available.</p>
             </div>
-            <div className="step">
-              <div className="step-number">3</div>
-              <h3>Push code</h3>
-              <p>Add <code>.cinch.yaml</code> with <code>build: make build</code> and push.</p>
+            <div className="why-card">
+              <div className="why-icon">🔧</div>
+              <h3>Dead Simple</h3>
+              <p>One command in config. No YAML pipelines, no plugins, no complexity.</p>
+            </div>
+            <div className="why-card">
+              <div className="why-icon">🔀</div>
+              <h3>Multi-Forge</h3>
+              <p>GitHub, GitLab, Codeberg. One worker handles them all.</p>
             </div>
           </div>
-        </section>
-      </div>
+          <div className="config-example">
+            <div className="config-file">
+              <div className="config-filename">.cinch.yaml</div>
+              <pre className="config-content">build: make build</pre>
+            </div>
+            <p className="config-caption">That's it. The same <code>make build</code> you run locally.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="social-proof-section">
+        <div className="container">
+          <p className="social-proof-text">Cinch builds itself with Cinch</p>
+          <img
+            src="https://cinch.sh/badge/github/ehrlich-b/cinch"
+            alt="Cinch build status"
+            className="social-proof-badge"
+          />
+        </div>
+      </section>
 
       <section className="pricing-section" id="pricing">
         <div className="container">
           <h2>Pricing</h2>
-          <p className="pricing-subtitle">Free while in beta. MIT licensed. Self-host anytime.</p>
+          <p className="pricing-subtitle">Free during beta. MIT licensed.</p>
           <div className="pricing-grid-landing">
             <div className="plan-card">
-              <div className="plan-name">Public Repos</div>
+              <div className="plan-name">Free</div>
               <div className="plan-price">$0</div>
-              <div className="plan-note">Free forever</div>
+              <div className="plan-note">Public repos</div>
               <ul className="plan-features-list">
                 <li>Unlimited builds</li>
-                <li>Unlimited workers</li>
-                <li>All forges supported</li>
-                <li>Community support</li>
+                <li>10 workers</li>
+                <li>100 MB log storage</li>
+                <li>7-day retention</li>
               </ul>
-              <div className="plan-cta"></div>
             </div>
             <div className="plan-card featured">
               <div className="plan-name">Pro</div>
               <div className="plan-price"><s className="old-price">$5</s> $0<span className="period">/seat/mo</span></div>
               <div className="plan-note">Free during beta</div>
               <ul className="plan-features-list">
-                <li>Everything in Free</li>
                 <li>Private repositories</li>
-                <li>Priority support</li>
-                <li>Badge customization</li>
+                <li>1000 workers</li>
+                <li>10 GB storage per seat</li>
+                <li>90-day retention</li>
               </ul>
               <div className="plan-cta">
                 {auth.isPro ? (
                   <div className="pro-status">You have Pro</div>
                 ) : auth.authenticated ? (
                   <button className="btn-pro" onClick={handleGivePro} disabled={givingPro}>
-                    {givingPro ? 'Activating...' : 'Give me Pro'}
+                    {givingPro ? 'Activating...' : 'Get Pro Free'}
                   </button>
                 ) : (
-                  <a href="/auth/login" className="btn-pro" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>
-                    Login to get Pro
-                  </a>
+                  <button className="btn-pro" onClick={() => setShowForgeSelector(true)}>
+                    Get Started
+                  </button>
                 )}
               </div>
             </div>
             <div className="plan-card">
-              <div className="plan-name">Enterprise</div>
-              <div className="plan-price">Custom</div>
-              <div className="plan-note">For teams that need support</div>
+              <div className="plan-name">Self-Hosted</div>
+              <div className="plan-price">$0</div>
+              <div className="plan-note">Your infrastructure</div>
               <ul className="plan-features-list">
-                <li>Dedicated support</li>
-                <li>SLA guarantees</li>
-                <li>Custom integrations</li>
-                <li>Managed hosting option</li>
+                <li>Everything unlimited</li>
+                <li>MIT licensed</li>
+                <li>Single binary deploy</li>
+                <li>Your data stays yours</li>
               </ul>
-              <div className="plan-cta"></div>
+              <div className="plan-cta">
+                <a href="https://github.com/ehrlich-b/cinch" className="btn-selfhost">View Source</a>
+              </div>
             </div>
           </div>
         </div>
