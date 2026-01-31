@@ -18,8 +18,8 @@
 
 ### Remaining Blockers
 
-- [ ] **Make GitHub App public** - Currently private, strangers can't install
-- [ ] **Public webhook ingress guidance** - Clear setup docs for self-hosted
+- ✅ **Make GitHub App public** - Now public, anyone can install
+- [ ] **Deep documentation** - Self-hosting guide, webhook ingress, full reference
 
 ### Security (remaining)
 

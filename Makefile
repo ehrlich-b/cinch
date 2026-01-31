@@ -1,6 +1,6 @@
 # Cinch Makefile
 
-.PHONY: build test fmt lint check release clean web web-deps web-dev dev dev-worker run pull push push-tags install-hooks
+.PHONY: build test fmt lint check release clean web web-deps web-dev dev dev-worker run pull push push-tags install-hooks analytics analytics-live analytics-users analytics-repos fly-deploy fly-logs fly-ssh
 
 # -----------------------------------------------------------------------------
 # Development
@@ -137,3 +137,28 @@ fly-logs:
 
 fly-ssh:
 	fly ssh console -a $(FLY_APP)
+
+# -----------------------------------------------------------------------------
+# Analytics (from Fly.io logs)
+# -----------------------------------------------------------------------------
+
+analytics:
+	@echo "=== Last 24 Hours ==="
+	@printf "Homepage (human): " && fly logs -a $(FLY_APP) --no-tail | grep "homepage human" | wc -l | tr -d ' '
+	@printf "Homepage (bot):   " && fly logs -a $(FLY_APP) --no-tail | grep "homepage bot" | wc -l | tr -d ' '
+	@printf "Install script:   " && fly logs -a $(FLY_APP) --no-tail | grep "install script download" | wc -l | tr -d ' '
+	@printf "GitHub logins:    " && fly logs -a $(FLY_APP) --no-tail | grep "user authenticated via GitHub" | wc -l | tr -d ' '
+	@printf "GitLab logins:    " && fly logs -a $(FLY_APP) --no-tail | grep "user authenticated via GitLab" | wc -l | tr -d ' '
+	@printf "Workers:          " && fly logs -a $(FLY_APP) --no-tail | grep "worker registered" | wc -l | tr -d ' '
+	@printf "Jobs completed:   " && fly logs -a $(FLY_APP) --no-tail | grep "job completed" | wc -l | tr -d ' '
+
+analytics-live:
+	@fly logs -a $(FLY_APP) | grep -E "homepage human|homepage bot|install script|authenticated via|worker registered|job completed"
+
+analytics-users:
+	@echo "=== Users in Database ==="
+	@fly ssh console -a $(FLY_APP) -C "sqlite3 /data/cinch.db 'SELECT email, created_at FROM users ORDER BY created_at DESC;'"
+
+analytics-repos:
+	@echo "=== Repos in Database ==="
+	@fly ssh console -a $(FLY_APP) -C "sqlite3 /data/cinch.db 'SELECT forge_type, owner, name, created_at FROM repos ORDER BY created_at DESC;'"

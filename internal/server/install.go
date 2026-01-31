@@ -1,14 +1,61 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
+	"strings"
 )
 
 // InstallScriptHandler serves the install script for curl | sh installation
 func InstallScriptHandler(w http.ResponseWriter, r *http.Request) {
+	// Log install script downloads for analytics
+	ip := ExtractClientIP(r)
+	ua := r.Header.Get("User-Agent")
+	slog.Info("install script download", "ip", ip, "ua", ua)
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write([]byte(installScript))
+}
+
+// ExtractClientIP gets the real client IP, checking X-Forwarded-For for proxies
+func ExtractClientIP(r *http.Request) string {
+	// Check X-Forwarded-For (set by Cloudflare and other proxies)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// Take the first IP in the chain (original client)
+		if idx := strings.Index(xff, ","); idx != -1 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+	// Check CF-Connecting-IP (Cloudflare specific)
+	if cfIP := r.Header.Get("CF-Connecting-IP"); cfIP != "" {
+		return cfIP
+	}
+	// Fall back to RemoteAddr
+	if idx := strings.LastIndex(r.RemoteAddr, ":"); idx != -1 {
+		return r.RemoteAddr[:idx]
+	}
+	return r.RemoteAddr
+}
+
+// IsLikelyBot checks if a User-Agent looks like a bot/crawler/scanner
+func IsLikelyBot(ua string) bool {
+	ua = strings.ToLower(ua)
+	if ua == "" {
+		return true
+	}
+	botPatterns := []string{
+		"bot", "crawler", "spider", "scan", "python", "wget", "fetch",
+		"http", "axios", "node", "go-http", "java", "ruby", "perl",
+		"check", "monitor", "probe", "test", "uptime", "health",
+	}
+	for _, pattern := range botPatterns {
+		if strings.Contains(ua, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 const installScript = `#!/bin/sh

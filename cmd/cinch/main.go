@@ -380,6 +380,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	fileServer := http.FileServer(http.FS(webFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Log homepage visits for analytics (only exact "/" path, not assets)
+		if r.URL.Path == "/" {
+			ip := server.ExtractClientIP(r)
+			ua := r.Header.Get("User-Agent")
+			if server.IsLikelyBot(ua) {
+				log.Info("homepage bot", "ip", ip, "ua", ua)
+			} else {
+				log.Info("homepage human", "ip", ip, "ua", ua)
+			}
+		}
+
 		// Try to serve the file directly
 		path := r.URL.Path
 		if path == "/" {
