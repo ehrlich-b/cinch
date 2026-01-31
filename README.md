@@ -49,6 +49,30 @@ workers: [linux-amd64, linux-arm64]  # optional: fan-out to multiple platforms
 
 Builds run in containers by default (auto-detects your devcontainer). Caches persist between builds.
 
+## CLI Commands
+
+```bash
+# Core workflow
+cinch login                     # Auth via browser
+cinch worker                    # Start building
+cinch run                       # Test locally
+
+# Forge connections
+cinch connect gitlab            # Add GitLab account
+cinch connect codeberg          # Add Codeberg account
+
+# Worker daemon
+cinch daemon start|stop|status  # Manage background worker
+cinch daemon install            # Install as system service
+
+# Monitoring
+cinch status                    # Build status for current repo
+cinch logs JOB_ID               # Stream job logs
+
+# Self-hosting
+cinch server                    # Run control plane
+```
+
 ## Self-Host
 
 Run your own cinch server:
@@ -59,7 +83,7 @@ cinch server --port 8080 --db ./cinch.db
 
 Point your workers at it, configure webhooks to hit your server. No dependency on cinch.sh.
 
-See `cinch server --help` for configuration options.
+See [docs/self-hosting.md](docs/self-hosting.md) for the full self-hosting guide, including forge OAuth setup, reverse proxy configuration, and production hardening.
 
 ## Multi-Forge
 
