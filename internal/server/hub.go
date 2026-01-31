@@ -96,8 +96,14 @@ func (h *Hub) SetEventCallbacks(
 }
 
 // Register adds a worker to the hub.
+// If a worker with the same ID already exists, it is disconnected first.
 func (h *Hub) Register(worker *WorkerConn) {
 	h.mu.Lock()
+	// Check if a worker with this ID already exists
+	if existing, ok := h.workers[worker.ID]; ok {
+		// Close the old worker's send channel to signal disconnection
+		close(existing.Send)
+	}
 	worker.LastPing = time.Now()
 	h.workers[worker.ID] = worker
 	callback := h.onWorkerConnected
@@ -130,13 +136,27 @@ func (h *Hub) Get(workerID string) *WorkerConn {
 	return h.workers[workerID]
 }
 
-// List returns all connected workers.
-func (h *Hub) List() []*WorkerConn {
+// List returns all connected workers (as copies to prevent race conditions).
+func (h *Hub) List() []WorkerConn {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	workers := make([]*WorkerConn, 0, len(h.workers))
+	workers := make([]WorkerConn, 0, len(h.workers))
 	for _, w := range h.workers {
-		workers = append(workers, w)
+		// Return a copy of the worker struct (without the Send channel)
+		workers = append(workers, WorkerConn{
+			ID:           w.ID,
+			Name:         w.Name,
+			Labels:       append([]string(nil), w.Labels...),
+			Capabilities: w.Capabilities,
+			Hostname:     w.Hostname,
+			Version:      w.Version,
+			Mode:         w.Mode,
+			OwnerID:      w.OwnerID,
+			OwnerName:    w.OwnerName,
+			ActiveJobs:   append([]string(nil), w.ActiveJobs...),
+			LastPing:     w.LastPing,
+			// Note: Send channel is intentionally not copied
+		})
 	}
 	return workers
 }
@@ -289,6 +309,20 @@ func (h *Hub) matchesLabels(w *WorkerConn, required []string) bool {
 		}
 	}
 	return true
+}
+
+// IsJobAssignedToWorker checks if a job is currently assigned to a specific worker.
+func (h *Hub) IsJobAssignedToWorker(workerID, jobID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if w, ok := h.workers[workerID]; ok {
+		for _, id := range w.ActiveJobs {
+			if id == jobID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // AddActiveJob marks a job as active on a worker.
