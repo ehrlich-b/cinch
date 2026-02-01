@@ -262,11 +262,21 @@ make push-tags   # Push tags to all forges (triggers releases)
 
 **NEVER use `git push`** - it only pushes to one remote.
 
+## Fly.io Deployment
+
+```bash
+fly deploy              # Deploy to Fly.io
+make fly-logs           # View recent logs (uses --no-tail)
+```
+
+**NEVER use `fly logs` directly** - it tails forever and hangs. Always use `make fly-logs`.
+
 ## Common Mistakes to Avoid
 
 1. **DON'T** tell users to use `cinch worker --token=xxx` - the flow is `cinch login` then `cinch worker`
 2. **DON'T** use `run: make ci` in examples - use `build: make build` (the actual config key)
 3. **DON'T** show complex YAML - Cinch's whole point is ONE command
 4. **DON'T** use `git push` - use `make push` to push to all forges
-5. **DO** emphasize "same command locally and in CI"
-6. **DO** mention `cinch release` works across forges (GitHub → GitLab migration keeps working)
+5. **DON'T** use `fly logs` - use `make fly-logs` (avoids infinite tailing)
+6. **DO** emphasize "same command locally and in CI"
+7. **DO** mention `cinch release` works across forges (GitHub → GitLab migration keeps working)
