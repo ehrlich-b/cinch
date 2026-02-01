@@ -2,24 +2,63 @@
 
 This guide covers running your own Cinch control plane. You'll have full control over your CI infrastructure with no dependency on cinch.sh.
 
-## Quick Start
+## Quick Start (with Relay)
 
-Minimal single-machine setup:
+The easiest way to self-host. Your server connects *outbound* to cinch.sh for webhook forwarding - no port forwarding or tunnels needed.
 
 ```bash
 # 1. Generate a secret key (CRITICAL - keep this safe, you'll need it for key rotation)
 export CINCH_SECRET_KEY=$(openssl rand -hex 32)
 
-# 2. Start the server
-cinch server --port 8080
+# 2. Set org-level PAT for your forge (used for webhooks + status checks)
+export CINCH_GITHUB_TOKEN=ghp_xxx      # GitHub PAT with repo scope
+# OR: export CINCH_GITLAB_TOKEN=glpat-xxx
+# OR: export CINCH_FORGEJO_TOKEN=xxx
 
-# 3. In another terminal, login and start a worker
-cinch login --server http://localhost:8080
-cinch repo add
+# 3. Login to cinch.sh (reserves your relay ID)
+cinch login
+
+# 4. Start the server with relay
+cinch server --relay
+# Output:
+#   Relay URL: https://cinch.sh/relay/x7k9m
+#   Admin token: cinch_xxx
+
+# 5. Add a repo (webhook auto-created via org token)
+cinch repo add owner/repo
+
+# 6. On worker machines, connect via env vars
+export CINCH_URL=http://your-server:8080
+export CINCH_TOKEN=<admin-token-from-step-4>
 cinch worker
 ```
 
-For production, you'll want to configure forge integrations (GitHub/GitLab/Forgejo) and run behind a reverse proxy with TLS.
+Workers talk only to your server. Webhook secrets are validated locally. cinch.sh is just a dumb pipe for webhooks.
+
+## Quick Start (Fully Independent)
+
+For zero cinch.sh dependency, you need your own webhook ingress (public IP, tunnel, or VPS).
+
+```bash
+# 1. Generate a secret key
+export CINCH_SECRET_KEY=$(openssl rand -hex 32)
+
+# 2. Set org-level PAT for your forge
+export CINCH_GITHUB_TOKEN=ghp_xxx
+
+# 3. Start the server (no --relay)
+cinch server --port 8080
+
+# 4. Add a repo (webhook auto-created via org token)
+cinch repo add owner/repo
+
+# 5. Workers connect via env vars
+export CINCH_URL=http://your-server:8080
+export CINCH_TOKEN=<admin-token>
+cinch worker
+```
+
+For production, you'll want to run behind a reverse proxy with TLS.
 
 ## Environment Variables
 
@@ -169,10 +208,31 @@ Each forge sends webhooks to a specific endpoint:
 
 **Important:** Webhooks must be able to reach your server. If self-hosting behind a firewall, you have several options:
 
-### Option 1: Public IP / Port Forwarding
+### Option 1: Built-in Relay (Recommended)
+
+Cinch has a built-in webhook relay. Your server connects *outbound* to cinch.sh, and webhooks are forwarded over WebSocket. No port forwarding, no extra services.
+
+```bash
+cinch login                      # Login to cinch.sh (reserves your relay ID)
+cinch server --relay             # Connects outbound to cinch.sh relay
+# Output:
+# Relay URL: https://cinch.sh/relay/x7k9m
+# Admin token: cinch_xxx
+```
+
+Point your forge webhooks at the relay URL. Webhook secrets are validated locally - cinch.sh is just a dumb pipe.
+
+Workers connect to your self-hosted server, not cinch.sh:
+```bash
+export CINCH_URL=http://your-server:8080
+export CINCH_TOKEN=<admin-token-from-above>
+cinch worker
+```
+
+### Option 2: Public IP / Port Forwarding
 If your server has a public IP or you can configure port forwarding on your router, expose port 443 (or your chosen port) and point your domain's DNS at it.
 
-### Option 2: Tunnel Services
+### Option 3: Tunnel Services
 For development or home setups without a public IP:
 
 - **Cloudflare Tunnel** (free): `cloudflared tunnel --url http://localhost:8080`
@@ -181,7 +241,7 @@ For development or home setups without a public IP:
 
 These create a public URL that forwards to your local Cinch server.
 
-### Option 3: VPS Reverse Proxy
+### Option 4: VPS Reverse Proxy
 Run a small VPS (e.g., $5/month DigitalOcean droplet) as a reverse proxy. Your home server connects outbound to the VPS, and webhooks hit the VPS's public IP.
 
 ## Reverse Proxy

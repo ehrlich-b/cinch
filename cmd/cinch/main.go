@@ -1969,8 +1969,6 @@ func repoCmd() *cobra.Command {
 func repoAddCmd() *cobra.Command {
 	var forgeType string
 	var forgeURL string
-	var forgeToken string
-	var manual bool
 
 	cmd := &cobra.Command{
 		Use:   "add [owner/name]",
@@ -1983,8 +1981,7 @@ Examples:
   cinch repo add                    # Add current repo (detects from git)
   cinch repo add ehrlich-b/cinch    # Add specific GitHub repo
   cinch repo add myorg/myproject --forge gitlab
-  cinch repo add myorg/myproject --forge gitlab --url https://gitlab.mycompany.com --token glpat-xxx
-  cinch repo add myorg/myproject --manual --token ghp_xxx  # Skip OAuth, show webhook instructions`,
+  cinch repo add myorg/myproject --forge gitlab --url https://gitlab.mycompany.com`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var repoPath string
@@ -2025,17 +2022,15 @@ Examples:
 				repoPath = args[0]
 			}
 
-			return runRepoAdd(repoPath, forgeType, forgeURL, forgeToken, manual)
+			return runRepoAdd(repoPath, forgeType, forgeURL)
 		},
 	}
 	cmd.Flags().StringVar(&forgeType, "forge", "github", "Forge type (github, gitlab, forgejo, gitea)")
 	cmd.Flags().StringVar(&forgeURL, "url", "", "Base URL for self-hosted instances (e.g., https://gitlab.mycompany.com)")
-	cmd.Flags().StringVar(&forgeToken, "token", "", "API token for status posting (e.g., glpat-xxx for GitLab)")
-	cmd.Flags().BoolVar(&manual, "manual", false, "Skip OAuth, print webhook setup instructions (for self-hosted)")
 	return cmd
 }
 
-func runRepoAdd(repoPath string, forgeType string, forgeURL string, forgeToken string, manual bool) error {
+func runRepoAdd(repoPath string, forgeType string, forgeURL string) error {
 	parts := strings.SplitN(repoPath, "/", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid repo format: use owner/name")
@@ -2045,15 +2040,14 @@ func runRepoAdd(repoPath string, forgeType string, forgeURL string, forgeToken s
 	// Check for environment variables first (self-hosted mode)
 	envURL := os.Getenv("CINCH_URL")
 	envToken := os.Getenv("CINCH_TOKEN")
+	selfHosted := envURL != "" && envToken != ""
 
 	var serverCfg cli.ServerConfig
-	if envURL != "" && envToken != "" {
-		// Self-hosted mode: use environment variables, always manual
+	if selfHosted {
 		serverCfg = cli.ServerConfig{
 			URL:   envURL,
 			Token: envToken,
 		}
-		manual = true // Force manual mode for self-hosted
 	} else {
 		// Normal mode: load credentials from config file
 		cfg, err := cli.LoadConfig()
@@ -2068,16 +2062,16 @@ func runRepoAdd(repoPath string, forgeType string, forgeURL string, forgeToken s
 		}
 	}
 
-	// For GitLab without manual flag, try to use stored OAuth credentials
-	if forgeType == "gitlab" && forgeToken == "" && !manual {
-		return runGitLabRepoAdd(serverCfg, repoPath, owner, name, forgeURL)
+	// For GitLab on hosted cinch.sh, try OAuth flow (uses stored credentials)
+	if forgeType == "gitlab" && !selfHosted {
+		return runGitLabRepoAdd(serverCfg, repoPath, forgeURL)
 	}
 
-	// Manual setup (explicit flag, self-hosted, or when token is provided)
-	return runManualRepoAdd(serverCfg, repoPath, forgeType, forgeURL, forgeToken, owner, name)
+	// Direct path: server auto-creates webhook via org token (or shows instructions if not configured)
+	return runDirectRepoAdd(serverCfg, forgeType, forgeURL, owner, name)
 }
 
-func runGitLabRepoAdd(serverCfg cli.ServerConfig, repoPath, owner, name, forgeURL string) error {
+func runGitLabRepoAdd(serverCfg cli.ServerConfig, repoPath, forgeURL string) error {
 	// First, get list of projects to find the project ID
 	req, err := http.NewRequest("GET", serverCfg.URL+"/api/gitlab/projects", nil)
 	if err != nil {
@@ -2173,8 +2167,7 @@ func runGitLabRepoAdd(serverCfg cli.ServerConfig, repoPath, owner, name, forgeUR
 			}
 		}
 		fmt.Println()
-		fmt.Println("Use the web UI to complete setup, or run:")
-		fmt.Printf("  cinch repo add %s --forge gitlab --token <your-token>\n", repoPath)
+		fmt.Println("Use the web UI to complete setup.")
 		return nil
 	}
 
@@ -2199,7 +2192,7 @@ func runGitLabRepoAdd(serverCfg cli.ServerConfig, repoPath, owner, name, forgeUR
 	return nil
 }
 
-func runManualRepoAdd(serverCfg cli.ServerConfig, repoPath, forgeType, forgeURL, forgeToken, owner, name string) error {
+func runDirectRepoAdd(serverCfg cli.ServerConfig, forgeType, forgeURL, owner, name string) error {
 	// Build clone URL based on forge
 	var cloneURL string
 	var baseURL string
@@ -2232,9 +2225,6 @@ func runManualRepoAdd(serverCfg cli.ServerConfig, repoPath, forgeType, forgeURL,
 		"owner":      owner,
 		"name":       name,
 		"clone_url":  cloneURL,
-	}
-	if forgeToken != "" {
-		reqData["forge_token"] = forgeToken
 	}
 	reqBody, _ := json.Marshal(reqData)
 
@@ -2291,12 +2281,10 @@ func runManualRepoAdd(serverCfg cli.ServerConfig, repoPath, forgeType, forgeURL,
 		fmt.Printf("  URL: %s\n", webhookURL)
 		fmt.Printf("  Secret token: %s\n", result.WebhookSecret)
 		fmt.Println("  Trigger: Push events, Tag push events, Merge request events")
-		if forgeToken == "" {
-			fmt.Println()
-			fmt.Println("Note: For status updates, create a Project Access Token with 'api' scope:")
-			fmt.Printf("  %s/%s/%s/-/settings/access_tokens\n", baseURL, owner, name)
-			fmt.Println("  Then run: cinch repo add --forge gitlab --token <token> ...")
-		}
+		fmt.Println()
+		fmt.Println("For status updates, set CINCH_GITLAB_TOKEN on your server:")
+		fmt.Printf("  Create a Project Access Token with 'api' scope at:\n")
+		fmt.Printf("  %s/%s/%s/-/settings/access_tokens\n", baseURL, owner, name)
 	case "github":
 		// For self-hosted, show manual webhook instructions
 		if os.Getenv("CINCH_URL") != "" {
