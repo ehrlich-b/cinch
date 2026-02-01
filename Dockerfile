@@ -1,5 +1,5 @@
 # -------- build stage --------
-FROM --platform=linux/amd64 golang:1.25-alpine AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /src
 
 # Install Node.js for web build
@@ -19,7 +19,7 @@ RUN cd web && npm run build
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /cinch ./cmd/cinch
 
 # -------- runtime stage --------
-FROM --platform=linux/amd64 alpine:3.20
+FROM alpine:3.20
 WORKDIR /app
 RUN apk add --no-cache ca-certificates git sqlite
 COPY --from=builder /cinch .
