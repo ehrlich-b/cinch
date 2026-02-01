@@ -68,15 +68,21 @@ cinch server                    # Run control plane
 
 ## Self-Host
 
-Run your own cinch server:
+Cinch is **100% self-hostable**. Single binary, SQLite by default, no external dependencies.
 
 ```bash
-cinch server --port 8080 --db ./cinch.db
+# Generate secret and start
+export CINCH_JWT_SECRET=$(openssl rand -hex 32)
+cinch server
+
+# Workers connect to your server
+cinch login --server https://ci.example.com
+cinch worker
 ```
 
-Point your workers at it, configure webhooks to hit your server. No dependency on cinch.sh.
+Put it behind Caddy or nginx for TLS. That's it.
 
-See [docs/self-hosting.md](docs/self-hosting.md) for the full self-hosting guide, including forge OAuth setup, reverse proxy configuration, and production hardening.
+See **[docs/self-hosting.md](docs/self-hosting.md)** for the full guide: forge OAuth setup, reverse proxy examples, systemd service, and security checklist.
 
 ## Multi-Forge
 

@@ -380,6 +380,13 @@ func runServer(cmd *cobra.Command, args []string) error {
 	mux.Handle("/badge/", badgeHandler)
 	mux.Handle("/api/badge/", badgeHandler)
 
+	// Health check endpoint (for monitoring, load balancers, Docker healthchecks)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
 	// Serve embedded web assets
 	webFS, err := fs.Sub(web.Assets, "dist")
 	if err != nil {

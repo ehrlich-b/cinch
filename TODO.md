@@ -9,6 +9,7 @@
 - [x] **Remove services from README** - Services syntax is shown but not wired up. Confuses first-time users. Services are v2 consideration.
 - [x] **Add `cinch secrets` CLI** - `cinch secrets list`, `cinch secrets set KEY=VALUE`, `cinch secrets delete KEY`
 - [x] **Deep documentation** - Self-hosting guide has webhook ingress options (Cloudflare Tunnel, ngrok, Tailscale Funnel, VPS proxy)
+- [ ] **README missing `repo add`** - Usage section says `login → worker` but should be `login → repo add → worker` (landing page is correct)
 
 ## Security (remaining)
 
@@ -42,6 +43,10 @@
 - [ ] awesome-selfhosted PR
 - [ ] Hacker News Show HN
 - [ ] Badge on someone else's repo
+
+**Self-Hosting Polish:**
+- [ ] Prometheus metrics endpoint (`/metrics`) - job counts, worker counts, durations
+- [ ] Log retention (`CINCH_LOG_RETENTION_DAYS` env var, background cleanup job)
 
 **Polish:**
 - [ ] Zero to green checkmark without questions

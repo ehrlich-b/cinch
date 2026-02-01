@@ -369,6 +369,20 @@ volumes:
   cinch-data:
 ```
 
+## Health Check
+
+Cinch exposes a `/health` endpoint for monitoring and container orchestration:
+
+```bash
+curl https://ci.example.com/health
+# {"status":"ok"}
+```
+
+Use this for:
+- Docker healthchecks
+- Load balancer health probes
+- Uptime monitoring (UptimeRobot, etc.)
+
 ## Troubleshooting
 
 ### Workers not connecting
