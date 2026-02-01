@@ -32,6 +32,13 @@ const (
 	TypeStatusUpdate = "STATUS_UPDATE"
 )
 
+// Message types for relay communication (self-hosted servers ↔ cinch.sh)
+const (
+	TypeRelayRequest  = "RELAY_REQUEST"  // cinch.sh → self-hosted: forwarded webhook
+	TypeRelayResponse = "RELAY_RESPONSE" // self-hosted → cinch.sh: webhook response
+	TypeRelayReady    = "RELAY_READY"    // cinch.sh → self-hosted: connection confirmed
+)
+
 // Log stream types
 const (
 	StreamStdout = "stdout"
@@ -272,4 +279,29 @@ type StatusUpdate struct {
 	MaxJobs    int     `json:"max_jobs"`
 	Available  bool    `json:"available"`
 	Load       float64 `json:"load,omitempty"`
+}
+
+// --- Relay Messages (for webhook forwarding to self-hosted servers) ---
+
+// RelayRequest is sent from cinch.sh to a self-hosted server to forward a webhook.
+type RelayRequest struct {
+	RequestID string            `json:"request_id"`
+	Method    string            `json:"method"`
+	Path      string            `json:"path"`
+	Headers   map[string]string `json:"headers"`
+	Body      string            `json:"body"` // base64 encoded
+}
+
+// RelayResponse is sent from a self-hosted server back to cinch.sh with the webhook response.
+type RelayResponse struct {
+	RequestID  string            `json:"request_id"`
+	StatusCode int               `json:"status_code"`
+	Headers    map[string]string `json:"headers"`
+	Body       string            `json:"body"` // base64 encoded
+}
+
+// RelayReady is sent from cinch.sh to confirm the relay connection.
+type RelayReady struct {
+	RelayID  string `json:"relay_id"`  // Unique ID for this relay (used in webhook URLs)
+	RelayURL string `json:"relay_url"` // Full URL for webhooks (e.g., https://cinch.sh/relay/x7k9m/webhooks/github)
 }

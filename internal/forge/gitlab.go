@@ -217,6 +217,83 @@ func (g *GitLab) CloneToken(ctx context.Context, repo *Repo) (string, time.Time,
 	return token, time.Now().Add(1 * time.Hour), nil
 }
 
+// CreateWebhook creates a webhook for the repository.
+func (g *GitLab) CreateWebhook(ctx context.Context, repo *Repo, webhookURL, secret string) (int64, error) {
+	// Extract base URL
+	var baseURL string
+	urlToParse := g.BaseURL
+	if urlToParse == "" {
+		urlToParse = repo.HTMLURL
+	}
+	if u, err := url.Parse(urlToParse); err == nil {
+		baseURL = u.Scheme + "://" + u.Host
+	} else {
+		return 0, errors.New("base URL not configured")
+	}
+
+	// Use URL-encoded path: owner%2Fname
+	projectPath := url.PathEscape(repo.Owner + "/" + repo.Name)
+	apiURL := fmt.Sprintf("%s/api/v4/projects/%s/hooks",
+		strings.TrimSuffix(baseURL, "/"), projectPath)
+
+	payload := gitlabWebhookPayload{
+		URL:                   webhookURL,
+		Token:                 secret,
+		PushEvents:            true,
+		TagPushEvents:         true,
+		MergeRequestsEvents:   true,
+		EnableSSLVerification: true,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+
+	// Get effective token
+	token, isOAuth, err := g.getEffectiveToken()
+	if err != nil {
+		return 0, fmt.Errorf("get token: %w", err)
+	}
+
+	if isOAuth {
+		req.Header.Set("Authorization", "Bearer "+token)
+	} else {
+		req.Header.Set("PRIVATE-TOKEN", token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := g.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("gitlab api error: %s - %s", resp.Status, string(respBody))
+	}
+
+	var result struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode response: %w", err)
+	}
+
+	return result.ID, nil
+}
+
 // ParsePullRequest parses a GitLab merge_request webhook.
 func (g *GitLab) ParsePullRequest(r *http.Request, secret string) (*PullRequestEvent, error) {
 	// Check event type
@@ -308,6 +385,15 @@ type gitlabStatusPayload struct {
 	Context     string `json:"name"` // GitLab uses "name" for status context
 	Description string `json:"description,omitempty"`
 	TargetURL   string `json:"target_url,omitempty"`
+}
+
+type gitlabWebhookPayload struct {
+	URL                   string `json:"url"`
+	Token                 string `json:"token"`
+	PushEvents            bool   `json:"push_events"`
+	TagPushEvents         bool   `json:"tag_push_events"`
+	MergeRequestsEvents   bool   `json:"merge_requests_events"`
+	EnableSSLVerification bool   `json:"enable_ssl_verification"`
 }
 
 type gitlabMRPayload struct {

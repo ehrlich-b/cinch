@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,10 +13,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ehrlich-b/cinch/internal/forge"
 	"github.com/ehrlich-b/cinch/internal/logstore"
 	"github.com/ehrlich-b/cinch/internal/storage"
 	"golang.org/x/crypto/sha3"
 )
+
+// OrgTokens holds org-level PATs for self-hosted servers.
+// These tokens enable automatic webhook creation and forge operations
+// without requiring users to provide their own PATs.
+type OrgTokens struct {
+	GitHub  string // CINCH_GITHUB_TOKEN
+	GitLab  string // CINCH_GITLAB_TOKEN
+	Forgejo string // CINCH_FORGEJO_TOKEN
+	BaseURL string // Server base URL for webhook callbacks
+}
 
 // APIHandler handles HTTP API requests.
 type APIHandler struct {
@@ -26,6 +38,7 @@ type APIHandler struct {
 	dispatcher *Dispatcher
 	githubApp  *GitHubAppHandler
 	wsHandler  *WSHandler
+	orgTokens  *OrgTokens
 	log        *slog.Logger
 }
 
@@ -60,6 +73,11 @@ func (h *APIHandler) SetGitHubApp(app *GitHubAppHandler) {
 // SetWSHandler sets the WebSocket handler for worker control.
 func (h *APIHandler) SetWSHandler(ws *WSHandler) {
 	h.wsHandler = ws
+}
+
+// SetOrgTokens sets the org-level PATs for automatic webhook creation.
+func (h *APIHandler) SetOrgTokens(tokens *OrgTokens) {
+	h.orgTokens = tokens
 }
 
 // ServeHTTP routes API requests.
@@ -995,7 +1013,9 @@ type createRepoRequest struct {
 // so user can configure webhook on their forge. Never returned by GET endpoints.
 type createRepoResponse struct {
 	repoResponse
-	WebhookSecret string `json:"webhook_secret"`
+	WebhookSecret      string `json:"webhook_secret,omitempty"`
+	WebhookAutoCreated bool   `json:"webhook_auto_created"`
+	WebhookURL         string `json:"webhook_url,omitempty"`
 }
 
 func (h *APIHandler) listRepos(w http.ResponseWriter, r *http.Request) {
@@ -1106,6 +1126,13 @@ func (h *APIHandler) createRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Determine effective forge token: user-provided or org token
+	forgeToken := req.ForgeToken
+	orgToken := h.getOrgToken(req.ForgeType)
+	if forgeToken == "" && orgToken != "" {
+		forgeToken = orgToken
+	}
+
 	repo := &storage.Repo{
 		ID:            fmt.Sprintf("r_%d", time.Now().UnixNano()),
 		ForgeType:     storage.ForgeType(req.ForgeType),
@@ -1114,7 +1141,7 @@ func (h *APIHandler) createRepo(w http.ResponseWriter, r *http.Request) {
 		CloneURL:      req.CloneURL,
 		HTMLURL:       req.HTMLURL,
 		WebhookSecret: secret,
-		ForgeToken:    req.ForgeToken,
+		ForgeToken:    forgeToken,
 		Build:         req.Build,
 		Release:       req.Release,
 		CreatedAt:     time.Now(),
@@ -1128,7 +1155,25 @@ func (h *APIHandler) createRepo(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("repo created", "repo_id", repo.ID, "clone_url", repo.CloneURL)
 
-	// Return repo with webhook secret (only on creation, for webhook setup)
+	// Build webhook URL
+	webhookURL := ""
+	if h.orgTokens != nil && h.orgTokens.BaseURL != "" {
+		webhookURL = strings.TrimSuffix(h.orgTokens.BaseURL, "/") + "/webhooks/" + req.ForgeType
+	}
+
+	// Try to auto-create webhook if org token is available
+	webhookAutoCreated := false
+	if orgToken != "" && webhookURL != "" {
+		if err := h.createWebhookForRepo(r.Context(), repo, webhookURL); err != nil {
+			h.log.Warn("failed to auto-create webhook, user must create manually",
+				"error", err, "repo", repo.CloneURL)
+		} else {
+			webhookAutoCreated = true
+			h.log.Info("webhook auto-created", "repo", repo.CloneURL, "url", webhookURL)
+		}
+	}
+
+	// Return repo with webhook info
 	resp := createRepoResponse{
 		repoResponse: repoResponse{
 			ID:        repo.ID,
@@ -1141,11 +1186,58 @@ func (h *APIHandler) createRepo(w http.ResponseWriter, r *http.Request) {
 			Release:   repo.Release,
 			CreatedAt: repo.CreatedAt,
 		},
-		WebhookSecret: repo.WebhookSecret,
+		WebhookAutoCreated: webhookAutoCreated,
+		WebhookURL:         webhookURL,
+	}
+	// Only include secret if webhook wasn't auto-created (user needs it for manual setup)
+	if !webhookAutoCreated {
+		resp.WebhookSecret = repo.WebhookSecret
 	}
 
 	w.WriteHeader(http.StatusCreated)
 	h.writeJSON(w, resp)
+}
+
+// getOrgToken returns the org token for the given forge type, if configured.
+func (h *APIHandler) getOrgToken(forgeType string) string {
+	if h.orgTokens == nil {
+		return ""
+	}
+	switch forgeType {
+	case "github":
+		return h.orgTokens.GitHub
+	case "gitlab":
+		return h.orgTokens.GitLab
+	case "forgejo", "gitea":
+		return h.orgTokens.Forgejo
+	default:
+		return ""
+	}
+}
+
+// createWebhookForRepo creates a webhook using the org token.
+func (h *APIHandler) createWebhookForRepo(ctx context.Context, repo *storage.Repo, webhookURL string) error {
+	// Create forge client with org token
+	f := forge.New(forge.ForgeConfig{
+		Type:    string(repo.ForgeType),
+		Token:   repo.ForgeToken,
+		BaseURL: repo.HTMLURL, // Use HTMLURL to derive base URL for self-hosted forges
+	})
+	if f == nil {
+		return fmt.Errorf("unknown forge type: %s", repo.ForgeType)
+	}
+
+	forgeRepo := &forge.Repo{
+		ForgeType: string(repo.ForgeType),
+		Owner:     repo.Owner,
+		Name:      repo.Name,
+		CloneURL:  repo.CloneURL,
+		HTMLURL:   repo.HTMLURL,
+		Private:   repo.Private,
+	}
+
+	_, err := f.CreateWebhook(ctx, forgeRepo, webhookURL, repo.WebhookSecret)
+	return err
 }
 
 func (h *APIHandler) deleteRepo(w http.ResponseWriter, r *http.Request, repoID string) {

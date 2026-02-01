@@ -30,6 +30,10 @@ type Forge interface {
 	// Returns the token and its expiry time.
 	// For public repos, may return empty string (no token needed).
 	CloneToken(ctx context.Context, repo *Repo) (string, time.Time, error)
+
+	// CreateWebhook creates a webhook for the repository.
+	// Returns the webhook ID on success.
+	CreateWebhook(ctx context.Context, repo *Repo, webhookURL, secret string) (int64, error)
 }
 
 // PushEvent represents a push webhook event.

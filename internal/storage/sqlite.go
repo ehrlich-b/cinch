@@ -215,6 +215,14 @@ func (s *SQLiteStorage) migrate() error {
 		FOREIGN KEY (org_billing_id) REFERENCES org_billing(id)
 	)`)
 
+	// Relay table for webhook forwarding to self-hosted servers
+	_, _ = s.db.Exec(`CREATE TABLE IF NOT EXISTS relays (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`)
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_relays_user_id ON relays(user_id)")
+
 	// Drop UNIQUE constraint on users.name (email is the identity, not username)
 	// SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the table
 	if s.hasUniqueConstraintOnUsersName() {
@@ -1393,6 +1401,54 @@ func formatEmailsJSON(emails []string) string {
 		return "[]"
 	}
 	return string(b)
+}
+
+// --- Relays ---
+
+// generateRelayID creates a short random ID for a relay.
+func generateRelayID() string {
+	// Generate a short 5-character alphanumeric ID
+	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, 5)
+	for i := range b {
+		b[i] = chars[time.Now().UnixNano()%int64(len(chars))]
+		time.Sleep(time.Nanosecond) // Ensure different values
+	}
+	return string(b)
+}
+
+func (s *SQLiteStorage) GetOrCreateRelayID(ctx context.Context, userID string) (string, error) {
+	// Check if user already has a relay
+	var relayID string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM relays WHERE user_id = ?`, userID).Scan(&relayID)
+	if err == nil {
+		return relayID, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", err
+	}
+
+	// Create new relay
+	relayID = generateRelayID()
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO relays (id, user_id, created_at) VALUES (?, ?, ?)`,
+		relayID, userID, time.Now())
+	if err != nil {
+		return "", err
+	}
+	return relayID, nil
+}
+
+func (s *SQLiteStorage) GetRelayByID(ctx context.Context, relayID string) (*Relay, error) {
+	relay := &Relay{}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, user_id, created_at FROM relays WHERE id = ?`, relayID).Scan(
+		&relay.ID, &relay.UserID, &relay.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	return relay, err
 }
 
 // --- Logs ---
