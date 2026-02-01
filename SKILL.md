@@ -108,7 +108,7 @@ Either:
 
 ```bash
 # 1. Set required env var
-export CINCH_JWT_SECRET=$(openssl rand -hex 32)
+export CINCH_SECRET_KEY=$(openssl rand -hex 32)
 
 # 2. Start server
 cinch server --port 8080

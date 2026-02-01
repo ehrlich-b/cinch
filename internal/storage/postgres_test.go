@@ -13,7 +13,7 @@ func TestPostgresStorage(t *testing.T) {
 		t.Skip("TEST_DATABASE_URL not set, skipping Postgres tests")
 	}
 
-	store, err := NewPostgres(dsn, "test-encryption-secret-32chars!")
+	store, err := NewPostgres(dsn, "test-encryption-secret-32chars!", "")
 	if err != nil {
 		t.Fatalf("failed to create postgres storage: %v", err)
 	}
@@ -456,7 +456,7 @@ func TestPostgresStorageNoEncryption(t *testing.T) {
 	}
 
 	// Create storage without encryption
-	store, err := NewPostgres(dsn, "")
+	store, err := NewPostgres(dsn, "", "")
 	if err != nil {
 		t.Fatalf("failed to create postgres storage: %v", err)
 	}

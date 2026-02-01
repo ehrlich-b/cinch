@@ -10,7 +10,7 @@ import (
 
 func TestDispatcherEnqueue(t *testing.T) {
 	hub := NewHub()
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	// Create repo for foreign key
@@ -68,7 +68,7 @@ func TestDispatcherEnqueue(t *testing.T) {
 
 func TestDispatcherAssignment(t *testing.T) {
 	hub := NewHub()
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	// Create repo
@@ -162,7 +162,7 @@ func TestDispatcherAssignment(t *testing.T) {
 
 func TestDispatcherNoMatchingWorker(t *testing.T) {
 	hub := NewHub()
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	// Create repo
@@ -226,7 +226,7 @@ func TestDispatcherNoMatchingWorker(t *testing.T) {
 
 func TestDispatcherPendingJobs(t *testing.T) {
 	hub := NewHub()
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	dispatcher := NewDispatcher(hub, store, nil, nil)

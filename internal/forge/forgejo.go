@@ -371,9 +371,9 @@ type forgejoStatusPayload struct {
 }
 
 type forgejoWebhookPayload struct {
-	Type   string              `json:"type"`
-	Active bool                `json:"active"`
-	Events []string            `json:"events"`
+	Type   string               `json:"type"`
+	Active bool                 `json:"active"`
+	Events []string             `json:"events"`
 	Config forgejoWebhookConfig `json:"config"`
 }
 

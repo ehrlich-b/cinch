@@ -15,15 +15,17 @@ import (
 
 // PostgresStorage implements Storage using PostgreSQL.
 type PostgresStorage struct {
-	db     *sql.DB
-	cipher *crypto.Cipher // nil = no encryption (tests)
-	log    *slog.Logger
+	db              *sql.DB
+	cipher          *crypto.Cipher // nil = no encryption (tests)
+	secondaryCipher *crypto.Cipher // non-nil during key rotation
+	log             *slog.Logger
 }
 
 // NewPostgres creates a new Postgres storage.
 // DSN format: postgres://user:password@host:port/dbname?sslmode=disable
 // If encryptionSecret is provided, sensitive fields are encrypted at rest.
-func NewPostgres(dsn string, encryptionSecret string) (*PostgresStorage, error) {
+// If secondarySecret is provided, triggers key rotation to the new key.
+func NewPostgres(dsn string, encryptionSecret, secondarySecret string) (*PostgresStorage, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -44,10 +46,25 @@ func NewPostgres(dsn string, encryptionSecret string) (*PostgresStorage, error) 
 		}
 	}
 
-	s := &PostgresStorage{db: db, cipher: cipher, log: slog.Default()}
+	var secondaryCipher *crypto.Cipher
+	if secondarySecret != "" {
+		secondaryCipher, err = crypto.NewCipher(secondarySecret)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("create secondary cipher: %w", err)
+		}
+	}
+
+	s := &PostgresStorage{db: db, cipher: cipher, secondaryCipher: secondaryCipher, log: slog.Default()}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
+	}
+
+	// Validate encryption key and handle rotation if secondary is set
+	if err := s.validateOrRotateKeys(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("validate encryption key: %w", err)
 	}
 
 	return s, nil
@@ -164,6 +181,13 @@ func (s *PostgresStorage) migrate() error {
 	for _, m := range orgBillingMigrations {
 		_, _ = s.db.Exec(m)
 	}
+
+	// Key canary for validating encryption key on startup
+	_, _ = s.db.Exec(`CREATE TABLE IF NOT EXISTS key_canary (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		encrypted_value TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`)
 
 	// Add columns that may not exist (for migrations)
 	alterStatements := []string{
@@ -304,6 +328,216 @@ func (s *PostgresStorage) migrateEncryptSecrets() error {
 		s.log.Info("encrypted user credentials", "user_id", u.id)
 	}
 
+	return nil
+}
+
+// canaryPlaintext is the known value used to validate the encryption key.
+// Defined in sqlite.go, referenced here for consistency.
+const postgresCanaryPlaintext = "cinch-canary-v1"
+
+// validateOrRotateKeys validates the encryption key and performs rotation if secondary key is set.
+func (s *PostgresStorage) validateOrRotateKeys() error {
+	// Skip if no encryption configured
+	if s.cipher == nil {
+		return nil
+	}
+
+	// Check if canary exists
+	var encryptedValue string
+	err := s.db.QueryRow(`SELECT encrypted_value FROM key_canary WHERE id = 1`).Scan(&encryptedValue)
+	if err == sql.ErrNoRows {
+		// No canary - create one with primary key
+		encrypted, err := s.cipher.Encrypt(postgresCanaryPlaintext)
+		if err != nil {
+			return fmt.Errorf("encrypt canary: %w", err)
+		}
+		_, err = s.db.Exec(`INSERT INTO key_canary (id, encrypted_value, created_at) VALUES (1, $1, $2)`,
+			encrypted, time.Now())
+		if err != nil {
+			return fmt.Errorf("insert canary: %w", err)
+		}
+		s.log.Info("created encryption key canary")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("query canary: %w", err)
+	}
+
+	// Canary exists - try to decrypt with primary key
+	decrypted, err := s.cipher.Decrypt(encryptedValue)
+	primaryWorks := err == nil && decrypted == postgresCanaryPlaintext
+
+	if primaryWorks {
+		// Primary key works
+		if s.secondaryCipher != nil {
+			// Secondary key is set - perform rotation
+			if err := s.rotateToSecondaryKey(); err != nil {
+				return fmt.Errorf("key rotation failed: %w", err)
+			}
+			// After rotation, use secondary as primary
+			s.cipher = s.secondaryCipher
+			s.secondaryCipher = nil
+		}
+		return nil
+	}
+
+	// Primary key failed - try secondary
+	if s.secondaryCipher != nil {
+		decrypted, err = s.secondaryCipher.Decrypt(encryptedValue)
+		if err == nil && decrypted == postgresCanaryPlaintext {
+			// Secondary works - rotation already completed, just use secondary
+			s.log.Warn("primary key failed but secondary works - rotation already complete, update your env vars")
+			s.cipher = s.secondaryCipher
+			s.secondaryCipher = nil
+			return nil
+		}
+	}
+
+	return fmt.Errorf("encryption key invalid: cannot decrypt canary (wrong CINCH_SECRET_KEY?)")
+}
+
+// rotateToSecondaryKey re-encrypts all secrets with the secondary key.
+func (s *PostgresStorage) rotateToSecondaryKey() error {
+	s.log.Info("starting key rotation")
+
+	// Re-encrypt repos
+	rows, err := s.db.Query(`SELECT id, webhook_secret, forge_token, secrets FROM repos`)
+	if err != nil {
+		return fmt.Errorf("query repos: %w", err)
+	}
+	var repoUpdates []struct {
+		id, webhookSecret, forgeToken, secrets string
+	}
+	for rows.Next() {
+		var id, webhookSecret, forgeToken, secrets string
+		if err := rows.Scan(&id, &webhookSecret, &forgeToken, &secrets); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan repo: %w", err)
+		}
+
+		// Decrypt with primary, re-encrypt with secondary
+		if webhookSecret != "" {
+			decrypted, err := s.cipher.Decrypt(webhookSecret)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("decrypt webhook_secret for %s: %w", id, err)
+			}
+			encrypted, err := s.secondaryCipher.Encrypt(decrypted)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("re-encrypt webhook_secret for %s: %w", id, err)
+			}
+			webhookSecret = encrypted
+		}
+		if forgeToken != "" {
+			decrypted, err := s.cipher.Decrypt(forgeToken)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("decrypt forge_token for %s: %w", id, err)
+			}
+			encrypted, err := s.secondaryCipher.Encrypt(decrypted)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("re-encrypt forge_token for %s: %w", id, err)
+			}
+			forgeToken = encrypted
+		}
+		if secrets != "" {
+			decrypted, err := s.cipher.Decrypt(secrets)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("decrypt secrets for %s: %w", id, err)
+			}
+			encrypted, err := s.secondaryCipher.Encrypt(decrypted)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("re-encrypt secrets for %s: %w", id, err)
+			}
+			secrets = encrypted
+		}
+
+		repoUpdates = append(repoUpdates, struct{ id, webhookSecret, forgeToken, secrets string }{id, webhookSecret, forgeToken, secrets})
+	}
+	rows.Close()
+
+	for _, u := range repoUpdates {
+		if _, err := s.db.Exec(`UPDATE repos SET webhook_secret = $1, forge_token = $2, secrets = $3 WHERE id = $4`,
+			u.webhookSecret, u.forgeToken, u.secrets, u.id); err != nil {
+			return fmt.Errorf("update repo %s: %w", u.id, err)
+		}
+	}
+	if len(repoUpdates) > 0 {
+		s.log.Info("re-encrypted repos", "count", len(repoUpdates))
+	}
+
+	// Re-encrypt users
+	rows, err = s.db.Query(`SELECT id, gitlab_credentials, forgejo_credentials FROM users`)
+	if err != nil {
+		return fmt.Errorf("query users: %w", err)
+	}
+	var userUpdates []struct {
+		id, gitlabCreds, forgejoCreds string
+	}
+	for rows.Next() {
+		var id, gitlabCreds, forgejoCreds string
+		if err := rows.Scan(&id, &gitlabCreds, &forgejoCreds); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan user: %w", err)
+		}
+
+		if gitlabCreds != "" {
+			decrypted, err := s.cipher.Decrypt(gitlabCreds)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("decrypt gitlab_credentials for %s: %w", id, err)
+			}
+			encrypted, err := s.secondaryCipher.Encrypt(decrypted)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("re-encrypt gitlab_credentials for %s: %w", id, err)
+			}
+			gitlabCreds = encrypted
+		}
+		if forgejoCreds != "" {
+			decrypted, err := s.cipher.Decrypt(forgejoCreds)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("decrypt forgejo_credentials for %s: %w", id, err)
+			}
+			encrypted, err := s.secondaryCipher.Encrypt(decrypted)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("re-encrypt forgejo_credentials for %s: %w", id, err)
+			}
+			forgejoCreds = encrypted
+		}
+
+		if gitlabCreds != "" || forgejoCreds != "" {
+			userUpdates = append(userUpdates, struct{ id, gitlabCreds, forgejoCreds string }{id, gitlabCreds, forgejoCreds})
+		}
+	}
+	rows.Close()
+
+	for _, u := range userUpdates {
+		if _, err := s.db.Exec(`UPDATE users SET gitlab_credentials = $1, forgejo_credentials = $2 WHERE id = $3`,
+			u.gitlabCreds, u.forgejoCreds, u.id); err != nil {
+			return fmt.Errorf("update user %s: %w", u.id, err)
+		}
+	}
+	if len(userUpdates) > 0 {
+		s.log.Info("re-encrypted users", "count", len(userUpdates))
+	}
+
+	// Update canary with new key
+	encrypted, err := s.secondaryCipher.Encrypt(postgresCanaryPlaintext)
+	if err != nil {
+		return fmt.Errorf("encrypt new canary: %w", err)
+	}
+	if _, err := s.db.Exec(`UPDATE key_canary SET encrypted_value = $1 WHERE id = 1`, encrypted); err != nil {
+		return fmt.Errorf("update canary: %w", err)
+	}
+
+	s.log.Info("key rotation complete - update CINCH_SECRET_KEY and remove CINCH_SECRET_KEY_SECONDARY")
 	return nil
 }
 

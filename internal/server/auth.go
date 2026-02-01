@@ -501,14 +501,17 @@ func (h *AuthHandler) getJWTSigningKey() []byte {
 		return []byte(h.config.JWTSecret)
 	}
 
-	// Check environment
+	// Check environment (new name first, then deprecated name)
+	if secret := os.Getenv("CINCH_SECRET_KEY"); secret != "" {
+		return []byte(secret)
+	}
 	if secret := os.Getenv("CINCH_JWT_SECRET"); secret != "" {
 		return []byte(secret)
 	}
 
 	// No secret configured - this is a fatal misconfiguration
 	// Panic to prevent the server from running with forgeable tokens
-	panic("FATAL: JWT_SECRET not configured. Set config.JWTSecret or CINCH_JWT_SECRET environment variable.")
+	panic("FATAL: secret not configured. Set config.JWTSecret or CINCH_SECRET_KEY environment variable.")
 }
 
 // --- OAuth State ---

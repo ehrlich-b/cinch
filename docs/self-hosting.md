@@ -7,8 +7,8 @@ This guide covers running your own Cinch control plane. You'll have full control
 Minimal single-machine setup:
 
 ```bash
-# 1. Generate a JWT secret (CRITICAL - keep this safe)
-export CINCH_JWT_SECRET=$(openssl rand -hex 32)
+# 1. Generate a secret key (CRITICAL - keep this safe, you'll need it for key rotation)
+export CINCH_SECRET_KEY=$(openssl rand -hex 32)
 
 # 2. Start the server
 cinch server --port 8080
@@ -31,7 +31,7 @@ For production, you'll want to configure forge integrations (GitHub/GitLab/Forge
 | `CINCH_DATA_DIR` | `./data` | Directory for SQLite database and local logs |
 | `CINCH_BASE_URL` | Auto-detect | Public URL for webhooks (e.g., `https://ci.example.com`) |
 | `CINCH_WS_BASE_URL` | Same as BASE_URL | WebSocket URL for workers (usually same host, `wss://`) |
-| `CINCH_JWT_SECRET` | **Required** | Secret for encrypting tokens. Generate with `openssl rand -hex 32` |
+| `CINCH_SECRET_KEY` | **Required** | Secret for JWT signing and data encryption. Generate with `openssl rand -hex 32`. **Save this - you need it for key rotation.** |
 | `CINCH_LOG_DIR` | `$CINCH_DATA_DIR/logs` | Directory for job log storage |
 
 ### Log Storage (R2)
@@ -320,7 +320,7 @@ WantedBy=multi-user.target
 Create `/etc/cinch/env` with your environment variables:
 
 ```bash
-CINCH_JWT_SECRET=your-secret-here
+CINCH_SECRET_KEY=your-secret-here
 CINCH_BASE_URL=https://ci.example.com
 CINCH_DATA_DIR=/var/lib/cinch
 # ... other variables
@@ -358,7 +358,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - CINCH_JWT_SECRET=${CINCH_JWT_SECRET}
+      - CINCH_SECRET_KEY=${CINCH_SECRET_KEY}
       - CINCH_BASE_URL=https://ci.example.com
       - CINCH_GITHUB_APP_ID=${CINCH_GITHUB_APP_ID}
       # ... other variables

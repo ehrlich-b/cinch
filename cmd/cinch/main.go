@@ -131,12 +131,22 @@ func runServer(cmd *cobra.Command, args []string) error {
 		dbPath = filepath.Join(dataDir, "cinch.db")
 	}
 
-	// Get JWT secret (also used for DB encryption)
-	jwtSecret := os.Getenv("CINCH_JWT_SECRET")
+	// Get secret key (used for JWT signing and DB encryption)
+	secretKey := os.Getenv("CINCH_SECRET_KEY")
+	if secretKey == "" {
+		// Fall back to deprecated env var
+		secretKey = os.Getenv("CINCH_JWT_SECRET")
+		if secretKey != "" {
+			log.Warn("CINCH_JWT_SECRET is deprecated, use CINCH_SECRET_KEY instead")
+		}
+	}
 
-	// Initialize storage with encryption using JWT secret
+	// Get secondary key for rotation (optional)
+	secondaryKey := os.Getenv("CINCH_SECRET_KEY_SECONDARY")
+
+	// Initialize storage with encryption using secret key
 	log.Info("initializing storage", "path", dbPath)
-	store, err := storage.NewSQLite(dbPath, jwtSecret)
+	store, err := storage.NewSQLite(dbPath, secretKey, secondaryKey)
 	if err != nil {
 		return fmt.Errorf("initialize storage: %w", err)
 	}
@@ -147,7 +157,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	authConfig := server.AuthConfig{
 		GitHubClientID:     os.Getenv("CINCH_GITHUB_APP_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("CINCH_GITHUB_APP_CLIENT_SECRET"),
-		JWTSecret:          jwtSecret,
+		JWTSecret:          secretKey,
 		BaseURL:            baseURL,
 		WsBaseURL:          wsBaseURL,
 	}
@@ -228,8 +238,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 		ClientSecret: os.Getenv("CINCH_GITLAB_CLIENT_SECRET"),
 		BaseURL:      os.Getenv("CINCH_GITLAB_URL"), // defaults to https://gitlab.com
 	}
-	jwtSecretBytes := []byte(jwtSecret)
-	gitlabOAuthHandler := server.NewGitLabOAuthHandler(gitlabOAuthConfig, baseURL, jwtSecretBytes, store, log)
+	secretKeyBytes := []byte(secretKey)
+	gitlabOAuthHandler := server.NewGitLabOAuthHandler(gitlabOAuthConfig, baseURL, secretKeyBytes, store, log)
 	if gitlabOAuthHandler.IsConfigured() {
 		log.Info("GitLab OAuth configured")
 	}
@@ -240,7 +250,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		ClientSecret: os.Getenv("CINCH_FORGEJO_CLIENT_SECRET"),
 		BaseURL:      os.Getenv("CINCH_FORGEJO_URL"), // defaults to https://codeberg.org
 	}
-	forgejoOAuthHandler := server.NewForgejoOAuthHandler(forgejoOAuthConfig, baseURL, jwtSecretBytes, store, log)
+	forgejoOAuthHandler := server.NewForgejoOAuthHandler(forgejoOAuthConfig, baseURL, secretKeyBytes, store, log)
 	if forgejoOAuthHandler.IsConfigured() {
 		log.Info("Forgejo OAuth configured", "url", forgejoOAuthConfig.BaseURL)
 	}
@@ -1746,10 +1756,10 @@ func tokenCreateCmd() *cobra.Command {
 		Long: `Create a JWT token for a user to authenticate with a self-hosted Cinch server.
 
 This command is for SERVER ADMINISTRATORS to generate tokens for their users.
-Requires CINCH_JWT_SECRET environment variable to be set (same secret used by the server).
+Requires CINCH_SECRET_KEY environment variable to be set (same secret used by the server).
 
 Example:
-  export CINCH_JWT_SECRET=your-server-secret
+  export CINCH_SECRET_KEY=your-server-secret
   cinch token create --user alice@company.com
 
   # Give the output token to Alice to use:
@@ -1761,13 +1771,17 @@ Example:
 				return fmt.Errorf("--user is required")
 			}
 
-			jwtSecret := os.Getenv("CINCH_JWT_SECRET")
-			if jwtSecret == "" {
-				return fmt.Errorf("CINCH_JWT_SECRET environment variable is required\n\nThis must be the same secret configured on your Cinch server.")
+			secretKey := os.Getenv("CINCH_SECRET_KEY")
+			if secretKey == "" {
+				// Fall back to deprecated env var
+				secretKey = os.Getenv("CINCH_JWT_SECRET")
+			}
+			if secretKey == "" {
+				return fmt.Errorf("CINCH_SECRET_KEY environment variable is required\n\nThis must be the same secret configured on your Cinch server.")
 			}
 
 			// Create JWT token
-			token, err := createUserJWT(user, jwtSecret, days)
+			token, err := createUserJWT(user, secretKey, days)
 			if err != nil {
 				return fmt.Errorf("create token: %w", err)
 			}

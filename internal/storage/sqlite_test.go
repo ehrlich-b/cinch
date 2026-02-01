@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 
 func newTestStorage(t *testing.T) *SQLiteStorage {
 	t.Helper()
-	s, err := NewSQLite(":memory:", "")
+	s, err := NewSQLite(":memory:", "", "")
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}
@@ -434,7 +435,7 @@ func TestNotFound(t *testing.T) {
 
 func TestEncryptedSecrets(t *testing.T) {
 	// Test with encryption enabled
-	s, err := NewSQLite(":memory:", "test-encryption-key")
+	s, err := NewSQLite(":memory:", "test-encryption-key", "")
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}
@@ -482,7 +483,7 @@ func TestEncryptedSecrets(t *testing.T) {
 
 func TestMigrationEncryptsExistingSecrets(t *testing.T) {
 	// First, create storage without encryption
-	s1, err := NewSQLite(":memory:", "")
+	s1, err := NewSQLite(":memory:", "", "")
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}
@@ -552,4 +553,49 @@ func TestMigrationEncryptsExistingSecrets(t *testing.T) {
 
 func newTestCipher(secret string) (*crypto.Cipher, error) {
 	return crypto.NewCipher(secret)
+}
+
+func TestCanaryValidation(t *testing.T) {
+	// Create storage with encryption - this creates the canary
+	s1, err := NewSQLite(":memory:", "correct-key", "")
+	if err != nil {
+		t.Fatalf("NewSQLite failed: %v", err)
+	}
+
+	// Verify canary was created
+	var encryptedValue string
+	err = s1.db.QueryRow(`SELECT encrypted_value FROM key_canary WHERE id = 1`).Scan(&encryptedValue)
+	if err != nil {
+		t.Fatalf("canary should exist: %v", err)
+	}
+	if !crypto.IsEncrypted(encryptedValue) {
+		t.Error("canary should be encrypted")
+	}
+
+	// Get the underlying db handle
+	db := s1.db
+
+	// Now try to create new storage with WRONG key, pointing to same db
+	// This simulates app restart with wrong key
+	wrongCipher, _ := crypto.NewCipher("wrong-key")
+	s2 := &SQLiteStorage{db: db, cipher: wrongCipher}
+
+	// Validate canary - should fail
+	err = s2.validateOrRotateKeys()
+	if err == nil {
+		t.Error("validateOrRotateKeys should fail with wrong key")
+	}
+	if err != nil && !strings.Contains(err.Error(), "cannot decrypt canary") && !strings.Contains(err.Error(), "wrong CINCH_SECRET_KEY") {
+		t.Errorf("error should mention wrong key, got: %v", err)
+	}
+
+	// Validate with correct key - should succeed
+	correctCipher, _ := crypto.NewCipher("correct-key")
+	s3 := &SQLiteStorage{db: db, cipher: correctCipher}
+	err = s3.validateOrRotateKeys()
+	if err != nil {
+		t.Errorf("validateOrRotateKeys should succeed with correct key: %v", err)
+	}
+
+	s1.Close()
 }

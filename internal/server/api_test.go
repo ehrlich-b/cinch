@@ -13,7 +13,7 @@ import (
 )
 
 func TestAPIListJobs(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	// Create repo for foreign key
@@ -61,7 +61,7 @@ func TestAPIListJobs(t *testing.T) {
 }
 
 func TestAPIListJobsWithFilters(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	// Create repo
@@ -112,7 +112,7 @@ func TestAPIListJobsWithFilters(t *testing.T) {
 }
 
 func TestAPIGetJob(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	// Create repo
@@ -160,7 +160,7 @@ func TestAPIGetJob(t *testing.T) {
 }
 
 func TestAPIGetJobNotFound(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -175,7 +175,7 @@ func TestAPIGetJobNotFound(t *testing.T) {
 }
 
 func TestAPIGetJobLogs(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	// Create repo and job
@@ -218,7 +218,7 @@ func TestAPIGetJobLogs(t *testing.T) {
 }
 
 func TestAPIListWorkers(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	// Create workers - one owned by alice, one owned by bob
@@ -268,7 +268,7 @@ func TestAPIListWorkers(t *testing.T) {
 }
 
 func TestAPICreateRepo(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -310,7 +310,7 @@ func TestAPICreateRepo(t *testing.T) {
 }
 
 func TestAPICreateRepoMissingFields(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -328,7 +328,7 @@ func TestAPICreateRepoMissingFields(t *testing.T) {
 }
 
 func TestAPIListRepos(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	// Create repos
@@ -368,7 +368,7 @@ func TestAPIListRepos(t *testing.T) {
 }
 
 func TestAPIGetRepo(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	_ = store.CreateRepo(t.Context(), &storage.Repo{
@@ -406,7 +406,7 @@ func TestAPIGetRepo(t *testing.T) {
 }
 
 func TestAPIDeleteRepo(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	_ = store.CreateRepo(t.Context(), &storage.Repo{
@@ -434,7 +434,7 @@ func TestAPIDeleteRepo(t *testing.T) {
 }
 
 func TestAPICreateToken(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -465,7 +465,7 @@ func TestAPICreateToken(t *testing.T) {
 }
 
 func TestAPIListTokens(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	_ = store.CreateToken(t.Context(), &storage.Token{
@@ -514,7 +514,7 @@ func TestAPIListTokens(t *testing.T) {
 }
 
 func TestAPIRevokeToken(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	_ = store.CreateToken(t.Context(), &storage.Token{
@@ -544,7 +544,7 @@ func TestAPIRevokeToken(t *testing.T) {
 }
 
 func TestAPINotFound(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -559,7 +559,7 @@ func TestAPINotFound(t *testing.T) {
 }
 
 func TestAPIMethodNotAllowed(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)
@@ -594,7 +594,7 @@ func TestGenerateSecret(t *testing.T) {
 }
 
 func TestAPIInvalidJSON(t *testing.T) {
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	api := NewAPIHandler(store, nil, nil, nil)

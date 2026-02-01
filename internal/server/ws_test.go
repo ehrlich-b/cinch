@@ -48,7 +48,7 @@ func TestTokensEqual(t *testing.T) {
 
 func TestWSHandlerMissingToken(t *testing.T) {
 	hub := NewHub()
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	handler := NewWSHandler(hub, store, nil)
@@ -65,7 +65,7 @@ func TestWSHandlerMissingToken(t *testing.T) {
 
 func TestWSHandlerInvalidToken(t *testing.T) {
 	hub := NewHub()
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	handler := NewWSHandler(hub, store, nil)
@@ -82,7 +82,7 @@ func TestWSHandlerInvalidToken(t *testing.T) {
 
 func TestWSFullConnection(t *testing.T) {
 	hub := NewHub()
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	// Create token
@@ -174,7 +174,7 @@ func TestWSFullConnection(t *testing.T) {
 
 func TestWSHandlePing(t *testing.T) {
 	hub := NewHub()
-	store, _ := storage.NewSQLite(":memory:", "")
+	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
 	// Create token

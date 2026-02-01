@@ -155,7 +155,7 @@ CINCH_ADDR=:8080                # Listen address (default :8080)
 CINCH_DATA_DIR=/var/lib/cinch   # Data directory for SQLite, logs
 CINCH_BASE_URL=https://ci.example.com    # Public URL for webhooks
 CINCH_WS_BASE_URL=wss://ci.example.com   # WebSocket URL (usually same host)
-CINCH_JWT_SECRET=xxx            # CRITICAL: Secret for encrypting tokens
+CINCH_SECRET_KEY=xxx            # CRITICAL: Secret for JWT signing and encryption
 CINCH_LOG_DIR=/var/log/cinch    # Log storage directory
 
 # R2 log storage (optional, for cloud log storage)

@@ -27,8 +27,9 @@ Or build from source: `make build`
 ## Usage
 
 ```bash
-cinch login    # Auth via browser
-cinch worker   # Start building
+cinch login      # Auth via browser
+cinch repo add   # Connect your repo
+cinch worker     # Start building
 ```
 
 Add `.cinch.yaml` to your repo, push. Done.
@@ -72,7 +73,7 @@ Cinch is **100% self-hostable**. Single binary, SQLite by default, no external d
 
 ```bash
 # Generate secret and start
-export CINCH_JWT_SECRET=$(openssl rand -hex 32)
+export CINCH_SECRET_KEY=$(openssl rand -hex 32)
 cinch server
 
 # Workers connect to your server
