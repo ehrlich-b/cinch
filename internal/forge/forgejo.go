@@ -204,6 +204,73 @@ func (f *Forgejo) CloneToken(ctx context.Context, repo *Repo) (string, time.Time
 	return f.Token, time.Now().Add(24 * time.Hour), nil
 }
 
+// CreateWebhook creates a webhook for the repository.
+func (f *Forgejo) CreateWebhook(ctx context.Context, repo *Repo, webhookURL, secret string) (int64, error) {
+	// Extract base URL
+	var baseURL string
+	urlToParse := f.BaseURL
+	if urlToParse == "" {
+		urlToParse = repo.HTMLURL
+	}
+	if u, err := url.Parse(urlToParse); err == nil {
+		baseURL = u.Scheme + "://" + u.Host
+	} else {
+		return 0, errors.New("base URL not configured")
+	}
+
+	apiURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/hooks",
+		strings.TrimSuffix(baseURL, "/"), repo.Owner, repo.Name)
+
+	payload := forgejoWebhookPayload{
+		Type:   "forgejo",
+		Active: true,
+		Events: []string{"push", "pull_request", "create"},
+		Config: forgejoWebhookConfig{
+			URL:         webhookURL,
+			ContentType: "json",
+			Secret:      secret,
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+
+	req.Header.Set("Authorization", "token "+f.Token)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := f.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("forgejo api error: %s - %s", resp.Status, string(respBody))
+	}
+
+	var result struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode response: %w", err)
+	}
+
+	return result.ID, nil
+}
+
 // ParsePullRequest parses a Forgejo/Gitea pull_request webhook.
 func (f *Forgejo) ParsePullRequest(r *http.Request, secret string) (*PullRequestEvent, error) {
 	// Check event type (try both headers)
@@ -301,6 +368,19 @@ type forgejoStatusPayload struct {
 	Context     string `json:"context"`
 	Description string `json:"description,omitempty"`
 	TargetURL   string `json:"target_url,omitempty"`
+}
+
+type forgejoWebhookPayload struct {
+	Type   string              `json:"type"`
+	Active bool                `json:"active"`
+	Events []string            `json:"events"`
+	Config forgejoWebhookConfig `json:"config"`
+}
+
+type forgejoWebhookConfig struct {
+	URL         string `json:"url"`
+	ContentType string `json:"content_type"`
+	Secret      string `json:"secret"`
 }
 
 type forgejoPRPayload struct {

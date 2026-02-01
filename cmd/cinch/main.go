@@ -24,12 +24,14 @@ import (
 	"github.com/ehrlich-b/cinch/internal/daemon"
 	"github.com/ehrlich-b/cinch/internal/forge"
 	"github.com/ehrlich-b/cinch/internal/logstore"
+	"github.com/ehrlich-b/cinch/internal/relay"
 	"github.com/ehrlich-b/cinch/internal/server"
 	"github.com/ehrlich-b/cinch/internal/storage"
 	"github.com/ehrlich-b/cinch/internal/version"
 	"github.com/ehrlich-b/cinch/internal/worker"
 	"github.com/ehrlich-b/cinch/internal/worker/container"
 	"github.com/ehrlich-b/cinch/web"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/spf13/cobra"
 )
 
@@ -89,6 +91,7 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().String("addr", ":8080", "Address to listen on")
 	cmd.Flags().String("data-dir", "", "Directory for SQLite database (default: current directory)")
 	cmd.Flags().String("base-url", "", "Base URL for job links (e.g., https://cinch.example.com)")
+	cmd.Flags().Bool("relay", false, "Connect to cinch.sh relay for webhook forwarding (self-hosted mode)")
 	return cmd
 }
 
@@ -96,6 +99,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	addr, _ := cmd.Flags().GetString("addr")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	baseURL, _ := cmd.Flags().GetString("base-url")
+	relayMode, _ := cmd.Flags().GetBool("relay")
 
 	// Allow env vars to override flags
 	if envAddr := os.Getenv("CINCH_ADDR"); envAddr != "" {
@@ -199,6 +203,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	badgeHandler := server.NewBadgeHandler(store, log, baseURL)
 	workerStreamHandler := server.NewWorkerStreamHandler(hub, authHandler, log)
 
+	// Create relay components (for self-hosted webhook forwarding)
+	relayHub := server.NewRelayHub()
+	relayWSHandler := server.NewRelayWSHandler(relayHub, store, baseURL, log)
+	relayHTTPHandler := server.NewRelayHTTPHandler(relayHub, log)
+
 	// Create GitHub App handler
 	githubAppConfig := server.GitHubAppConfig{
 		AppID:         parseAppID(os.Getenv("CINCH_GITHUB_APP_ID")),
@@ -236,6 +245,23 @@ func runServer(cmd *cobra.Command, args []string) error {
 		log.Info("Forgejo OAuth configured", "url", forgejoOAuthConfig.BaseURL)
 	}
 
+	// Org-level PATs for self-hosted servers (enables automatic webhook creation)
+	orgTokens := &server.OrgTokens{
+		GitHub:  os.Getenv("CINCH_GITHUB_TOKEN"),
+		GitLab:  os.Getenv("CINCH_GITLAB_TOKEN"),
+		Forgejo: os.Getenv("CINCH_FORGEJO_TOKEN"),
+		BaseURL: baseURL,
+	}
+	if orgTokens.GitHub != "" {
+		log.Info("GitHub org token configured")
+	}
+	if orgTokens.GitLab != "" {
+		log.Info("GitLab org token configured")
+	}
+	if orgTokens.Forgejo != "" {
+		log.Info("Forgejo org token configured")
+	}
+
 	// Wire up dependencies
 	wsHandler.SetStatusPoster(webhookHandler)
 	wsHandler.SetLogBroadcaster(logStreamHandler)
@@ -243,6 +269,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	wsHandler.SetJWTValidator(authHandler)
 	wsHandler.SetGitHubApp(githubAppHandler)
 	wsHandler.SetWorkerNotifier(dispatcher)
+
+	// Wire up relay handler
+	relayWSHandler.SetJWTValidator(authHandler)
 	webhookHandler.SetGitHubApp(githubAppHandler)
 	webhookHandler.SetLogStore(logStore)
 	dispatcher.SetGitHubApp(githubAppHandler)
@@ -251,6 +280,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	apiHandler.SetDispatcher(dispatcher)
 	apiHandler.SetGitHubApp(githubAppHandler)
 	apiHandler.SetWSHandler(wsHandler)
+	apiHandler.SetOrgTokens(orgTokens)
 
 	// Register forges (for webhook identification)
 	webhookHandler.RegisterForge(&forge.GitHub{})
@@ -370,6 +400,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// WebSocket for UI worker streaming - public for now
 	mux.Handle("/ws/workers", workerStreamHandler)
 
+	// Relay endpoints for self-hosted webhook forwarding
+	mux.Handle("/ws/relay", relayWSHandler)
+	mux.Handle("/relay/", relayHTTPHandler)
+
 	// Install script for curl | sh
 	mux.HandleFunc("/install.sh", server.InstallScriptHandler)
 
@@ -450,6 +484,39 @@ func runServer(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Start relay client if in relay mode
+	var relayClient *relay.Client
+	if relayMode {
+		// Load credentials to get JWT token for relay connection
+		cliCfg, err := cli.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("load credentials for relay: %w", err)
+		}
+		serverCfg, ok := cliCfg.Servers["default"]
+		if !ok || serverCfg.Token == "" {
+			return fmt.Errorf("not logged in - run 'cinch login' first to use --relay")
+		}
+
+		// Build relay WebSocket URL
+		relayWsURL := serverCfg.URL
+		relayWsURL = strings.Replace(relayWsURL, "https://", "wss://", 1)
+		relayWsURL = strings.Replace(relayWsURL, "http://", "ws://", 1)
+		relayWsURL = relayWsURL + "/ws/relay"
+
+		// Local server address
+		localAddr := "http://localhost" + addr
+
+		relayClient = relay.NewClient(relayWsURL, serverCfg.Token, localAddr, log)
+
+		go func() {
+			if err := relayClient.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Error("relay client error", "error", err)
+			}
+		}()
+
+		log.Info("relay mode enabled - connecting to cinch.sh")
+	}
+
 	// Start server in goroutine
 	errChan := make(chan error, 1)
 	go func() {
@@ -465,6 +532,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("server error: %w", err)
 	case <-ctx.Done():
 		log.Info("shutting down server")
+		if relayClient != nil {
+			relayClient.Stop()
+		}
 		if err := srv.Shutdown(context.Background()); err != nil {
 			log.Warn("shutdown error", "error", err)
 		}
@@ -615,15 +685,29 @@ func runStandaloneWorker(verbose bool, labels []string, shared bool) error {
 	defer os.Remove(socketPath)
 	defer os.Remove(socketPath + ".pid")
 
-	// Load credentials to validate they exist (daemon run will use them)
-	cliCfg, err := cli.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load credentials: %w", err)
-	}
+	// Check for environment variables first (self-hosted mode)
+	envURL := os.Getenv("CINCH_URL")
+	envToken := os.Getenv("CINCH_TOKEN")
 
-	serverCfg, ok := cliCfg.Servers["default"]
-	if !ok || serverCfg.Token == "" {
-		return fmt.Errorf("not logged in - run 'cinch login' first")
+	var serverCfg cli.ServerConfig
+	if envURL != "" && envToken != "" {
+		// Self-hosted mode: use environment variables
+		serverCfg = cli.ServerConfig{
+			URL:   envURL,
+			Token: envToken,
+		}
+	} else {
+		// Normal mode: load credentials from config file
+		cliCfg, err := cli.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("load credentials: %w", err)
+		}
+
+		var ok bool
+		serverCfg, ok = cliCfg.Servers["default"]
+		if !ok || serverCfg.Token == "" {
+			return fmt.Errorf("not logged in - run 'cinch login' first, or set CINCH_URL and CINCH_TOKEN")
+		}
 	}
 
 	// Get the path to the current executable
@@ -785,15 +869,29 @@ func daemonStartCmd() *cobra.Command {
 			verbose, _ := cmd.Flags().GetBool("verbose")
 			labels, _ := cmd.Flags().GetStringSlice("labels")
 
-			// Load credentials
-			cliCfg, err := cli.LoadConfig()
-			if err != nil {
-				return fmt.Errorf("load credentials: %w", err)
-			}
+			// Check for environment variables first (self-hosted mode)
+			envURL := os.Getenv("CINCH_URL")
+			envToken := os.Getenv("CINCH_TOKEN")
 
-			serverCfg, ok := cliCfg.Servers["default"]
-			if !ok || serverCfg.Token == "" {
-				return fmt.Errorf("not logged in - run 'cinch login' first")
+			var serverCfg cli.ServerConfig
+			if envURL != "" && envToken != "" {
+				// Self-hosted mode: use environment variables
+				serverCfg = cli.ServerConfig{
+					URL:   envURL,
+					Token: envToken,
+				}
+			} else {
+				// Normal mode: load credentials from config file
+				cliCfg, err := cli.LoadConfig()
+				if err != nil {
+					return fmt.Errorf("load credentials: %w", err)
+				}
+
+				var ok bool
+				serverCfg, ok = cliCfg.Servers["default"]
+				if !ok || serverCfg.Token == "" {
+					return fmt.Errorf("not logged in - run 'cinch login' first, or set CINCH_URL and CINCH_TOKEN")
+				}
 			}
 
 			// Use ws_url if available (from server), otherwise derive from URL
@@ -928,15 +1026,29 @@ func daemonRunCmd() *cobra.Command {
 			shared, _ := cmd.Flags().GetBool("shared")
 			labels, _ := cmd.Flags().GetStringSlice("labels")
 
-			// Load credentials
-			cliCfg, err := cli.LoadConfig()
-			if err != nil {
-				return fmt.Errorf("load credentials: %w", err)
-			}
+			// Check for environment variables first (self-hosted mode)
+			envURL := os.Getenv("CINCH_URL")
+			envToken := os.Getenv("CINCH_TOKEN")
 
-			serverCfg, ok := cliCfg.Servers["default"]
-			if !ok || serverCfg.Token == "" {
-				return fmt.Errorf("not logged in - run 'cinch login' first")
+			var serverCfg cli.ServerConfig
+			if envURL != "" && envToken != "" {
+				// Self-hosted mode: use environment variables
+				serverCfg = cli.ServerConfig{
+					URL:   envURL,
+					Token: envToken,
+				}
+			} else {
+				// Normal mode: load credentials from config file
+				cliCfg, err := cli.LoadConfig()
+				if err != nil {
+					return fmt.Errorf("load credentials: %w", err)
+				}
+
+				var ok bool
+				serverCfg, ok = cliCfg.Servers["default"]
+				if !ok || serverCfg.Token == "" {
+					return fmt.Errorf("not logged in - run 'cinch login' first, or set CINCH_URL and CINCH_TOKEN")
+				}
 			}
 
 			// Use ws_url if available (from server), otherwise derive from URL
@@ -1602,16 +1714,9 @@ func configValidateCmd() *cobra.Command {
 func tokenCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "token",
-		Short: "Manage worker tokens",
+		Short: "Manage user tokens (for self-hosted servers)",
 	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "create",
-		Short: "Create a new worker token",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("token create not yet implemented")
-			return nil
-		},
-	})
+	cmd.AddCommand(tokenCreateCmd())
 	cmd.AddCommand(&cobra.Command{
 		Use:   "list",
 		Short: "List active tokens",
@@ -1629,6 +1734,74 @@ func tokenCmd() *cobra.Command {
 		},
 	})
 	return cmd
+}
+
+func tokenCreateCmd() *cobra.Command {
+	var user string
+	var days int
+
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a user token for self-hosted servers",
+		Long: `Create a JWT token for a user to authenticate with a self-hosted Cinch server.
+
+This command is for SERVER ADMINISTRATORS to generate tokens for their users.
+Requires CINCH_JWT_SECRET environment variable to be set (same secret used by the server).
+
+Example:
+  export CINCH_JWT_SECRET=your-server-secret
+  cinch token create --user alice@company.com
+
+  # Give the output token to Alice to use:
+  # export CINCH_URL=http://ci.internal:8080
+  # export CINCH_TOKEN=<the-token>
+  # cinch worker`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if user == "" {
+				return fmt.Errorf("--user is required")
+			}
+
+			jwtSecret := os.Getenv("CINCH_JWT_SECRET")
+			if jwtSecret == "" {
+				return fmt.Errorf("CINCH_JWT_SECRET environment variable is required\n\nThis must be the same secret configured on your Cinch server.")
+			}
+
+			// Create JWT token
+			token, err := createUserJWT(user, jwtSecret, days)
+			if err != nil {
+				return fmt.Errorf("create token: %w", err)
+			}
+
+			fmt.Printf("Token for %s:\n\n%s\n\n", user, token)
+			fmt.Println("Give this token to the user. They should set:")
+			fmt.Println("  export CINCH_URL=<your-server-url>")
+			fmt.Println("  export CINCH_TOKEN=<this-token>")
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&user, "user", "", "User email/identifier for the token (required)")
+	cmd.Flags().IntVar(&days, "days", 90, "Token validity in days")
+
+	return cmd
+}
+
+// createUserJWT creates a signed JWT for a user.
+func createUserJWT(email, jwtSecret string, days int) (string, error) {
+	// Import jwt inline to avoid adding to package imports
+	type MapClaims map[string]interface{}
+
+	claims := MapClaims{
+		"sub":  email,
+		"type": "user",
+		"iat":  time.Now().Unix(),
+		"exp":  time.Now().Add(time.Duration(days) * 24 * time.Hour).Unix(),
+	}
+
+	// Use the same JWT library as the server
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims(claims))
+	return token.SignedString([]byte(jwtSecret))
 }
 
 func loginCmd() *cobra.Command {
@@ -1783,6 +1956,7 @@ func repoAddCmd() *cobra.Command {
 	var forgeType string
 	var forgeURL string
 	var forgeToken string
+	var manual bool
 
 	cmd := &cobra.Command{
 		Use:   "add [owner/name]",
@@ -1795,7 +1969,8 @@ Examples:
   cinch repo add                    # Add current repo (detects from git)
   cinch repo add ehrlich-b/cinch    # Add specific GitHub repo
   cinch repo add myorg/myproject --forge gitlab
-  cinch repo add myorg/myproject --forge gitlab --url https://gitlab.mycompany.com --token glpat-xxx`,
+  cinch repo add myorg/myproject --forge gitlab --url https://gitlab.mycompany.com --token glpat-xxx
+  cinch repo add myorg/myproject --manual --token ghp_xxx  # Skip OAuth, show webhook instructions`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var repoPath string
@@ -1836,39 +2011,55 @@ Examples:
 				repoPath = args[0]
 			}
 
-			return runRepoAdd(repoPath, forgeType, forgeURL, forgeToken)
+			return runRepoAdd(repoPath, forgeType, forgeURL, forgeToken, manual)
 		},
 	}
 	cmd.Flags().StringVar(&forgeType, "forge", "github", "Forge type (github, gitlab, forgejo, gitea)")
 	cmd.Flags().StringVar(&forgeURL, "url", "", "Base URL for self-hosted instances (e.g., https://gitlab.mycompany.com)")
 	cmd.Flags().StringVar(&forgeToken, "token", "", "API token for status posting (e.g., glpat-xxx for GitLab)")
+	cmd.Flags().BoolVar(&manual, "manual", false, "Skip OAuth, print webhook setup instructions (for self-hosted)")
 	return cmd
 }
 
-func runRepoAdd(repoPath string, forgeType string, forgeURL string, forgeToken string) error {
+func runRepoAdd(repoPath string, forgeType string, forgeURL string, forgeToken string, manual bool) error {
 	parts := strings.SplitN(repoPath, "/", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid repo format: use owner/name")
 	}
 	owner, name := parts[0], parts[1]
 
-	// Load credentials
-	cfg, err := cli.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+	// Check for environment variables first (self-hosted mode)
+	envURL := os.Getenv("CINCH_URL")
+	envToken := os.Getenv("CINCH_TOKEN")
+
+	var serverCfg cli.ServerConfig
+	if envURL != "" && envToken != "" {
+		// Self-hosted mode: use environment variables, always manual
+		serverCfg = cli.ServerConfig{
+			URL:   envURL,
+			Token: envToken,
+		}
+		manual = true // Force manual mode for self-hosted
+	} else {
+		// Normal mode: load credentials from config file
+		cfg, err := cli.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
+		}
+
+		var ok bool
+		serverCfg, ok = cfg.Servers["default"]
+		if !ok || serverCfg.Token == "" {
+			return fmt.Errorf("not logged in - run 'cinch login' first, or set CINCH_URL and CINCH_TOKEN")
+		}
 	}
 
-	serverCfg, ok := cfg.Servers["default"]
-	if !ok || serverCfg.Token == "" {
-		return fmt.Errorf("not logged in - run 'cinch login' first")
-	}
-
-	// For GitLab, try to use stored OAuth credentials for automatic webhook setup
-	if forgeType == "gitlab" && forgeToken == "" {
+	// For GitLab without manual flag, try to use stored OAuth credentials
+	if forgeType == "gitlab" && forgeToken == "" && !manual {
 		return runGitLabRepoAdd(serverCfg, repoPath, owner, name, forgeURL)
 	}
 
-	// For other forges or when token is provided, use manual setup
+	// Manual setup (explicit flag, self-hosted, or when token is provided)
 	return runManualRepoAdd(serverCfg, repoPath, forgeType, forgeURL, forgeToken, owner, name)
 }
 
@@ -2053,16 +2244,30 @@ func runManualRepoAdd(serverCfg cli.ServerConfig, repoPath, forgeType, forgeURL,
 	}
 
 	var result struct {
-		ID            string `json:"id"`
-		WebhookSecret string `json:"webhook_secret"`
+		ID                 string `json:"id"`
+		WebhookSecret      string `json:"webhook_secret"`
+		WebhookAutoCreated bool   `json:"webhook_auto_created"`
+		WebhookURL         string `json:"webhook_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 
-	webhookURL := serverCfg.URL + "/webhooks"
-
 	fmt.Printf("Added repo %s/%s\n", owner, name)
+
+	// If webhook was auto-created, no manual setup needed
+	if result.WebhookAutoCreated {
+		fmt.Println("Webhook created automatically!")
+		fmt.Println("\nYou're all set. Push to trigger a build.")
+		return nil
+	}
+
+	// Manual webhook setup required
+	webhookURL := result.WebhookURL
+	if webhookURL == "" {
+		webhookURL = serverCfg.URL + "/webhooks/" + forgeType
+	}
+
 	fmt.Println()
 
 	// Show forge-specific webhook configuration
@@ -2079,14 +2284,23 @@ func runManualRepoAdd(serverCfg cli.ServerConfig, repoPath, forgeType, forgeURL,
 			fmt.Println("  Then run: cinch repo add --forge gitlab --token <token> ...")
 		}
 	case "github":
-		// GitHub uses the GitHub App - redirect to add repo to installation
-		appURL := "https://github.com/apps/cinch-sh/installations/select_target"
-		fmt.Println()
-		fmt.Println("To enable webhooks, add this repo to your GitHub App installation:")
-		fmt.Printf("  %s\n", appURL)
-		fmt.Println()
-		fmt.Println("Opening browser...")
-		openBrowser(appURL)
+		// For self-hosted, show manual webhook instructions
+		if os.Getenv("CINCH_URL") != "" {
+			fmt.Println("Configure webhook in GitHub:")
+			fmt.Printf("  URL: %s\n", webhookURL)
+			fmt.Printf("  Secret: %s\n", result.WebhookSecret)
+			fmt.Println("  Content type: application/json")
+			fmt.Println("  Events: Pushes, Pull requests, Create (for tags)")
+		} else {
+			// Hosted service uses GitHub App
+			appURL := "https://github.com/apps/cinch-sh/installations/select_target"
+			fmt.Println()
+			fmt.Println("To enable webhooks, add this repo to your GitHub App installation:")
+			fmt.Printf("  %s\n", appURL)
+			fmt.Println()
+			fmt.Println("Opening browser...")
+			openBrowser(appURL)
+		}
 	default:
 		fmt.Printf("Configure webhook in %s:\n", forgeType)
 		fmt.Printf("  URL: %s\n", webhookURL)

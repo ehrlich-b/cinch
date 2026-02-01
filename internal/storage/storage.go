@@ -86,6 +86,10 @@ type Storage interface {
 	AddOrgSeat(ctx context.Context, orgBillingID, userID, forgeUsername string) error
 	ResetOrgSeats(ctx context.Context, orgBillingID string) error // Called at billing period start
 
+	// Relay (self-hosted webhook forwarding)
+	GetOrCreateRelayID(ctx context.Context, userID string) (string, error)
+	GetRelayByID(ctx context.Context, relayID string) (*Relay, error)
+
 	// Lifecycle
 	Close() error
 }
@@ -310,4 +314,11 @@ type OrgSeat struct {
 	UserID        string
 	ForgeUsername string    // For admin display
 	ConsumedAt    time.Time // When seat was consumed
+}
+
+// Relay represents a webhook relay for a self-hosted server.
+type Relay struct {
+	ID        string // Short random ID (e.g., "x7k9m")
+	UserID    string // Owner of this relay
+	CreatedAt time.Time
 }

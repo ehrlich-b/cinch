@@ -182,6 +182,64 @@ func (g *GitHub) CloneToken(ctx context.Context, repo *Repo) (string, time.Time,
 	return g.Token, time.Now().Add(time.Hour), nil
 }
 
+// CreateWebhook creates a webhook for the repository.
+func (g *GitHub) CreateWebhook(ctx context.Context, repo *Repo, webhookURL, secret string) (int64, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/hooks",
+		repo.Owner, repo.Name)
+
+	payload := githubWebhookPayload{
+		Name:   "web",
+		Active: true,
+		Events: []string{"push", "pull_request", "create"},
+		Config: githubWebhookConfig{
+			URL:         webhookURL,
+			ContentType: "json",
+			Secret:      secret,
+			InsecureSSL: "0",
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+g.Token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	client := g.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("github api error: %s - %s", resp.Status, string(respBody))
+	}
+
+	var result struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode response: %w", err)
+	}
+
+	return result.ID, nil
+}
+
 // ParsePullRequest parses a GitHub pull_request webhook.
 func (g *GitHub) ParsePullRequest(r *http.Request, secret string) (*PullRequestEvent, error) {
 	// Check event type
@@ -268,6 +326,20 @@ type githubStatusPayload struct {
 	Context     string `json:"context"`
 	Description string `json:"description,omitempty"`
 	TargetURL   string `json:"target_url,omitempty"`
+}
+
+type githubWebhookPayload struct {
+	Name   string              `json:"name"`
+	Active bool                `json:"active"`
+	Events []string            `json:"events"`
+	Config githubWebhookConfig `json:"config"`
+}
+
+type githubWebhookConfig struct {
+	URL         string `json:"url"`
+	ContentType string `json:"content_type"`
+	Secret      string `json:"secret"`
+	InsecureSSL string `json:"insecure_ssl"`
 }
 
 type githubPRPayload struct {
