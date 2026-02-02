@@ -1,9 +1,5 @@
 # Cinch TODO
 
-**Goal:** First external user by Sunday 2026-02-02
-
----
-
 ## Launch Blockers
 
 - [x] **Remove services from README** - Services syntax is shown but not wired up. Confuses first-time users. Services are v2 consideration.
@@ -56,24 +52,6 @@ From simulated r/selfhosted feedback:
 
 ---
 
-## Target Audience
-
-**Primary:** Forgejo/Gitea self-hosters (underserved by CI tools)
-**Secondary:** r/selfhosted generalists
-**Tertiary:** GitHub users who want their own hardware
-
-**Why Forgejo first:**
-- GitLab has GitLab CI built-in
-- GitHub has Actions built-in
-- Forgejo has... Woodpecker? Gitea Actions (rough)
-- Cinch can own this niche
-
-**Positioning:**
-- r/forgejo: "Native Forgejo CI, 5 minutes to first build, no OAuth apps needed"
-- r/selfhosted: Lead with Forgejo story, "also works with GitHub/GitLab"
-
----
-
 ## Billing (Post-Launch)
 
 **Status:** Free during beta. Infrastructure ready, Stripe stubbed.
@@ -96,13 +74,6 @@ From simulated r/selfhosted feedback:
 ---
 
 ## After Launch
-
-**User Acquisition (order matters):**
-1. [ ] r/forgejo post - underserved audience, most likely to try it
-2. [ ] r/selfhosted post - broader reach, lead with Forgejo story
-3. [ ] awesome-selfhosted PR
-4. [ ] Hacker News Show HN
-5. [ ] Badge on someone else's repo
 
 **Self-Hosting Polish:**
 - [ ] Prometheus metrics endpoint (`/metrics`) - job counts, worker counts, durations
