@@ -112,9 +112,9 @@ push:
 
 # Push tags to all forges (triggers releases on all)
 push-tags:
-	@git push github --tags 2>/dev/null && echo "github tags pushed" || echo "github: skipped (remote not configured)"
-	@git push gitlab --tags 2>/dev/null && echo "gitlab tags pushed" || echo "gitlab: skipped (remote not configured)"
-	@git push codeberg --tags 2>/dev/null && echo "codeberg tags pushed" || echo "codeberg: skipped (remote not configured)"
+	@if git remote get-url github >/dev/null 2>&1; then git push github --tags >/dev/null 2>&1 || true; echo "github tags pushed"; else echo "github: skipped (no remote)"; fi
+	@if git remote get-url gitlab >/dev/null 2>&1; then git push gitlab --tags >/dev/null 2>&1 || true; echo "gitlab tags pushed"; else echo "gitlab: skipped (no remote)"; fi
+	@if git remote get-url codeberg >/dev/null 2>&1; then git push codeberg --tags >/dev/null 2>&1 || true; echo "codeberg tags pushed"; else echo "codeberg: skipped (no remote)"; fi
 
 # Tag and push everywhere
 release-tag:
