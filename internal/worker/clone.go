@@ -114,31 +114,45 @@ func (c *GitCloner) Clone(ctx context.Context, repo protocol.JobRepo) (string, e
 // createAskpassScript creates a temporary executable script that outputs the token.
 // This is used with GIT_ASKPASS to avoid putting tokens in command-line arguments
 // where they would be visible in `ps` output.
+//
+// We write the token to a file named <script>.token alongside the script.
+// The script reads this file by deriving the path from $0 (its own path).
+// This avoids shell injection vulnerabilities from tokens containing special characters.
 func createAskpassScript(token string) (string, error) {
-	// Create temp file with executable permissions
-	f, err := os.CreateTemp("", "git-askpass-*.sh")
+	// Create the askpass script first
+	scriptFile, err := os.CreateTemp("", "git-askpass-*.sh")
 	if err != nil {
 		return "", err
 	}
-	path := f.Name()
+	scriptPath := scriptFile.Name()
 
-	// Write script that echoes the token
-	// The script is simple: when git calls it asking for password, it outputs the token
-	script := fmt.Sprintf("#!/bin/sh\necho '%s'\n", token)
-	if _, err := f.WriteString(script); err != nil {
-		f.Close()
-		os.Remove(path)
+	// Script reads token from a file named <script>.token
+	// Uses $0 to find its own path and appends .token - no interpolation of untrusted data
+	script := `#!/bin/sh
+cat "$0.token"
+rm -f "$0.token" "$0"
+`
+	if _, err := scriptFile.WriteString(script); err != nil {
+		scriptFile.Close()
+		os.Remove(scriptPath)
 		return "", err
 	}
-	f.Close()
+	scriptFile.Close()
 
-	// Make executable
-	if err := os.Chmod(path, 0700); err != nil {
-		os.Remove(path)
+	// Make script executable
+	if err := os.Chmod(scriptPath, 0700); err != nil {
+		os.Remove(scriptPath)
 		return "", err
 	}
 
-	return path, nil
+	// Write token to <script>.token file (with trailing newline for git compatibility)
+	tokenPath := scriptPath + ".token"
+	if err := os.WriteFile(tokenPath, []byte(token+"\n"), 0600); err != nil {
+		os.Remove(scriptPath)
+		return "", err
+	}
+
+	return scriptPath, nil
 }
 
 // injectUsername adds just the username to a clone URL (password comes from askpass).

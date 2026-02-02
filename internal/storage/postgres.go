@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -189,12 +190,23 @@ func (s *PostgresStorage) migrate() error {
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`)
 
+	// Relay table for webhook forwarding to self-hosted servers
+	_, _ = s.db.Exec(`CREATE TABLE IF NOT EXISTS relays (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`)
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_relays_user_id ON relays(user_id)")
+
 	// Add columns that may not exist (for migrations)
 	alterStatements := []string{
 		// Storage quota columns
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'free'`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_used_bytes BIGINT NOT NULL DEFAULT 0`,
 		`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS log_size_bytes BIGINT NOT NULL DEFAULT 0`,
+		// Authorization columns
+		`ALTER TABLE repos ADD COLUMN IF NOT EXISTS owner_user_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS owner_user_id TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range alterStatements {
 		_, _ = s.db.Exec(stmt)
@@ -210,11 +222,13 @@ func (s *PostgresStorage) migrate() error {
 	indexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_workers_owner_name ON workers(owner_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_repos_forge_owner_name ON repos(forge_type, owner, name)`,
+		`CREATE INDEX IF NOT EXISTS idx_repos_owner_user_id ON repos(owner_user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_jobs_repo_id ON jobs(repo_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_jobs_author ON jobs(author)`,
 		`CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash)`,
+		`CREATE INDEX IF NOT EXISTS idx_tokens_owner_user_id ON tokens(owner_user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
 	}
 
@@ -880,15 +894,16 @@ func (s *PostgresStorage) CreateRepo(ctx context.Context, repo *Repo) error {
 
 	// Use upsert to handle re-onboarding: if repo exists, update token and webhook secret
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO repos (id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		`INSERT INTO repos (id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		 ON CONFLICT (clone_url) DO UPDATE SET
 		 	webhook_secret = EXCLUDED.webhook_secret,
 		 	forge_token = EXCLUDED.forge_token,
 		 	workers = EXCLUDED.workers,
-		 	private = EXCLUDED.private`,
+		 	private = EXCLUDED.private,
+		 	owner_user_id = CASE WHEN repos.owner_user_id = '' THEN EXCLUDED.owner_user_id ELSE repos.owner_user_id END`,
 		repo.ID, repo.ForgeType, repo.Owner, repo.Name, repo.CloneURL, repo.HTMLURL,
-		webhookSecret, forgeToken, repo.Build, repo.Release, workers, secretsJSON, repo.Private, repo.CreatedAt)
+		webhookSecret, forgeToken, repo.Build, repo.Release, workers, secretsJSON, repo.Private, repo.OwnerUserID, repo.CreatedAt)
 	return err
 }
 
@@ -896,10 +911,10 @@ func (s *PostgresStorage) GetRepo(ctx context.Context, id string) (*Repo, error)
 	repo := &Repo{}
 	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at
 		 FROM repos WHERE id = $1`, id).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
-		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.OwnerUserID, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -936,10 +951,10 @@ func (s *PostgresStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string
 	repo := &Repo{}
 	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at
 		 FROM repos WHERE clone_url = $1`, cloneURL).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
-		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.OwnerUserID, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -974,19 +989,35 @@ func (s *PostgresStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string
 
 func (s *PostgresStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at
 		 FROM repos ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	return s.scanRepos(rows)
+}
+
+func (s *PostgresStorage) ListReposByOwner(ctx context.Context, ownerUserID string) ([]*Repo, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at
+		 FROM repos WHERE owner_user_id = $1 ORDER BY created_at DESC`, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return s.scanRepos(rows)
+}
+
+func (s *PostgresStorage) scanRepos(rows *sql.Rows) ([]*Repo, error) {
 	var repos []*Repo
 	for rows.Next() {
 		repo := &Repo{}
 		var workers, secretsJSON string
 		if err := rows.Scan(&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL,
-			&repo.HTMLURL, &repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt); err != nil {
+			&repo.HTMLURL, &repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.OwnerUserID, &repo.CreatedAt); err != nil {
 			return nil, err
 		}
 		// Parse workers from comma-separated string
@@ -994,6 +1025,7 @@ func (s *PostgresStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 			repo.Workers = strings.Split(workers, ",")
 		}
 		// Decrypt secrets
+		var err error
 		if repo.WebhookSecret, err = s.decrypt(repo.WebhookSecret); err != nil {
 			return nil, fmt.Errorf("decrypt webhook_secret: %w", err)
 		}
@@ -1026,10 +1058,10 @@ func (s *PostgresStorage) GetRepoByOwnerName(ctx context.Context, forge, owner, 
 	repo := &Repo{}
 	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at
 		 FROM repos WHERE forge_type = $1 AND owner = $2 AND name = $3`, forge, owner, name).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
-		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.OwnerUserID, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -1092,18 +1124,18 @@ func (s *PostgresStorage) UpdateRepoSecrets(ctx context.Context, id string, secr
 
 func (s *PostgresStorage) CreateToken(ctx context.Context, token *Token) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO tokens (id, name, hash, worker_id, created_at)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		token.ID, token.Name, token.Hash, token.WorkerID, token.CreatedAt)
+		`INSERT INTO tokens (id, name, hash, worker_id, owner_user_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		token.ID, token.Name, token.Hash, token.WorkerID, token.OwnerUserID, token.CreatedAt)
 	return err
 }
 
 func (s *PostgresStorage) GetTokenByHash(ctx context.Context, hash string) (*Token, error) {
 	token := &Token{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, hash, worker_id, created_at, revoked_at
+		`SELECT id, name, hash, worker_id, owner_user_id, created_at, revoked_at
 		 FROM tokens WHERE hash = $1 AND revoked_at IS NULL`, hash).Scan(
-		&token.ID, &token.Name, &token.Hash, &token.WorkerID, &token.CreatedAt, &token.RevokedAt)
+		&token.ID, &token.Name, &token.Hash, &token.WorkerID, &token.OwnerUserID, &token.CreatedAt, &token.RevokedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -1112,17 +1144,32 @@ func (s *PostgresStorage) GetTokenByHash(ctx context.Context, hash string) (*Tok
 
 func (s *PostgresStorage) ListTokens(ctx context.Context) ([]*Token, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, hash, worker_id, created_at, revoked_at FROM tokens ORDER BY created_at DESC`)
+		`SELECT id, name, hash, worker_id, owner_user_id, created_at, revoked_at FROM tokens ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	return s.scanTokens(rows)
+}
+
+func (s *PostgresStorage) ListTokensByOwner(ctx context.Context, ownerUserID string) ([]*Token, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, hash, worker_id, owner_user_id, created_at, revoked_at FROM tokens WHERE owner_user_id = $1 ORDER BY created_at DESC`, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return s.scanTokens(rows)
+}
+
+func (s *PostgresStorage) scanTokens(rows *sql.Rows) ([]*Token, error) {
 	var tokens []*Token
 	for rows.Next() {
 		token := &Token{}
 		if err := rows.Scan(&token.ID, &token.Name, &token.Hash,
-			&token.WorkerID, &token.CreatedAt, &token.RevokedAt); err != nil {
+			&token.WorkerID, &token.OwnerUserID, &token.CreatedAt, &token.RevokedAt); err != nil {
 			return nil, err
 		}
 		tokens = append(tokens, token)
@@ -1585,4 +1632,53 @@ func (s *PostgresStorage) GetLogs(ctx context.Context, jobID string) ([]*LogEntr
 		logs = append(logs, log)
 	}
 	return logs, rows.Err()
+}
+
+// --- Relays ---
+
+// generateRelayID creates a cryptographically random ID for a relay.
+func generateRelayIDPostgres() string {
+	const chars = "abcdefghijklmnopqrstuvwxyz234567"
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	for i := range b {
+		b[i] = chars[int(b[i])%len(chars)]
+	}
+	return string(b)
+}
+
+func (s *PostgresStorage) GetOrCreateRelayID(ctx context.Context, userID string) (string, error) {
+	// Check if user already has a relay
+	var relayID string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM relays WHERE user_id = $1`, userID).Scan(&relayID)
+	if err == nil {
+		return relayID, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", err
+	}
+
+	// Create new relay
+	relayID = generateRelayIDPostgres()
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO relays (id, user_id, created_at) VALUES ($1, $2, $3)`,
+		relayID, userID, time.Now())
+	if err != nil {
+		return "", err
+	}
+	return relayID, nil
+}
+
+func (s *PostgresStorage) GetRelayByID(ctx context.Context, relayID string) (*Relay, error) {
+	relay := &Relay{}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, user_id, created_at FROM relays WHERE id = $1`, relayID).Scan(
+		&relay.ID, &relay.UserID, &relay.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	return relay, err
 }

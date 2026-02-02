@@ -200,7 +200,12 @@ func (h *GitLabOAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Not logged in - find or create account by email
+	// Not logged in - create/find account by email
+	// SECURITY NOTE: This is safe because:
+	// 1. The OAuth flow only works with the configured GitLab instance (set by Cinch admin)
+	// 2. Admin configuring a GitLab instance means they trust it for their deployment
+	// 3. Users cannot OAuth to arbitrary GitLab instances - only the configured one
+	// 4. Official hosted Cinch only configures gitlab.com (trusted upstream)
 	email := glUser.Email
 	if email == "" {
 		h.log.Error("GitLab user has no email")

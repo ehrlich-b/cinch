@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -260,14 +261,25 @@ func (s *SQLiteStorage) migrate() error {
 			gitlab_credentials_at DATETIME,
 			forgejo_credentials TEXT NOT NULL DEFAULT '',
 			forgejo_credentials_at DATETIME,
+			tier TEXT NOT NULL DEFAULT 'free',
+			storage_used_bytes INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`)
 		_, _ = s.db.Exec(`INSERT INTO users_new SELECT id, name, email, emails, github_connected_at,
-			gitlab_credentials, gitlab_credentials_at, forgejo_credentials, forgejo_credentials_at, created_at FROM users`)
+			gitlab_credentials, gitlab_credentials_at, forgejo_credentials, forgejo_credentials_at,
+			COALESCE(tier, 'free'), COALESCE(storage_used_bytes, 0), created_at FROM users`)
 		_, _ = s.db.Exec(`DROP TABLE users`)
 		_, _ = s.db.Exec(`ALTER TABLE users_new RENAME TO users`)
 		_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 	}
+
+	// Add owner_user_id to repos for authorization
+	_, _ = s.db.Exec("ALTER TABLE repos ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT ''")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_repos_owner_user_id ON repos(owner_user_id)")
+
+	// Add owner_user_id to tokens for authorization
+	_, _ = s.db.Exec("ALTER TABLE tokens ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT ''")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_tokens_owner_user_id ON tokens(owner_user_id)")
 
 	// Encrypt existing plaintext secrets if cipher is configured
 	if s.cipher != nil {
@@ -931,15 +943,16 @@ func (s *SQLiteStorage) CreateRepo(ctx context.Context, repo *Repo) error {
 
 	// Use upsert to handle re-onboarding: if repo exists, update token and webhook secret
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO repos (id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO repos (id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(clone_url) DO UPDATE SET
 		 	webhook_secret = excluded.webhook_secret,
 		 	forge_token = excluded.forge_token,
 		 	workers = excluded.workers,
-		 	private = excluded.private`,
+		 	private = excluded.private,
+		 	owner_user_id = CASE WHEN repos.owner_user_id = '' THEN excluded.owner_user_id ELSE repos.owner_user_id END`,
 		repo.ID, repo.ForgeType, repo.Owner, repo.Name, repo.CloneURL, repo.HTMLURL,
-		webhookSecret, forgeToken, repo.Build, repo.Release, workers, secretsJSON, repo.Private, repo.CreatedAt)
+		webhookSecret, forgeToken, repo.Build, repo.Release, workers, secretsJSON, repo.Private, repo.OwnerUserID, repo.CreatedAt)
 	return err
 }
 
@@ -947,10 +960,10 @@ func (s *SQLiteStorage) GetRepo(ctx context.Context, id string) (*Repo, error) {
 	repo := &Repo{}
 	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at
 		 FROM repos WHERE id = ?`, id).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
-		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.OwnerUserID, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -987,10 +1000,10 @@ func (s *SQLiteStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string) 
 	repo := &Repo{}
 	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at
 		 FROM repos WHERE clone_url = ?`, cloneURL).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
-		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.OwnerUserID, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -1025,19 +1038,35 @@ func (s *SQLiteStorage) GetRepoByCloneURL(ctx context.Context, cloneURL string) 
 
 func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at
 		 FROM repos ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	return s.scanRepos(rows)
+}
+
+func (s *SQLiteStorage) ListReposByOwner(ctx context.Context, ownerUserID string) ([]*Repo, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at
+		 FROM repos WHERE owner_user_id = ? ORDER BY created_at DESC`, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return s.scanRepos(rows)
+}
+
+func (s *SQLiteStorage) scanRepos(rows *sql.Rows) ([]*Repo, error) {
 	var repos []*Repo
 	for rows.Next() {
 		repo := &Repo{}
 		var workers, secretsJSON string
 		if err := rows.Scan(&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL,
-			&repo.HTMLURL, &repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt); err != nil {
+			&repo.HTMLURL, &repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.OwnerUserID, &repo.CreatedAt); err != nil {
 			return nil, err
 		}
 		// Parse workers from comma-separated string
@@ -1045,6 +1074,7 @@ func (s *SQLiteStorage) ListRepos(ctx context.Context) ([]*Repo, error) {
 			repo.Workers = strings.Split(workers, ",")
 		}
 		// Decrypt secrets
+		var err error
 		if repo.WebhookSecret, err = s.decrypt(repo.WebhookSecret); err != nil {
 			return nil, fmt.Errorf("decrypt webhook_secret: %w", err)
 		}
@@ -1077,10 +1107,10 @@ func (s *SQLiteStorage) GetRepoByOwnerName(ctx context.Context, forge, owner, na
 	repo := &Repo{}
 	var workers, secretsJSON string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, created_at
+		`SELECT id, forge_type, owner, name, clone_url, html_url, webhook_secret, forge_token, build, release, workers, secrets, private, owner_user_id, created_at
 		 FROM repos WHERE forge_type = ? AND owner = ? AND name = ?`, forge, owner, name).Scan(
 		&repo.ID, &repo.ForgeType, &repo.Owner, &repo.Name, &repo.CloneURL, &repo.HTMLURL,
-		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.CreatedAt)
+		&repo.WebhookSecret, &repo.ForgeToken, &repo.Build, &repo.Release, &workers, &secretsJSON, &repo.Private, &repo.OwnerUserID, &repo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -1143,18 +1173,18 @@ func (s *SQLiteStorage) UpdateRepoSecrets(ctx context.Context, id string, secret
 
 func (s *SQLiteStorage) CreateToken(ctx context.Context, token *Token) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO tokens (id, name, hash, worker_id, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		token.ID, token.Name, token.Hash, token.WorkerID, token.CreatedAt)
+		`INSERT INTO tokens (id, name, hash, worker_id, owner_user_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		token.ID, token.Name, token.Hash, token.WorkerID, token.OwnerUserID, token.CreatedAt)
 	return err
 }
 
 func (s *SQLiteStorage) GetTokenByHash(ctx context.Context, hash string) (*Token, error) {
 	token := &Token{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, hash, worker_id, created_at, revoked_at
+		`SELECT id, name, hash, worker_id, owner_user_id, created_at, revoked_at
 		 FROM tokens WHERE hash = ? AND revoked_at IS NULL`, hash).Scan(
-		&token.ID, &token.Name, &token.Hash, &token.WorkerID, &token.CreatedAt, &token.RevokedAt)
+		&token.ID, &token.Name, &token.Hash, &token.WorkerID, &token.OwnerUserID, &token.CreatedAt, &token.RevokedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -1163,17 +1193,32 @@ func (s *SQLiteStorage) GetTokenByHash(ctx context.Context, hash string) (*Token
 
 func (s *SQLiteStorage) ListTokens(ctx context.Context) ([]*Token, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, hash, worker_id, created_at, revoked_at FROM tokens ORDER BY created_at DESC`)
+		`SELECT id, name, hash, worker_id, owner_user_id, created_at, revoked_at FROM tokens ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	return s.scanTokens(rows)
+}
+
+func (s *SQLiteStorage) ListTokensByOwner(ctx context.Context, ownerUserID string) ([]*Token, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, hash, worker_id, owner_user_id, created_at, revoked_at FROM tokens WHERE owner_user_id = ? ORDER BY created_at DESC`, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return s.scanTokens(rows)
+}
+
+func (s *SQLiteStorage) scanTokens(rows *sql.Rows) ([]*Token, error) {
 	var tokens []*Token
 	for rows.Next() {
 		token := &Token{}
 		if err := rows.Scan(&token.ID, &token.Name, &token.Hash,
-			&token.WorkerID, &token.CreatedAt, &token.RevokedAt); err != nil {
+			&token.WorkerID, &token.OwnerUserID, &token.CreatedAt, &token.RevokedAt); err != nil {
 			return nil, err
 		}
 		tokens = append(tokens, token)
@@ -1638,14 +1683,17 @@ func formatEmailsJSON(emails []string) string {
 
 // --- Relays ---
 
-// generateRelayID creates a short random ID for a relay.
+// generateRelayID creates a cryptographically random ID for a relay.
+// Uses 8 characters from base32 (a-z, 2-7) for ~40 bits of entropy.
 func generateRelayID() string {
-	// Generate a short 5-character alphanumeric ID
-	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 5)
+	const chars = "abcdefghijklmnopqrstuvwxyz234567"
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback should never happen, but if it does, use a longer random source
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
 	for i := range b {
-		b[i] = chars[time.Now().UnixNano()%int64(len(chars))]
-		time.Sleep(time.Nanosecond) // Ensure different values
+		b[i] = chars[int(b[i])%len(chars)]
 	}
 	return string(b)
 }

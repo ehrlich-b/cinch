@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,50 @@ import (
 
 	"github.com/ehrlich-b/cinch/internal/storage"
 )
+
+const testJWTSecret = "test-jwt-secret-for-unit-tests"
+
+// setupTestAuth creates a test user and auth handler for testing authenticated endpoints.
+func setupTestAuth(t *testing.T, store storage.Storage) (*AuthHandler, *storage.User) {
+	t.Helper()
+
+	// Create test user
+	user, err := store.GetOrCreateUserByEmail(context.Background(), "test@example.com", "testuser")
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+	t.Logf("Created user: ID=%s Email=%s", user.ID, user.Email)
+
+	// Create auth handler with known JWT secret
+	auth := NewAuthHandler(AuthConfig{
+		JWTSecret: testJWTSecret,
+	}, store, nil)
+
+	return auth, user
+}
+
+// addAuthCookie adds a valid auth cookie to a request.
+func addAuthCookie(t *testing.T, auth *AuthHandler, req *http.Request, email string) {
+	t.Helper()
+
+	// Create a response writer to capture the cookie
+	w := httptest.NewRecorder()
+	if err := auth.SetAuthCookie(w, email); err != nil {
+		t.Fatalf("failed to set auth cookie: %v", err)
+	}
+
+	// Get the cookie from the response and add it to the request
+	cookies := w.Result().Cookies()
+	t.Logf("Got %d cookies from SetAuthCookie", len(cookies))
+	for _, c := range cookies {
+		t.Logf("Adding cookie: %s", c.Name)
+		req.AddCookie(c)
+	}
+
+	// Verify auth works
+	gotEmail := auth.GetUser(req)
+	t.Logf("GetUser returned: '%s'", gotEmail)
+}
 
 func TestAPIListJobs(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:", "", "")
@@ -271,7 +316,8 @@ func TestAPICreateRepo(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
-	api := NewAPIHandler(store, nil, nil, nil)
+	auth, _ := setupTestAuth(t, store)
+	api := NewAPIHandler(store, nil, auth, nil)
 
 	body := `{
 		"forge_type": "github",
@@ -285,6 +331,7 @@ func TestAPICreateRepo(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/api/repos", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	addAuthCookie(t, auth, req, "test@example.com")
 	w := httptest.NewRecorder()
 	api.ServeHTTP(w, req)
 
@@ -313,12 +360,14 @@ func TestAPICreateRepoMissingFields(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
-	api := NewAPIHandler(store, nil, nil, nil)
+	auth, _ := setupTestAuth(t, store)
+	api := NewAPIHandler(store, nil, auth, nil)
 
 	body := `{"forge_type": "github"}`
 
 	req := httptest.NewRequest("POST", "/api/repos", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	addAuthCookie(t, auth, req, "test@example.com")
 	w := httptest.NewRecorder()
 	api.ServeHTTP(w, req)
 
@@ -331,27 +380,42 @@ func TestAPIListRepos(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
-	// Create repos
+	auth, user := setupTestAuth(t, store)
+
+	// Create repos owned by test user
 	_ = store.CreateRepo(t.Context(), &storage.Repo{
-		ID:        "r_1",
-		ForgeType: storage.ForgeTypeGitHub,
-		Owner:     "org1",
-		Name:      "repo1",
-		CloneURL:  "https://github.com/org1/repo1.git",
-		CreatedAt: time.Now(),
+		ID:          "r_1",
+		ForgeType:   storage.ForgeTypeGitHub,
+		Owner:       "org1",
+		Name:        "repo1",
+		CloneURL:    "https://github.com/org1/repo1.git",
+		OwnerUserID: user.ID, // Owned by test user
+		CreatedAt:   time.Now(),
 	})
 	_ = store.CreateRepo(t.Context(), &storage.Repo{
-		ID:        "r_2",
-		ForgeType: storage.ForgeTypeForgejo,
-		Owner:     "org2",
-		Name:      "repo2",
-		CloneURL:  "https://forgejo.example.com/org2/repo2.git",
-		CreatedAt: time.Now(),
+		ID:          "r_2",
+		ForgeType:   storage.ForgeTypeForgejo,
+		Owner:       "org2",
+		Name:        "repo2",
+		CloneURL:    "https://forgejo.example.com/org2/repo2.git",
+		OwnerUserID: user.ID, // Owned by test user
+		CreatedAt:   time.Now(),
+	})
+	// Create a repo owned by someone else - should not be visible
+	_ = store.CreateRepo(t.Context(), &storage.Repo{
+		ID:          "r_3",
+		ForgeType:   storage.ForgeTypeGitHub,
+		Owner:       "other",
+		Name:        "repo3",
+		CloneURL:    "https://github.com/other/repo3.git",
+		OwnerUserID: "some-other-user-id",
+		CreatedAt:   time.Now(),
 	})
 
-	api := NewAPIHandler(store, nil, nil, nil)
+	api := NewAPIHandler(store, nil, auth, nil)
 
 	req := httptest.NewRequest("GET", "/api/repos", nil)
+	addAuthCookie(t, auth, req, "test@example.com")
 	w := httptest.NewRecorder()
 	api.ServeHTTP(w, req)
 
@@ -362,6 +426,7 @@ func TestAPIListRepos(t *testing.T) {
 	var repos []repoResponse
 	_ = json.NewDecoder(w.Body).Decode(&repos)
 
+	// Should only see the 2 repos owned by test user
 	if len(repos) != 2 {
 		t.Errorf("len(repos) = %d, want 2", len(repos))
 	}
@@ -409,16 +474,20 @@ func TestAPIDeleteRepo(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
+	auth, user := setupTestAuth(t, store)
+
 	_ = store.CreateRepo(t.Context(), &storage.Repo{
-		ID:        "r_1",
-		ForgeType: storage.ForgeTypeGitHub,
-		CloneURL:  "https://github.com/test/repo.git",
-		CreatedAt: time.Now(),
+		ID:          "r_1",
+		ForgeType:   storage.ForgeTypeGitHub,
+		CloneURL:    "https://github.com/test/repo.git",
+		OwnerUserID: user.ID, // Owned by test user
+		CreatedAt:   time.Now(),
 	})
 
-	api := NewAPIHandler(store, nil, nil, nil)
+	api := NewAPIHandler(store, nil, auth, nil)
 
 	req := httptest.NewRequest("DELETE", "/api/repos/r_1", nil)
+	addAuthCookie(t, auth, req, "test@example.com")
 	w := httptest.NewRecorder()
 	api.ServeHTTP(w, req)
 
@@ -437,12 +506,14 @@ func TestAPICreateToken(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
-	api := NewAPIHandler(store, nil, nil, nil)
+	auth, _ := setupTestAuth(t, store)
+	api := NewAPIHandler(store, nil, auth, nil)
 
 	body := `{"name": "my-worker-token"}`
 
 	req := httptest.NewRequest("POST", "/api/tokens", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	addAuthCookie(t, auth, req, "test@example.com")
 	w := httptest.NewRecorder()
 	api.ServeHTTP(w, req)
 
@@ -468,15 +539,25 @@ func TestAPIListTokens(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
+	auth, user := setupTestAuth(t, store)
+
+	// Create token owned by test user
 	_ = store.CreateToken(t.Context(), &storage.Token{
-		ID:        "t_1",
-		Name:      "token-1",
-		Hash:      "hash1",
-		CreatedAt: time.Now(),
+		ID:          "t_1",
+		Name:        "token-1",
+		Hash:        "hash1",
+		OwnerUserID: user.ID,
+		CreatedAt:   time.Now(),
+	})
+	// Create token owned by someone else - should not be visible
+	_ = store.CreateToken(t.Context(), &storage.Token{
+		ID:          "t_2",
+		Name:        "other-token",
+		Hash:        "hash2",
+		OwnerUserID: "some-other-user",
+		CreatedAt:   time.Now(),
 	})
 
-	// Create auth handler with test secret
-	auth := NewAuthHandler(AuthConfig{JWTSecret: "test-secret"}, store, nil)
 	api := NewAPIHandler(store, nil, auth, nil)
 
 	// Test without auth - should be unauthorized
@@ -488,13 +569,9 @@ func TestAPIListTokens(t *testing.T) {
 		t.Fatalf("unauthenticated status = %d, want %d", w.Code, http.StatusUnauthorized)
 	}
 
-	// Test with auth - create a request with auth cookie
+	// Test with auth
 	req = httptest.NewRequest("GET", "/api/tokens", nil)
-	w = httptest.NewRecorder()
-	// Set the auth cookie manually (create a valid JWT)
-	_ = auth.SetAuthCookie(w, "test@example.com")
-	cookie := w.Result().Cookies()[0]
-	req.AddCookie(cookie)
+	addAuthCookie(t, auth, req, "test@example.com")
 	w = httptest.NewRecorder()
 	api.ServeHTTP(w, req)
 
@@ -505,6 +582,7 @@ func TestAPIListTokens(t *testing.T) {
 	var tokens []tokenResponse
 	_ = json.NewDecoder(w.Body).Decode(&tokens)
 
+	// Should only see the 1 token owned by test user
 	if len(tokens) != 1 {
 		t.Errorf("len(tokens) = %d, want 1", len(tokens))
 	}
@@ -517,16 +595,20 @@ func TestAPIRevokeToken(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
+	auth, user := setupTestAuth(t, store)
+
 	_ = store.CreateToken(t.Context(), &storage.Token{
-		ID:        "t_1",
-		Name:      "token-1",
-		Hash:      "hash1",
-		CreatedAt: time.Now(),
+		ID:          "t_1",
+		Name:        "token-1",
+		Hash:        "hash1",
+		OwnerUserID: user.ID,
+		CreatedAt:   time.Now(),
 	})
 
-	api := NewAPIHandler(store, nil, nil, nil)
+	api := NewAPIHandler(store, nil, auth, nil)
 
 	req := httptest.NewRequest("DELETE", "/api/tokens/t_1", nil)
+	addAuthCookie(t, auth, req, "test@example.com")
 	w := httptest.NewRecorder()
 	api.ServeHTTP(w, req)
 
@@ -535,7 +617,7 @@ func TestAPIRevokeToken(t *testing.T) {
 	}
 
 	// Verify revoked
-	tokens, _ := store.ListTokens(t.Context())
+	tokens, _ := store.ListTokensByOwner(t.Context(), user.ID)
 	for _, tok := range tokens {
 		if tok.ID == "t_1" && tok.RevokedAt == nil {
 			t.Error("token should be revoked")
@@ -597,10 +679,12 @@ func TestAPIInvalidJSON(t *testing.T) {
 	store, _ := storage.NewSQLite(":memory:", "", "")
 	defer store.Close()
 
-	api := NewAPIHandler(store, nil, nil, nil)
+	auth, _ := setupTestAuth(t, store)
+	api := NewAPIHandler(store, nil, auth, nil)
 
 	req := httptest.NewRequest("POST", "/api/repos", bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
+	addAuthCookie(t, auth, req, "test@example.com")
 	w := httptest.NewRecorder()
 	api.ServeHTTP(w, req)
 

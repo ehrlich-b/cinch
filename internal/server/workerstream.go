@@ -73,10 +73,14 @@ func NewWorkerStreamHandler(hub *Hub, auth *AuthHandler, log *slog.Logger) *Work
 
 // ServeHTTP handles WebSocket upgrade requests for /ws/workers.
 func (h *WorkerStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Get authenticated user for visibility filtering
+	// Require authentication - anonymous access to worker telemetry leaks operational metadata
 	username := ""
 	if h.auth != nil {
 		username = h.auth.GetUser(r)
+	}
+	if username == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
 	}
 
 	conn, err := uiUpgrader.Upgrade(w, r, nil)

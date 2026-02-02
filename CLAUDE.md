@@ -271,6 +271,49 @@ make fly-logs           # View recent logs (uses --no-tail)
 
 **NEVER use `fly logs` directly** - it tails forever and hangs. Always use `make fly-logs`.
 
+## Security Guidelines
+
+**CRITICAL: When writing API handlers or any code that accesses resources:**
+
+1. **Authenticated ≠ Authorized** - Being logged in doesn't mean a user can access any resource. Always check ownership.
+
+2. **Every resource access needs an owner check:**
+   ```go
+   // BAD - any logged-in user can access any repo
+   repo, _ := storage.GetRepo(ctx, repoID)
+
+   // GOOD - verify the user owns or has access to the repo
+   repo, _ := storage.GetRepo(ctx, repoID)
+   if repo.OwnerUserID != user.ID {
+       http.Error(w, "forbidden", http.StatusForbidden)
+       return
+   }
+   ```
+
+3. **Identity model:** `auth.GetUser(r)` returns **email**, not username. The User struct has:
+   - `ID` - unique user ID (use this for ownership checks)
+   - `Email` - primary email (what GetUser returns)
+   - `Name` - forge username (may differ from email)
+
+4. **Storage has owner fields** - Use them:
+   - `Repo.OwnerUserID` - Cinch user who owns this repo
+   - `Token.OwnerUserID` - Cinch user who owns this token
+
+5. **Filter lists by owner:**
+   ```go
+   // BAD - returns ALL repos
+   repos, _ := storage.ListRepos(ctx)
+
+   // GOOD - returns only user's repos
+   repos, _ := storage.ListReposByOwner(ctx, user.ID)
+   ```
+
+6. **WebSocket endpoints need auth too** - Check auth BEFORE upgrading the connection.
+
+7. **No shell interpolation of untrusted data** - Use files or environment variables instead.
+
+8. **Use crypto/rand, not time-based IDs** - Anything guessable is attackable.
+
 ## Common Mistakes to Avoid
 
 1. **DON'T** tell users to use `cinch worker --token=xxx` - the flow is `cinch login` then `cinch worker`

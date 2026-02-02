@@ -298,12 +298,8 @@ func jobToResponse(j *storage.Job) jobResponse {
 
 func (h *APIHandler) listJobs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-
-	// Check auth for filtering private repos
-	var isAuthenticated bool
-	if h.auth != nil {
-		isAuthenticated = h.auth.GetUser(r) != ""
-	}
+	ctx := r.Context()
+	user := h.getCurrentUser(ctx, r)
 
 	filter := storage.JobFilter{
 		RepoID: q.Get("repo_id"),
@@ -323,23 +319,23 @@ func (h *APIHandler) listJobs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	jobs, err := h.storage.ListJobs(r.Context(), filter)
+	jobs, err := h.storage.ListJobs(ctx, filter)
 	if err != nil {
 		h.log.Error("failed to list jobs", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	// Build response with repo names, filtering out private repos for unauthenticated users
+	// Build response with repo names, filtering by access
 	var resp []jobResponse
 	for _, j := range jobs {
-		repo, err := h.storage.GetRepo(r.Context(), j.RepoID)
+		repo, err := h.storage.GetRepo(ctx, j.RepoID)
 		if err != nil {
 			continue // Skip jobs with missing repos
 		}
 
-		// Filter: unauthenticated users only see public repo jobs
-		if repo.Private && !isAuthenticated {
+		// Authorization: filter by repo access
+		if !h.canAccessRepo(ctx, user, repo) {
 			continue
 		}
 
@@ -364,7 +360,7 @@ func (h *APIHandler) getJob(w http.ResponseWriter, r *http.Request, jobID string
 		return
 	}
 
-	// Authorization: require auth for private repo jobs
+	// Authorization: check access to the job's repo
 	repo, err := h.storage.GetRepo(ctx, job.RepoID)
 	if err != nil {
 		h.log.Error("failed to get repo for job auth", "error", err)
@@ -372,16 +368,14 @@ func (h *APIHandler) getJob(w http.ResponseWriter, r *http.Request, jobID string
 		return
 	}
 
-	if repo.Private {
-		var email string
-		if h.auth != nil {
-			email = h.auth.GetUser(r)
+	user := h.getCurrentUser(ctx, r)
+	if !h.canAccessRepo(ctx, user, repo) {
+		if user == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		} else {
+			http.Error(w, "forbidden", http.StatusForbidden)
 		}
-		if email == "" {
-			http.Error(w, "authentication required for private repo", http.StatusUnauthorized)
-			return
-		}
-		// TODO: check if user is collaborator on repo
+		return
 	}
 
 	// Get sibling jobs (other attempts for same commit)
@@ -411,9 +405,10 @@ func (h *APIHandler) getJobLogs(w http.ResponseWriter, r *http.Request, jobID st
 		CreatedAt time.Time `json:"created_at"`
 	}
 
-	// Authorization: require auth for private repo logs
-	// Get job to find repo
-	job, err := h.storage.GetJob(r.Context(), jobID)
+	ctx := r.Context()
+
+	// Authorization: check access to the job's repo
+	job, err := h.storage.GetJob(ctx, jobID)
 	if err != nil {
 		if err == storage.ErrNotFound {
 			http.Error(w, "job not found", http.StatusNotFound)
@@ -424,27 +419,21 @@ func (h *APIHandler) getJobLogs(w http.ResponseWriter, r *http.Request, jobID st
 		return
 	}
 
-	// Get repo to check if private
-	repo, err := h.storage.GetRepo(r.Context(), job.RepoID)
+	repo, err := h.storage.GetRepo(ctx, job.RepoID)
 	if err != nil {
 		h.log.Error("failed to get repo for log auth", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	// For private repos, require authentication
-	if repo.Private {
-		var email string
-		if h.auth != nil {
-			email = h.auth.GetUser(r)
+	user := h.getCurrentUser(ctx, r)
+	if !h.canAccessRepo(ctx, user, repo) {
+		if user == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		} else {
+			http.Error(w, "forbidden", http.StatusForbidden)
 		}
-		if email == "" {
-			http.Error(w, "authentication required for private repo logs", http.StatusUnauthorized)
-			return
-		}
-		// TODO: check if user is collaborator on repo (design/16-worker-visibility.md)
-		// For now, any authenticated user can view logs of private repos they know the job ID for
-		// This is still better than fully public, as they need to be logged in
+		return
 	}
 
 	// Use logStore if available
@@ -507,18 +496,10 @@ func (h *APIHandler) getJobLogs(w http.ResponseWriter, r *http.Request, jobID st
 func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string) {
 	ctx := r.Context()
 
-	// Check auth - GetUser returns email
-	email := h.auth.GetUser(r)
-	if email == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	// Require authentication
+	user := h.requireAuth(w, r)
+	if user == nil {
 		return
-	}
-
-	// Look up user to get their GitHub username for the trust model
-	// Job.Author must match Worker.OwnerName (both should be GitHub usernames)
-	username := email // fallback to email if user not found
-	if user, err := h.storage.GetUserByEmail(ctx, email); err == nil && user != nil && user.Name != "" {
-		username = user.Name
 	}
 
 	// Get original job
@@ -541,6 +522,12 @@ func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string
 		return
 	}
 
+	// Authorization: must own the repo to run/retry jobs
+	if repo.OwnerUserID != user.ID {
+		http.Error(w, "forbidden: you do not own this repo", http.StatusForbidden)
+		return
+	}
+
 	// Check dispatcher is available
 	if h.dispatcher == nil {
 		http.Error(w, "job dispatch not available", http.StatusServiceUnavailable)
@@ -551,21 +538,10 @@ func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string
 
 	switch job.Status {
 	case storage.JobStatusPendingContributor:
-		// Security: Only repo collaborators can approve fork PRs
-		// TODO: implement proper forge API collaborator check (design/16-worker-visibility.md)
-		// For now, only allow repo owner to approve. This is restrictive but secure.
-		if repo.Owner != username {
-			h.log.Warn("unauthorized PR approval attempt",
-				"job_id", jobID,
-				"repo_owner", repo.Owner,
-				"approver", username,
-				"repo", repo.Owner+"/"+repo.Name)
-			http.Error(w, "only repo collaborators can approve fork PRs", http.StatusForbidden)
-			return
-		}
+		// Approve the job (user already authorized as repo owner above)
 
 		// Approve and queue the existing job
-		if err := h.storage.ApproveJob(ctx, jobID, username); err != nil {
+		if err := h.storage.ApproveJob(ctx, jobID, user.Name); err != nil {
 			h.log.Error("failed to approve job", "job_id", jobID, "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -575,7 +551,7 @@ func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string
 		job, _ = h.storage.GetJob(ctx, jobID)
 		newJobID = jobID
 
-		h.log.Info("job approved", "job_id", jobID, "approved_by", username)
+		h.log.Info("job approved", "job_id", jobID, "approved_by", user.Name)
 
 	case storage.JobStatusFailed, storage.JobStatusSuccess, storage.JobStatusError, storage.JobStatusCancelled:
 		// Create a new job (retry)
@@ -590,7 +566,7 @@ func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string
 			Status:         storage.JobStatusPending,
 			InstallationID: job.InstallationID,
 			CreatedAt:      time.Now(),
-			Author:         username, // Current user is the one retrying
+			Author:         user.Name, // Current user is the one retrying
 			TrustLevel:     storage.TrustCollaborator,
 			IsFork:         false, // Retries aren't from forks
 		}
@@ -616,7 +592,7 @@ func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string
 		job = newJob
 		newJobID = newJob.ID
 
-		h.log.Info("job retry created", "job_id", newJobID, "original_job_id", jobID, "user", username)
+		h.log.Info("job retry created", "job_id", newJobID, "original_job_id", jobID, "user", user.Name)
 
 	case storage.JobStatusPending, storage.JobStatusQueued, storage.JobStatusRunning:
 		http.Error(w, "job already in progress", http.StatusConflict)
@@ -1019,27 +995,25 @@ type createRepoResponse struct {
 }
 
 func (h *APIHandler) listRepos(w http.ResponseWriter, r *http.Request) {
-	repos, err := h.storage.ListRepos(r.Context())
+	user := h.getCurrentUser(r.Context(), r)
+
+	// Authorization: only list repos the user owns
+	// Unauthenticated users get empty list (they can access public repos by direct URL)
+	var repos []*storage.Repo
+	var err error
+	if user != nil {
+		repos, err = h.storage.ListReposByOwner(r.Context(), user.ID)
+	}
 	if err != nil {
 		h.log.Error("failed to list repos", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	// Check auth for filtering private repos
-	var isAuthenticated bool
-	if h.auth != nil {
-		isAuthenticated = h.auth.GetUser(r) != ""
-	}
-
 	includeStatus := r.URL.Query().Get("include_status") == "true"
 
 	var resp []repoResponse
 	for _, repo := range repos {
-		// Filter: unauthenticated users only see public repos
-		if repo.Private && !isAuthenticated {
-			continue
-		}
 
 		htmlURL := repo.HTMLURL
 		if htmlURL == "" {
@@ -1088,6 +1062,17 @@ func (h *APIHandler) getRepo(w http.ResponseWriter, r *http.Request, repoID stri
 		return
 	}
 
+	// Authorization: check if user can access this repo
+	user := h.getCurrentUser(r.Context(), r)
+	if !h.canAccessRepo(r.Context(), user, repo) {
+		if user == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		} else {
+			http.Error(w, "forbidden", http.StatusForbidden)
+		}
+		return
+	}
+
 	resp := repoResponse{
 		ID:        repo.ID,
 		ForgeType: string(repo.ForgeType),
@@ -1106,6 +1091,12 @@ func (h *APIHandler) getRepo(w http.ResponseWriter, r *http.Request, repoID stri
 }
 
 func (h *APIHandler) createRepo(w http.ResponseWriter, r *http.Request) {
+	// Require authentication to create repos
+	user := h.requireAuth(w, r)
+	if user == nil {
+		return
+	}
+
 	var req createRepoRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -1144,6 +1135,7 @@ func (h *APIHandler) createRepo(w http.ResponseWriter, r *http.Request) {
 		ForgeToken:    forgeToken,
 		Build:         req.Build,
 		Release:       req.Release,
+		OwnerUserID:   user.ID, // Authorization: track who owns this repo
 		CreatedAt:     time.Now(),
 	}
 
@@ -1241,17 +1233,31 @@ func (h *APIHandler) createWebhookForRepo(ctx context.Context, repo *storage.Rep
 }
 
 func (h *APIHandler) deleteRepo(w http.ResponseWriter, r *http.Request, repoID string) {
-	if err := h.storage.DeleteRepo(r.Context(), repoID); err != nil {
+	// Get the repo first to check ownership
+	repo, err := h.storage.GetRepo(r.Context(), repoID)
+	if err != nil {
 		if err == storage.ErrNotFound {
 			http.Error(w, "repo not found", http.StatusNotFound)
 			return
 		}
+		h.log.Error("failed to get repo for delete", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Authorization: require ownership to delete
+	user := h.requireRepoOwnership(w, r, repo)
+	if user == nil {
+		return // error already written
+	}
+
+	if err := h.storage.DeleteRepo(r.Context(), repoID); err != nil {
 		h.log.Error("failed to delete repo", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	h.log.Info("repo deleted", "repo_id", repoID)
+	h.log.Info("repo deleted", "repo_id", repoID, "by_user", user.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1281,44 +1287,20 @@ func forgeDomainToType(domain string) string {
 	}
 }
 
-// checkRepoAccess verifies user has access to a private repo
+// checkRepoAccess verifies user has access to a repo (public access or ownership)
 // Returns true if access is allowed, false otherwise (and writes error response)
 func (h *APIHandler) checkRepoAccess(w http.ResponseWriter, r *http.Request, repo *storage.Repo) bool {
-	if !repo.Private {
-		return true // Public repos are always accessible
+	user := h.getCurrentUser(r.Context(), r)
+	if h.canAccessRepo(r.Context(), user, repo) {
+		return true
 	}
-
-	// Private repo - check auth
-	username := h.auth.GetUser(r)
-	if username == "" {
+	// Not authorized
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return false
+	} else {
+		http.Error(w, "forbidden", http.StatusForbidden)
 	}
-
-	// Check if user has connected the required forge
-	user, err := h.storage.GetUserByName(r.Context(), username)
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return false
-	}
-
-	// Check if user has the required forge connected
-	hasAccess := false
-	switch repo.ForgeType {
-	case storage.ForgeTypeGitHub:
-		hasAccess = !user.GitHubConnectedAt.IsZero()
-	case storage.ForgeTypeGitLab:
-		hasAccess = user.GitLabCredentials != ""
-	case storage.ForgeTypeForgejo, storage.ForgeTypeGitea:
-		hasAccess = user.ForgejoCredentials != ""
-	}
-
-	if !hasAccess {
-		http.Error(w, "forbidden: connect your "+string(repo.ForgeType)+" account to access this repo", http.StatusForbidden)
-		return false
-	}
-
-	return true
+	return false
 }
 
 // Response type for per-repo endpoint with latest job
@@ -1602,20 +1584,15 @@ func (h *APIHandler) updateRepoSecretsById(w http.ResponseWriter, r *http.Reques
 	h.writeJSON(w, secretsResponse{Keys: keys})
 }
 
-// requireRepoOwner checks if the current user owns the repo. Returns false if not authorized.
+// requireRepoOwner checks if the current user owns the repo (by OwnerUserID). Returns false if not authorized.
 func (h *APIHandler) requireRepoOwner(w http.ResponseWriter, r *http.Request, repo *storage.Repo) bool {
-	if h.auth == nil {
+	user := h.getCurrentUser(r.Context(), r)
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return false
 	}
-	user := h.auth.GetUser(r)
-	if user == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return false
-	}
-	// Check if user is the repo owner (simple ownership model for MVP)
-	// TODO: check collaborator status via forge API
-	if user != repo.Owner {
+	// Check if user is the Cinch owner of this repo
+	if repo.OwnerUserID != user.ID {
 		http.Error(w, "forbidden: only repo owner can manage secrets", http.StatusForbidden)
 		return false
 	}
@@ -1644,13 +1621,14 @@ type createTokenResponse struct {
 }
 
 func (h *APIHandler) listTokens(w http.ResponseWriter, r *http.Request) {
-	// Require authentication to view tokens
-	if h.auth == nil || h.auth.GetUser(r) == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	// Require authentication
+	user := h.requireAuth(w, r)
+	if user == nil {
 		return
 	}
 
-	tokens, err := h.storage.ListTokens(r.Context())
+	// Authorization: only list tokens the user owns
+	tokens, err := h.storage.ListTokensByOwner(r.Context(), user.ID)
 	if err != nil {
 		h.log.Error("failed to list tokens", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -1672,6 +1650,12 @@ func (h *APIHandler) listTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) createToken(w http.ResponseWriter, r *http.Request) {
+	// Require authentication to create tokens
+	user := h.requireAuth(w, r)
+	if user == nil {
+		return
+	}
+
 	var req createTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -1697,10 +1681,11 @@ func (h *APIHandler) createToken(w http.ResponseWriter, r *http.Request) {
 	hashHex := hex.EncodeToString(hasher.Sum(nil))
 
 	token := &storage.Token{
-		ID:        fmt.Sprintf("t_%d", time.Now().UnixNano()),
-		Name:      req.Name,
-		Hash:      hashHex,
-		CreatedAt: time.Now(),
+		ID:          fmt.Sprintf("t_%d", time.Now().UnixNano()),
+		Name:        req.Name,
+		Hash:        hashHex,
+		OwnerUserID: user.ID, // Authorization: track who owns this token
+		CreatedAt:   time.Now(),
 	}
 
 	if err := h.storage.CreateToken(r.Context(), token); err != nil {
@@ -1709,7 +1694,7 @@ func (h *APIHandler) createToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log.Info("token created", "token_id", token.ID, "name", token.Name)
+	h.log.Info("token created", "token_id", token.ID, "name", token.Name, "owner", user.ID)
 
 	resp := createTokenResponse{
 		ID:        token.ID,
@@ -1723,6 +1708,34 @@ func (h *APIHandler) createToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) revokeToken(w http.ResponseWriter, r *http.Request, tokenID string) {
+	// Require authentication
+	user := h.requireAuth(w, r)
+	if user == nil {
+		return
+	}
+
+	// Get token to check ownership - we need to find it first
+	// ListTokensByOwner and check if this token is in the list
+	tokens, err := h.storage.ListTokensByOwner(r.Context(), user.ID)
+	if err != nil {
+		h.log.Error("failed to list tokens for ownership check", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user owns this token
+	ownsToken := false
+	for _, t := range tokens {
+		if t.ID == tokenID {
+			ownsToken = true
+			break
+		}
+	}
+	if !ownsToken {
+		http.Error(w, "token not found", http.StatusNotFound) // Don't reveal existence
+		return
+	}
+
 	if err := h.storage.RevokeToken(r.Context(), tokenID); err != nil {
 		if err == storage.ErrNotFound {
 			http.Error(w, "token not found", http.StatusNotFound)
@@ -1733,7 +1746,7 @@ func (h *APIHandler) revokeToken(w http.ResponseWriter, r *http.Request, tokenID
 		return
 	}
 
-	h.log.Info("token revoked", "token_id", tokenID)
+	h.log.Info("token revoked", "token_id", tokenID, "by_user", user.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -2041,6 +2054,60 @@ func (h *APIHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- Helpers ---
+
+// getCurrentUser returns the authenticated user, or nil if not authenticated.
+// This handles the email -> user lookup that's needed for authorization.
+func (h *APIHandler) getCurrentUser(ctx context.Context, r *http.Request) *storage.User {
+	if h.auth == nil {
+		return nil
+	}
+	email := h.auth.GetUser(r)
+	if email == "" {
+		return nil
+	}
+	user, err := h.storage.GetUserByEmail(ctx, email)
+	if err != nil {
+		return nil
+	}
+	return user
+}
+
+// requireAuth returns the current user or writes an unauthorized error.
+func (h *APIHandler) requireAuth(w http.ResponseWriter, r *http.Request) *storage.User {
+	user := h.getCurrentUser(r.Context(), r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return nil
+	}
+	return user
+}
+
+// canAccessRepo checks if the user owns or has access to a repo.
+// For MVP: user owns the repo OR repo is public.
+func (h *APIHandler) canAccessRepo(_ context.Context, user *storage.User, repo *storage.Repo) bool {
+	// Public repos are accessible to anyone
+	if !repo.Private {
+		return true
+	}
+	// Private repos require ownership
+	if user == nil {
+		return false
+	}
+	return repo.OwnerUserID == user.ID
+}
+
+// requireRepoOwnership checks if the current user owns a repo.
+func (h *APIHandler) requireRepoOwnership(w http.ResponseWriter, r *http.Request, repo *storage.Repo) *storage.User {
+	user := h.requireAuth(w, r)
+	if user == nil {
+		return nil // error already written
+	}
+	if repo.OwnerUserID != user.ID {
+		http.Error(w, "forbidden: you do not own this repo", http.StatusForbidden)
+		return nil
+	}
+	return user
+}
 
 func (h *APIHandler) writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")

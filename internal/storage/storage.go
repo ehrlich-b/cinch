@@ -39,6 +39,7 @@ type Storage interface {
 	GetRepoByCloneURL(ctx context.Context, cloneURL string) (*Repo, error)
 	GetRepoByOwnerName(ctx context.Context, forge, owner, name string) (*Repo, error)
 	ListRepos(ctx context.Context) ([]*Repo, error)
+	ListReposByOwner(ctx context.Context, ownerUserID string) ([]*Repo, error)
 	UpdateRepoPrivate(ctx context.Context, id string, private bool) error
 	UpdateRepoSecrets(ctx context.Context, id string, secrets map[string]string) error
 	DeleteRepo(ctx context.Context, id string) error
@@ -47,6 +48,7 @@ type Storage interface {
 	CreateToken(ctx context.Context, token *Token) error
 	GetTokenByHash(ctx context.Context, hash string) (*Token, error)
 	ListTokens(ctx context.Context) ([]*Token, error)
+	ListTokensByOwner(ctx context.Context, ownerUserID string) ([]*Token, error)
 	RevokeToken(ctx context.Context, id string) error
 
 	// Logs
@@ -257,17 +259,19 @@ type Repo struct {
 	Workers       []string          // Worker labels for fan-out (e.g., ["linux-amd64", "linux-arm64"])
 	Secrets       map[string]string // Environment secrets injected into jobs (encrypted at rest)
 	Private       bool              // Whether the repo is private
+	OwnerUserID   string            // Cinch user who owns this repo (for authorization)
 	CreatedAt     time.Time
 }
 
 // Token represents a worker authentication token.
 type Token struct {
-	ID        string
-	Name      string
-	Hash      string // bcrypt hash of the token
-	WorkerID  *string
-	CreatedAt time.Time
-	RevokedAt *time.Time
+	ID          string
+	Name        string
+	Hash        string // SHA3-256 hash of the token
+	WorkerID    *string
+	OwnerUserID string // Cinch user who owns this token (for authorization)
+	CreatedAt   time.Time
+	RevokedAt   *time.Time
 }
 
 // LogEntry represents a chunk of log output.
