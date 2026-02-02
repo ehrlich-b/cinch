@@ -244,9 +244,11 @@ Add integration tests through full mux/middleware with multi-user fixtures and e
 
 9. **Test suite updated** - Tests now work with new auth requirements via `setupTestAuth()` and `addAuthCookie()` helpers.
 
-### 🚧 Remaining
+10. **Badge endpoint privacy** (`internal/server/badge.go`) - Private repos now return "unknown" status, same as non-existent repos. No information leakage.
 
-1. **Badge endpoint** - Still leaks private repo status metadata for private repos.
+### ✅ All Fixed
+
+All security issues from this review have been addressed.
 
 ---
 

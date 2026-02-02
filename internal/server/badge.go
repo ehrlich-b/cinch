@@ -147,17 +147,25 @@ func (h *BadgeHandler) getRepoStatus(ctx context.Context, _, owner, repo, branch
 		return "unknown"
 	}
 
-	var repoID string
+	var foundRepo *storage.Repo
 	for _, r := range repos {
 		if r.Owner == owner && r.Name == repo {
-			repoID = r.ID
+			foundRepo = r
 			break
 		}
 	}
 
-	if repoID == "" {
+	if foundRepo == nil {
 		return "unknown"
 	}
+
+	// Private repos return "unknown" to avoid leaking existence/status
+	// Badges are public endpoints - no way to auth in README embeds
+	if foundRepo.Private {
+		return "unknown"
+	}
+
+	repoID := foundRepo.ID
 
 	// Get latest job for this repo
 	filter := storage.JobFilter{
