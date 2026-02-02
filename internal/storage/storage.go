@@ -41,6 +41,7 @@ type Storage interface {
 	ListRepos(ctx context.Context) ([]*Repo, error)
 	ListReposByOwner(ctx context.Context, ownerUserID string) ([]*Repo, error)
 	UpdateRepoPrivate(ctx context.Context, id string, private bool) error
+	UpdateRepoHTMLURL(ctx context.Context, id string, htmlURL string) error
 	UpdateRepoSecrets(ctx context.Context, id string, secrets map[string]string) error
 	DeleteRepo(ctx context.Context, id string) error
 

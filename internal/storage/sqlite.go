@@ -1150,6 +1150,13 @@ func (s *SQLiteStorage) UpdateRepoPrivate(ctx context.Context, id string, privat
 	return err
 }
 
+func (s *SQLiteStorage) UpdateRepoHTMLURL(ctx context.Context, id string, htmlURL string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE repos SET html_url = ? WHERE id = ?`,
+		htmlURL, id)
+	return err
+}
+
 func (s *SQLiteStorage) UpdateRepoSecrets(ctx context.Context, id string, secrets map[string]string) error {
 	// Convert and encrypt secrets map to JSON
 	var secretsJSON string

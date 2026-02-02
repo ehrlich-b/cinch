@@ -249,6 +249,16 @@ func (h *GitHubAppHandler) handlePush(w http.ResponseWriter, r *http.Request, bo
 		}
 	}
 
+	// Sync HTMLURL if empty (for repos created before this was set)
+	if repo.HTMLURL == "" && event.Repository.HTMLURL != "" {
+		if err := h.storage.UpdateRepoHTMLURL(ctx, repo.ID, event.Repository.HTMLURL); err != nil {
+			h.log.Warn("failed to update repo html_url", "error", err)
+		} else {
+			h.log.Info("repo html_url updated", "repo", event.Repository.FullName)
+			repo.HTMLURL = event.Repository.HTMLURL
+		}
+	}
+
 	// Check if private repo can run builds (requires Pro)
 	if repo.Private {
 		billing, err := h.storage.GetOrgBilling(ctx, repo.ForgeType, repo.Owner)
@@ -419,6 +429,16 @@ func (h *GitHubAppHandler) handlePullRequest(w http.ResponseWriter, r *http.Requ
 		} else {
 			h.log.Info("repo private flag updated", "repo", event.Repository.FullName, "private", event.Repository.Private)
 			repo.Private = event.Repository.Private
+		}
+	}
+
+	// Sync HTMLURL if empty (for repos created before this was set)
+	if repo.HTMLURL == "" && event.Repository.HTMLURL != "" {
+		if err := h.storage.UpdateRepoHTMLURL(ctx, repo.ID, event.Repository.HTMLURL); err != nil {
+			h.log.Warn("failed to update repo html_url", "error", err)
+		} else {
+			h.log.Info("repo html_url updated", "repo", event.Repository.FullName)
+			repo.HTMLURL = event.Repository.HTMLURL
 		}
 	}
 

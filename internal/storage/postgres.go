@@ -1101,6 +1101,13 @@ func (s *PostgresStorage) UpdateRepoPrivate(ctx context.Context, id string, priv
 	return err
 }
 
+func (s *PostgresStorage) UpdateRepoHTMLURL(ctx context.Context, id string, htmlURL string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE repos SET html_url = $1 WHERE id = $2`,
+		htmlURL, id)
+	return err
+}
+
 func (s *PostgresStorage) UpdateRepoSecrets(ctx context.Context, id string, secrets map[string]string) error {
 	// Convert and encrypt secrets map to JSON
 	var secretsJSON string

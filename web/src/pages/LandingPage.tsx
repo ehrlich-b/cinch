@@ -102,9 +102,9 @@ export function LandingPage({ auth, onNavigate }: Props) {
         <div className="container">
           <p className="social-proof-text">Cinch builds itself with Cinch</p>
           <div className="social-proof-badges">
-            <img src="https://cinch.sh/badge/github/ehrlich-b/cinch" alt="GitHub build" />
-            <img src="https://cinch.sh/badge/gitlab/ehrlich-b/cinch" alt="GitLab build" />
-            <img src="https://cinch.sh/badge/forgejo/ehrlich-b/cinch" alt="Codeberg build" />
+            <a href="https://cinch.sh/jobs/github.com/ehrlich-b/cinch"><img src="https://cinch.sh/badge/github.com/ehrlich-b/cinch.svg" alt="GitHub build" /></a>
+            <a href="https://cinch.sh/jobs/gitlab.com/ehrlich-b/cinch"><img src="https://cinch.sh/badge/gitlab.com/ehrlich-b/cinch.svg" alt="GitLab build" /></a>
+            <a href="https://cinch.sh/jobs/codeberg.org/ehrlich-b/cinch"><img src="https://cinch.sh/badge/codeberg.org/ehrlich-b/cinch.svg" alt="Codeberg build" /></a>
           </div>
         </div>
       </section>
