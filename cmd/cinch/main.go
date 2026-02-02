@@ -92,7 +92,52 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().String("data-dir", "", "Directory for SQLite database (default: current directory)")
 	cmd.Flags().String("base-url", "", "Base URL for job links (e.g., https://cinch.example.com)")
 	cmd.Flags().Bool("relay", false, "Connect to cinch.sh relay for webhook forwarding (self-hosted mode)")
+
+	// Add subcommands
+	cmd.AddCommand(serverInstallCmd())
+	cmd.AddCommand(serverUninstallCmd())
+
 	return cmd
+}
+
+func serverInstallCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install cinch server as a system service",
+		Long: `Install cinch server as a system service (systemd on Linux, launchd on macOS).
+
+The current CINCH_* environment variables will be captured and saved to the service
+configuration. Make sure you have at least CINCH_SECRET_KEY set before running.
+
+On Linux, this requires root (sudo). Creates:
+  - /etc/systemd/system/cinch-server.service
+  - /etc/cinch/env (environment variables, mode 0600)
+  - /var/lib/cinch (data directory)
+
+On macOS, creates a user-level launchd service.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			relay, _ := cmd.Flags().GetBool("relay")
+
+			// Prompt for missing env vars if interactive
+			if err := cli.PromptServerEnvVars(); err != nil {
+				return err
+			}
+
+			return cli.InstallServer(relay)
+		},
+	}
+	cmd.Flags().Bool("relay", false, "Enable webhook relay mode")
+	return cmd
+}
+
+func serverUninstallCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "uninstall",
+		Short: "Uninstall cinch server system service",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cli.UninstallServer()
+		},
+	}
 }
 
 func runServer(cmd *cobra.Command, args []string) error {

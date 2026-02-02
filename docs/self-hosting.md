@@ -33,7 +33,7 @@ export CINCH_TOKEN=<admin-token-from-step-4>
 cinch worker
 ```
 
-Workers talk only to your server. Webhook secrets are validated locally. cinch.sh is just a dumb pipe for webhooks.
+Workers talk only to your server. Webhook secrets are validated locally. cinch.sh is just a dumb pipe for webhooks. The relay is free—it costs us nearly nothing to operate.
 
 ## Quick Start (Fully Independent)
 
@@ -59,6 +59,35 @@ cinch worker
 ```
 
 For production, you'll want to run behind a reverse proxy with TLS.
+
+## Resource Requirements
+
+Cinch is lightweight. Observed usage (not rigorous benchmarks):
+
+| Component | RAM (idle) | CPU (idle) | Notes |
+|-----------|------------|------------|-------|
+| Control plane | ~15-20 MB | ~0% | Spikes briefly on webhook/dispatch |
+| Worker | ~10-15 MB | ~0% | Build processes use their own resources |
+| SQLite | ~10 KB/job | - | Job metadata, repos, tokens |
+| Logs | ~10 KB - 1 MB/job | - | Plain text, one file per job |
+
+A Raspberry Pi can run a worker. A Pi 4 can run the full stack.
+
+## Privacy
+
+Cinch does not collect telemetry. No analytics, no usage tracking, no phone-home.
+
+Self-hosted deployments have zero communication with cinch.sh unless you explicitly enable the webhook relay. Even with the relay, cinch.sh only sees HTTP headers and encrypted webhook payloads—it never sees your code, credentials, or build logs.
+
+## Upgrades
+
+```bash
+sudo systemctl stop cinch-server
+cinch install
+sudo systemctl start cinch-server
+```
+
+Workers auto-reconnect. No database migrations needed.
 
 ## Environment Variables
 
@@ -112,37 +141,23 @@ For cloud log storage instead of local filesystem:
 
 ## Forge Setup
 
-### GitHub App
+### GitHub
 
-GitHub requires a GitHub App (not OAuth App) for webhook integration and installation tokens.
+**Option A: Org token (recommended)**—webhooks auto-created via `cinch repo add`:
+```bash
+export CINCH_GITHUB_TOKEN=ghp_xxx  # PAT with repo scope
+```
 
-1. **Create the App:**
-   - Go to GitHub → Settings → Developer settings → GitHub Apps → New GitHub App
-   - Name: "Cinch CI" (or your preferred name)
-   - Homepage URL: Your Cinch server URL
+**Option B: GitHub App**—for multi-user login and fine-grained permissions:
+
+1. Create the App: GitHub → Settings → Developer settings → GitHub Apps
    - Callback URL: `https://ci.example.com/auth/github/callback`
    - Webhook URL: `https://ci.example.com/webhooks/github`
-   - Webhook secret: Generate with `openssl rand -hex 20`
-
-2. **Permissions:**
-   - Repository permissions:
-     - Contents: Read and write (for cloning and releases)
-     - Metadata: Read-only (required)
-     - Commit statuses: Read and write
-     - Pull requests: Read and write (for PR comments)
-   - Account permissions:
-     - Email addresses: Read-only (for user identification)
-
-3. **Subscribe to events:**
-   - Push
-   - Pull request
-   - Create (for tags)
-
-4. **Generate private key:**
-   - After creating the app, scroll to "Private keys" and generate one
-   - Download the `.pem` file
-
-5. **Configure Cinch:**
+   - Webhook secret: `openssl rand -hex 20`
+2. Permissions: Contents (read/write), Metadata (read), Commit statuses (read/write), Pull requests (read/write), Email addresses (read)
+3. Events: Push, Pull request, Create
+4. Generate and download private key
+5. Configure Cinch:
    ```bash
    export CINCH_GITHUB_APP_ID=123456
    export CINCH_GITHUB_APP_PRIVATE_KEY="$(cat /path/to/private-key.pem)"
@@ -150,67 +165,58 @@ GitHub requires a GitHub App (not OAuth App) for webhook integration and install
    export CINCH_GITHUB_APP_CLIENT_ID=Iv1.xxxxxxxx
    export CINCH_GITHUB_APP_CLIENT_SECRET=xxxxxxxx
    ```
+6. Install the app on repositories that should use Cinch.
 
-6. **Install the app** on repositories that should use Cinch.
+### GitLab
 
-### GitLab OAuth
+**Option A: Org token (recommended)**—webhooks auto-created via `cinch repo add`:
+```bash
+export CINCH_GITLAB_TOKEN=glpat-xxx  # PAT with api scope
+export CINCH_GITLAB_URL=https://gitlab.yourcompany.com  # for self-hosted
+```
 
-1. **Create OAuth Application:**
-   - Go to GitLab → Settings → Applications (or Admin → Applications for instance-wide)
-   - Name: "Cinch CI"
+**Option B: OAuth**—for multi-user login (like cinch.sh):
+1. Create OAuth Application: GitLab → Settings → Applications
    - Redirect URI: `https://ci.example.com/auth/gitlab/callback`
    - Scopes: `api`, `read_user`, `read_repository`
-
-2. **Configure webhooks** per-project:
-   - URL: `https://ci.example.com/webhooks/gitlab`
-   - Secret token: Generate and save for each project
-   - Triggers: Push events, Tag push events, Merge request events
-
-3. **Configure Cinch:**
+2. Configure Cinch:
    ```bash
    export CINCH_GITLAB_CLIENT_ID=your-client-id
    export CINCH_GITLAB_CLIENT_SECRET=your-client-secret
-   # For self-hosted GitLab:
-   export CINCH_GITLAB_URL=https://gitlab.yourcompany.com
    ```
 
 ### Forgejo/Codeberg/Gitea
 
-1. **Create OAuth Application:**
-   - Go to Settings → Applications → Create a new OAuth2 Application
-   - Application name: "Cinch CI"
+**Option A: Org token (recommended)**—webhooks auto-created via `cinch repo add`:
+```bash
+export CINCH_FORGEJO_TOKEN=xxx  # PAT with repo scope
+export CINCH_FORGEJO_URL=https://git.yourcompany.com  # for self-hosted
+```
+
+**Option B: OAuth**—for multi-user login:
+1. Create OAuth Application: Settings → Applications → Create new OAuth2 Application
    - Redirect URI: `https://ci.example.com/auth/forgejo/callback`
-
-2. **Configure webhooks** per-repository:
-   - URL: `https://ci.example.com/webhooks/forgejo`
-   - HTTP Method: POST
-   - Content type: application/json
-   - Secret: Generate and save
-   - Trigger on: Push, Create (for tags), Pull Request
-
-3. **Configure Cinch:**
+2. Configure Cinch:
    ```bash
    export CINCH_FORGEJO_CLIENT_ID=your-client-id
    export CINCH_FORGEJO_CLIENT_SECRET=your-client-secret
-   # For self-hosted Forgejo:
-   export CINCH_FORGEJO_URL=https://git.yourcompany.com
    ```
 
-## Webhook Configuration
+## Webhook Ingress
 
-Each forge sends webhooks to a specific endpoint:
+Webhooks are auto-created when you run `cinch repo add`. The only question is: can your forge reach your server?
 
-| Forge | Webhook URL |
-|-------|-------------|
-| GitHub | `https://ci.example.com/webhooks/github` |
-| GitLab | `https://ci.example.com/webhooks/gitlab` |
-| Forgejo/Gitea | `https://ci.example.com/webhooks/forgejo` |
+| Forge | Webhook Endpoint |
+|-------|------------------|
+| GitHub | `/webhooks/github` |
+| GitLab | `/webhooks/gitlab` |
+| Forgejo/Gitea | `/webhooks/forgejo` |
 
-**Important:** Webhooks must be able to reach your server. If self-hosting behind a firewall, you have several options:
+If you're behind a firewall or NAT, you have several options:
 
 ### Option 1: Built-in Relay (Recommended)
 
-Cinch has a built-in webhook relay. Your server connects *outbound* to cinch.sh, and webhooks are forwarded over WebSocket. No port forwarding, no extra services.
+Cinch has a built-in webhook relay. Your server connects *outbound* to cinch.sh, and webhooks are forwarded over WebSocket. No port forwarding, no extra services. The relay is free—idle WebSocket connections cost us nearly nothing to maintain.
 
 ```bash
 cinch login                      # Login to cinch.sh (reserves your relay ID)
@@ -218,9 +224,11 @@ cinch server --relay             # Connects outbound to cinch.sh relay
 # Output:
 # Relay URL: https://cinch.sh/relay/x7k9m
 # Admin token: cinch_xxx
+
+cinch repo add owner/repo        # Webhook auto-created, points to relay URL
 ```
 
-Point your forge webhooks at the relay URL. Webhook secrets are validated locally - cinch.sh is just a dumb pipe.
+Webhook secrets are validated locally - cinch.sh is just a dumb pipe.
 
 Workers connect to your self-hosted server, not cinch.sh:
 ```bash
@@ -356,43 +364,30 @@ R2 is S3-compatible, so other S3-compatible storage may work (untested).
 
 ## Systemd Service
 
-Create `/etc/systemd/system/cinch.service`:
-
-```ini
-[Unit]
-Description=Cinch CI Server
-After=network.target
-
-[Service]
-Type=simple
-User=cinch
-Group=cinch
-WorkingDirectory=/var/lib/cinch
-EnvironmentFile=/etc/cinch/env
-ExecStart=/usr/local/bin/cinch server
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Create `/etc/cinch/env` with your environment variables:
+The easiest way to install as a system service:
 
 ```bash
-CINCH_SECRET_KEY=your-secret-here
-CINCH_BASE_URL=https://ci.example.com
-CINCH_DATA_DIR=/var/lib/cinch
-# ... other variables
+# Set your env vars first
+export CINCH_SECRET_KEY=$(openssl rand -hex 32)
+export CINCH_GITHUB_TOKEN=ghp_xxx
+export CINCH_BASE_URL=https://ci.example.com
+
+# Install (captures current CINCH_* env vars)
+sudo -E cinch server install
+
+# Start
+sudo systemctl enable cinch-server
+sudo systemctl start cinch-server
 ```
 
-Enable and start:
+This creates:
+- `/etc/systemd/system/cinch-server.service`
+- `/etc/cinch/env` (your env vars, mode 0600)
+- `/var/lib/cinch` (data directory)
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable cinch
-sudo systemctl start cinch
-```
+To view logs: `journalctl -u cinch-server -f`
+
+To uninstall: `sudo cinch server uninstall`
 
 ## Docker
 

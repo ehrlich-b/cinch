@@ -41,10 +41,10 @@ cinch worker                     # Connects to self-hosted server only
 From simulated r/selfhosted feedback:
 
 - [ ] **Security / Threat Model** - What's isolated, what's not, fork PR handling, worker trust
-- [ ] **Resource requirements** - RAM, CPU, disk estimates (it's minimal, just say so)
-- [ ] **Upgrade procedure** - "Replace binary, restart" - document explicitly
+- [x] **Resource requirements** - RAM, CPU, disk estimates (observed usage in docs)
+- [x] **Upgrade procedure** - Stop, install, start - documented
 - [ ] **Backup procedure** - Beyond "copy .db" - mention `sqlite3 .backup`, what else to save
-- [ ] **No telemetry statement** - Important to this audience, add to docs
+- [x] **No telemetry statement** - Added to self-hosting.md
 - [ ] **What `repo add` actually does** - Creates webhook? Requires OAuth? Make explicit
 
 ---
@@ -108,6 +108,11 @@ From simulated r/selfhosted feedback:
 - [ ] Prometheus metrics endpoint (`/metrics`) - job counts, worker counts, durations
 - [ ] Log retention (`CINCH_LOG_RETENTION_DAYS` env var, background cleanup job)
 - [ ] Auto-prompt PAT setup via relay if server has no org token configured
+
+**Release Verification:**
+- [ ] SHA256 checksums file for cinch releases
+- [ ] cosign/sigstore signing (keyless)
+- [ ] `cinch release --checksums` to auto-generate checksums for user artifacts
 
 **Polish:**
 - [ ] Zero to green checkmark without questions

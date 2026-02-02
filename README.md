@@ -69,21 +69,45 @@ cinch server                    # Run control plane
 
 ## Self-Host
 
-Cinch is **100% self-hostable**. Single binary, SQLite by default, no external dependencies.
+Cinch is **100% self-hostable**. Single binary, SQLite, no external dependencies, no telemetry.
+
+**Resource usage (observed, not benchmarked):** Control plane idles at ~15MB RAM, worker at ~10MB. CPU usage is near-zero—cinch just coordinates; your builds use whatever they use.
+
+### I have a public IP / domain
 
 ```bash
-# Generate secret and start
 export CINCH_SECRET_KEY=$(openssl rand -hex 32)
+export CINCH_GITHUB_TOKEN=ghp_xxx  # or CINCH_GITLAB_TOKEN / CINCH_FORGEJO_TOKEN
+export CINCH_BASE_URL=https://ci.example.com
 cinch server
 
-# Workers connect to your server
-cinch login --server https://ci.example.com
+cinch repo add owner/repo    # Webhook auto-created via org token
+
+export CINCH_URL=https://ci.example.com
+export CINCH_TOKEN=<admin-token-from-server-output>
 cinch worker
 ```
 
-Put it behind Caddy or nginx for TLS. That's it.
+### I'm behind NAT / CGNAT
 
-See **[docs/self-hosting.md](docs/self-hosting.md)** for the full guide: forge OAuth setup, reverse proxy examples, systemd service, and security checklist.
+Use the built-in webhook relay. Your server connects *outbound* to cinch.sh—no port forwarding needed. The relay is free (it costs us nearly nothing to run).
+
+```bash
+export CINCH_SECRET_KEY=$(openssl rand -hex 32)
+export CINCH_GITHUB_TOKEN=ghp_xxx
+cinch login                  # Reserves your relay ID
+cinch server --relay         # Prints relay URL + admin token
+
+cinch repo add owner/repo    # Webhook auto-created, points to relay
+
+export CINCH_URL=http://your-server:8080
+export CINCH_TOKEN=<admin-token>
+cinch worker
+```
+
+cinch.sh is just a dumb pipe—it never sees your code or credentials.
+
+See **[docs/self-hosting.md](docs/self-hosting.md)** for the full guide.
 
 ## Multi-Forge
 
