@@ -80,6 +80,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Debug("webhook received", "forge", matchedForge.Name())
 
+	// Limit request body to 5MB to prevent DoS
+	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
+
 	// We need to read the body but also need to pass the request to parsers
 	// which will read it again. So we need to buffer and restore.
 	body, err := io.ReadAll(r.Body)

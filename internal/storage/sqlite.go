@@ -1332,6 +1332,48 @@ func (s *SQLiteStorage) GetOrCreateUserByEmail(ctx context.Context, email, name 
 	return nil, err
 }
 
+func (s *SQLiteStorage) GetUserByID(ctx context.Context, id string) (*User, error) {
+	user := &User{}
+	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
+	var emailsJSON string
+	var tier sql.NullString
+	var storageUsed sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, email, emails, github_connected_at, gitlab_credentials, gitlab_credentials_at,
+		        forgejo_credentials, forgejo_credentials_at, tier, storage_used_bytes, created_at
+		 FROM users WHERE id = ?`, id).Scan(
+		&user.ID, &user.Name, &user.Email, &emailsJSON, &githubConnectedAt,
+		&user.GitLabCredentials, &gitlabCredentialsAt,
+		&user.ForgejoCredentials, &forgejoCredentialsAt, &tier, &storageUsed, &user.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if gitlabCredentialsAt.Valid {
+		user.GitLabCredentialsAt = gitlabCredentialsAt.Time
+	}
+	if forgejoCredentialsAt.Valid {
+		user.ForgejoCredentialsAt = forgejoCredentialsAt.Time
+	}
+	if githubConnectedAt.Valid {
+		user.GitHubConnectedAt = githubConnectedAt.Time
+	}
+	if emailsJSON != "" {
+		user.Emails = parseEmailsJSON(emailsJSON)
+	}
+	if tier.Valid {
+		user.Tier = UserTier(tier.String)
+	} else {
+		user.Tier = UserTierFree
+	}
+	if storageUsed.Valid {
+		user.StorageUsedBytes = storageUsed.Int64
+	}
+	return user, nil
+}
+
 func (s *SQLiteStorage) GetUserByName(ctx context.Context, name string) (*User, error) {
 	user := &User{}
 	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
@@ -1518,14 +1560,32 @@ func (s *SQLiteStorage) ClearUserGitHubConnected(ctx context.Context, userID str
 }
 
 func (s *SQLiteStorage) DeleteUser(ctx context.Context, id string) error {
-	// Delete user and all associated data
-	// Note: repos are not currently linked to users, so they remain
-	// In a future version, we might want to cascade delete repos too
+	// Delete user and all associated data in a transaction
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
 
-	// Delete tokens created by this user (we don't have user_id on tokens yet, so skip)
-	// For now, just delete the user record
-	_, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
-	return err
+	// Delete tokens owned by this user
+	_, err = tx.ExecContext(ctx, `DELETE FROM tokens WHERE owner_user_id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete user tokens: %w", err)
+	}
+
+	// Delete repos owned by this user
+	_, err = tx.ExecContext(ctx, `DELETE FROM repos WHERE owner_user_id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete user repos: %w", err)
+	}
+
+	// Delete the user record
+	_, err = tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // UpdateJobLogSize updates the log size for a job.

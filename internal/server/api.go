@@ -104,6 +104,13 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	case strings.HasPrefix(path, "/jobs/") && strings.HasSuffix(path, "/cancel"):
+		jobID := strings.TrimSuffix(strings.TrimPrefix(path, "/jobs/"), "/cancel")
+		if r.Method == http.MethodPost {
+			h.cancelJob(w, r, jobID)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	case strings.HasPrefix(path, "/jobs/"):
 		jobID := strings.TrimPrefix(path, "/jobs/")
 		if r.Method == http.MethodGet {
@@ -219,6 +226,8 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.giveMePro(w, r)
 
 	// User/Account
+	case path == "/whoami" && r.Method == http.MethodGet:
+		h.whoami(w, r)
 	case path == "/user" && r.Method == http.MethodGet:
 		h.getUser(w, r)
 	case path == "/user" && r.Method == http.MethodDelete:
@@ -657,6 +666,63 @@ func (h *APIHandler) runJob(w http.ResponseWriter, r *http.Request, jobID string
 	h.writeJSON(w, map[string]string{"job_id": newJobID})
 }
 
+// cancelJob cancels a pending or running job.
+func (h *APIHandler) cancelJob(w http.ResponseWriter, r *http.Request, jobID string) {
+	user := h.requireAuth(w, r)
+	if user == nil {
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get job
+	job, err := h.storage.GetJob(ctx, jobID)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			http.Error(w, "job not found", http.StatusNotFound)
+			return
+		}
+		h.log.Error("failed to get job", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Check repo access
+	repo, err := h.storage.GetRepo(ctx, job.RepoID)
+	if err != nil {
+		http.Error(w, "repo not found", http.StatusNotFound)
+		return
+	}
+
+	if !h.canAccessRepo(ctx, user, repo) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	// Only pending/queued/running jobs can be cancelled
+	switch job.Status {
+	case storage.JobStatusPending, storage.JobStatusQueued, storage.JobStatusRunning:
+		// OK to cancel
+	default:
+		http.Error(w, "job already completed", http.StatusBadRequest)
+		return
+	}
+
+	// Update job status to cancelled
+	if err := h.storage.UpdateJobStatus(ctx, jobID, storage.JobStatusCancelled, nil); err != nil {
+		h.log.Error("failed to update job status", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// TODO: If job is running on a worker, send cancel signal
+
+	h.log.Info("job cancelled", "job_id", jobID, "cancelled_by", user.Name)
+
+	w.WriteHeader(http.StatusOK)
+	h.writeJSON(w, map[string]any{"ok": true, "job_id": jobID})
+}
+
 // --- Workers ---
 
 type workerResponse struct {
@@ -832,6 +898,26 @@ func (h *APIHandler) listWorkers(w http.ResponseWriter, r *http.Request) {
 
 // listWorkerJobs returns recent jobs for a specific worker.
 func (h *APIHandler) listWorkerJobs(w http.ResponseWriter, r *http.Request, workerID string) {
+	// Require auth to prevent leaking job/repo metadata
+	user := h.requireAuth(w, r)
+	if user == nil {
+		return
+	}
+
+	// Get the worker to check ownership
+	ctx := r.Context()
+	worker, err := h.storage.GetWorker(ctx, workerID)
+	if err != nil {
+		http.Error(w, "worker not found", http.StatusNotFound)
+		return
+	}
+
+	// User can only view jobs from their own workers
+	if worker.OwnerName != user.Name {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
 	q := r.URL.Query()
 	limit := 10
 	if l := q.Get("limit"); l != "" {
@@ -840,7 +926,7 @@ func (h *APIHandler) listWorkerJobs(w http.ResponseWriter, r *http.Request, work
 		}
 	}
 
-	jobs, err := h.storage.ListJobsByWorker(r.Context(), workerID, limit)
+	jobs, err := h.storage.ListJobsByWorker(ctx, workerID, limit)
 	if err != nil {
 		h.log.Error("failed to list worker jobs", "worker_id", workerID, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -850,7 +936,7 @@ func (h *APIHandler) listWorkerJobs(w http.ResponseWriter, r *http.Request, work
 	resp := make([]jobResponse, len(jobs))
 	for i, j := range jobs {
 		resp[i] = jobToResponse(j)
-		if repo, err := h.storage.GetRepo(r.Context(), j.RepoID); err == nil {
+		if repo, err := h.storage.GetRepo(ctx, j.RepoID); err == nil {
 			resp[i].Repo = repo.Owner + "/" + repo.Name
 		}
 	}
@@ -860,9 +946,9 @@ func (h *APIHandler) listWorkerJobs(w http.ResponseWriter, r *http.Request, work
 
 // drainWorker sends a drain request to a worker (graceful shutdown).
 func (h *APIHandler) drainWorker(w http.ResponseWriter, r *http.Request, workerID string) {
-	// Check auth
-	username := h.auth.GetUser(r)
-	if username == "" {
+	// Check auth - use getCurrentUser to properly resolve email->user
+	user := h.getCurrentUser(r.Context(), r)
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -879,7 +965,8 @@ func (h *APIHandler) drainWorker(w http.ResponseWriter, r *http.Request, workerI
 		http.Error(w, "only shared workers can be remotely controlled", http.StatusForbidden)
 		return
 	}
-	if worker.OwnerName != username {
+	// Compare by username (worker.OwnerName is the GitHub username, so is user.Name)
+	if worker.OwnerName != user.Name {
 		http.Error(w, "only the worker owner can control this worker", http.StatusForbidden)
 		return
 	}
@@ -906,15 +993,15 @@ func (h *APIHandler) drainWorker(w http.ResponseWriter, r *http.Request, workerI
 		return
 	}
 
-	h.log.Info("worker drain requested", "worker_id", workerID, "by", username, "timeout", req.Timeout)
+	h.log.Info("worker drain requested", "worker_id", workerID, "by", user.Name, "timeout", req.Timeout)
 	h.writeJSON(w, map[string]any{"ok": true, "message": "drain command sent"})
 }
 
 // disconnectWorker sends a kill request to a worker (force disconnect).
 func (h *APIHandler) disconnectWorker(w http.ResponseWriter, r *http.Request, workerID string) {
-	// Check auth
-	username := h.auth.GetUser(r)
-	if username == "" {
+	// Check auth - use getCurrentUser to properly resolve email->user
+	user := h.getCurrentUser(r.Context(), r)
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -931,7 +1018,8 @@ func (h *APIHandler) disconnectWorker(w http.ResponseWriter, r *http.Request, wo
 		http.Error(w, "only shared workers can be remotely controlled", http.StatusForbidden)
 		return
 	}
-	if worker.OwnerName != username {
+	// Compare by username (worker.OwnerName is the GitHub username, so is user.Name)
+	if worker.OwnerName != user.Name {
 		http.Error(w, "only the worker owner can control this worker", http.StatusForbidden)
 		return
 	}
@@ -954,7 +1042,7 @@ func (h *APIHandler) disconnectWorker(w http.ResponseWriter, r *http.Request, wo
 		return
 	}
 
-	h.log.Info("worker disconnect requested", "worker_id", workerID, "by", username)
+	h.log.Info("worker disconnect requested", "worker_id", workerID, "by", user.Name)
 	h.writeJSON(w, map[string]any{"ok": true, "message": "disconnect command sent"})
 }
 
@@ -1785,6 +1873,20 @@ func (h *APIHandler) giveMePro(w http.ResponseWriter, r *http.Request) {
 
 // --- User/Account ---
 
+// whoami is a lightweight endpoint for checking if a user is logged in.
+// Used by CLI to test if saved credentials are still valid.
+func (h *APIHandler) whoami(w http.ResponseWriter, r *http.Request) {
+	user := h.getCurrentUser(r.Context(), r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	h.writeJSON(w, map[string]any{
+		"email":    user.Email,
+		"username": user.Name,
+	})
+}
+
 type connectedForge struct {
 	Type        string     `json:"type"`
 	Username    string     `json:"username,omitempty"`
@@ -1804,21 +1906,10 @@ type userResponse struct {
 }
 
 func (h *APIHandler) getUser(w http.ResponseWriter, r *http.Request) {
-	// Get username from auth context
-	username := h.auth.GetUser(r)
-	if username == "" {
+	// Get user - use getCurrentUser which properly handles email->user lookup
+	user := h.getCurrentUser(r.Context(), r)
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	user, err := h.storage.GetUserByName(r.Context(), username)
-	if err != nil {
-		if err == storage.ErrNotFound {
-			http.Error(w, "user not found", http.StatusNotFound)
-			return
-		}
-		h.log.Error("failed to get user", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
@@ -1868,20 +1959,9 @@ func (h *APIHandler) getUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) disconnectForge(w http.ResponseWriter, r *http.Request, forgeType string) {
-	username := h.auth.GetUser(r)
-	if username == "" {
+	user := h.getCurrentUser(r.Context(), r)
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	user, err := h.storage.GetUserByName(r.Context(), username)
-	if err != nil {
-		if err == storage.ErrNotFound {
-			http.Error(w, "user not found", http.StatusNotFound)
-			return
-		}
-		h.log.Error("failed to get user", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
@@ -1905,7 +1985,7 @@ func (h *APIHandler) disconnectForge(w http.ResponseWriter, r *http.Request, for
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		h.log.Info("user disconnected GitLab", "user", username)
+		h.log.Info("user disconnected GitLab", "user", user.Email)
 
 	case "forgejo", "codeberg":
 		if user.ForgejoCredentials == "" {
@@ -1917,7 +1997,7 @@ func (h *APIHandler) disconnectForge(w http.ResponseWriter, r *http.Request, for
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		h.log.Info("user disconnected Forgejo/Codeberg", "user", username)
+		h.log.Info("user disconnected Forgejo/Codeberg", "user", user.Email)
 
 	case "github":
 		// GitHub is the login provider - warn them
@@ -2020,31 +2100,20 @@ func (h *APIHandler) connectForge(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
-	username := h.auth.GetUser(r)
-	if username == "" {
+	user := h.getCurrentUser(r.Context(), r)
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	user, err := h.storage.GetUserByName(r.Context(), username)
-	if err != nil {
-		if err == storage.ErrNotFound {
-			http.Error(w, "user not found", http.StatusNotFound)
-			return
-		}
-		h.log.Error("failed to get user", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	// Delete the user
+	// Delete the user (also deletes their tokens and repos)
 	if err := h.storage.DeleteUser(r.Context(), user.ID); err != nil {
 		h.log.Error("failed to delete user", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	h.log.Info("user deleted account", "user", username, "user_id", user.ID)
+	h.log.Info("user deleted account", "user", user.Email, "user_id", user.ID)
 
 	// Return success - frontend should clear cookies and redirect
 	h.writeJSON(w, map[string]any{

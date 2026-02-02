@@ -58,6 +58,7 @@ type Storage interface {
 	// Users
 	GetOrCreateUser(ctx context.Context, name string) (*User, error)
 	GetOrCreateUserByEmail(ctx context.Context, email, name string) (*User, error)
+	GetUserByID(ctx context.Context, id string) (*User, error)
 	GetUserByName(ctx context.Context, name string) (*User, error)
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	UpdateUserEmail(ctx context.Context, userID, email string) error

@@ -39,8 +39,9 @@ const (
 
 // tokenCacheEntry holds a cached token lookup result.
 type tokenCacheEntry struct {
-	workerID  string
-	expiresAt time.Time
+	workerID    string
+	ownerUserID string // Token owner for authorization (empty for JWT auth)
+	expiresAt   time.Time
 }
 
 // tokenCache caches token hash -> worker ID lookups to reduce DB queries.
@@ -184,7 +185,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Validate token
 	ctx := r.Context()
-	workerID, err := h.validateToken(ctx, token)
+	tokenResult, err := h.validateToken(ctx, token)
 	if err != nil {
 		h.log.Warn("token validation failed", "error", err)
 		http.Error(w, "invalid token", http.StatusUnauthorized)
@@ -198,19 +199,20 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create worker connection
+	// Create worker connection with trusted token owner info
 	worker := &WorkerConn{
-		ID:         workerID,
-		Send:       make(chan []byte, 256),
-		ActiveJobs: []string{},
-		LastPing:   time.Now(),
+		ID:           tokenResult.workerID,
+		Send:         make(chan []byte, 256),
+		ActiveJobs:   []string{},
+		LastPing:     time.Now(),
+		TokenOwnerID: tokenResult.ownerUserID, // Server-derived, trusted
 	}
 
-	h.log.Info("worker connected", "worker_id", workerID)
+	h.log.Info("worker connected", "worker_id", tokenResult.workerID)
 
 	// Send AUTH_OK
 	authOK, err := protocol.Encode(protocol.TypeAuthOK, protocol.AuthOK{
-		WorkerID:      workerID,
+		WorkerID:      tokenResult.workerID,
 		ServerVersion: version.Version,
 	})
 	if err != nil {
@@ -229,15 +231,21 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go h.readPump(conn, worker)
 }
 
-// validateToken checks the token and returns the worker ID.
-func (h *WSHandler) validateToken(ctx context.Context, token string) (string, error) {
+// tokenValidationResult holds the result of token validation.
+type tokenValidationResult struct {
+	workerID    string
+	ownerUserID string // Token owner for authorization (empty for JWT auth)
+}
+
+// validateToken checks the token and returns the worker ID and owner info.
+func (h *WSHandler) validateToken(ctx context.Context, token string) (tokenValidationResult, error) {
 	hash := hashToken(token)
 
 	// Check cache first
 	tokenCache.RLock()
 	if entry, ok := tokenCache.entries[hash]; ok && time.Now().Before(entry.expiresAt) {
 		tokenCache.RUnlock()
-		return entry.workerID, nil
+		return tokenValidationResult{workerID: entry.workerID, ownerUserID: entry.ownerUserID}, nil
 	}
 	tokenCache.RUnlock()
 
@@ -249,14 +257,15 @@ func (h *WSHandler) validateToken(ctx context.Context, token string) (string, er
 		if tok.WorkerID != nil {
 			workerID = *tok.WorkerID
 		}
-		// Cache the result
+		// Cache the result including owner
 		tokenCache.Lock()
 		tokenCache.entries[hash] = tokenCacheEntry{
-			workerID:  workerID,
-			expiresAt: time.Now().Add(tokenCacheTTL),
+			workerID:    workerID,
+			ownerUserID: tok.OwnerUserID,
+			expiresAt:   time.Now().Add(tokenCacheTTL),
 		}
 		tokenCache.Unlock()
-		return workerID, nil
+		return tokenValidationResult{workerID: workerID, ownerUserID: tok.OwnerUserID}, nil
 	}
 
 	// If database lookup failed and we have a JWT validator, try JWT
@@ -264,11 +273,12 @@ func (h *WSHandler) validateToken(ctx context.Context, token string) (string, er
 		if email := h.jwtValidator.ValidateUserToken(token); email != "" {
 			// Use email as worker ID prefix for user tokens
 			// Don't cache JWTs - they have their own expiry handling
-			return "user:" + email, nil
+			// ownerUserID is empty for JWT - we'll look up by email in handleRegister
+			return tokenValidationResult{workerID: "user:" + email, ownerUserID: ""}, nil
 		}
 	}
 
-	return "", err
+	return tokenValidationResult{}, err
 }
 
 // hashToken creates a SHA3-256 hash of the token.
@@ -402,22 +412,38 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 	}
 
 	// Set worker mode (default to personal if not specified)
+	// Mode is validated but client can choose between personal/shared
 	worker.Mode = reg.Mode
 	if worker.Mode == "" {
 		worker.Mode = protocol.ModePersonal
 	}
-
-	// Set owner info from registration or extract from worker ID
-	worker.OwnerID = reg.OwnerID
-	worker.OwnerName = reg.OwnerName
+	// Validate mode is one of the allowed values
+	if worker.Mode != protocol.ModePersonal && worker.Mode != protocol.ModeShared {
+		worker.Mode = protocol.ModePersonal
+	}
 
 	ctx := context.Background()
 	var ownerUser *storage.User
 
-	// If owner info not in registration, try to extract from worker ID
-	// Worker IDs for JWT-authenticated workers are "user:email:hostname"
-	if worker.OwnerName == "" && len(worker.ID) > 5 && worker.ID[:5] == "user:" {
-		// Extract email from "user:email:hostname" format
+	// SECURITY: Derive owner from server-trusted sources, NOT from client-provided values.
+	// This prevents a malicious worker from claiming to be owned by another user.
+
+	// Case 1: Token-authenticated workers - use TokenOwnerID (set from token's owner_user_id)
+	if worker.TokenOwnerID != "" {
+		if user, err := h.storage.GetUserByID(ctx, worker.TokenOwnerID); err == nil && user != nil {
+			worker.OwnerID = user.ID
+			worker.OwnerName = user.Name // GitHub username
+			ownerUser = user
+		} else {
+			h.log.Warn("token owner not found", "owner_id", worker.TokenOwnerID)
+			// Reject the connection if we can't verify the owner
+			msg, _ := protocol.Encode(protocol.TypeAuthFail, protocol.AuthFail{Error: "Token owner not found"})
+			worker.Send <- msg
+			return
+		}
+	} else if len(worker.ID) > 5 && worker.ID[:5] == "user:" {
+		// Case 2: JWT-authenticated workers - extract email from worker ID
+		// Worker IDs for JWT auth are "user:email:hostname"
 		rest := worker.ID[5:]
 		var email string
 		if idx := strings.LastIndex(rest, ":"); idx > 0 {
@@ -430,12 +456,16 @@ func (h *WSHandler) handleRegister(worker *WorkerConn, payload []byte) {
 		// This is critical for the trust model: job.Author is a GitHub username,
 		// so worker.OwnerName must also be the GitHub username to match
 		if user, err := h.storage.GetUserByEmail(ctx, email); err == nil && user != nil {
+			worker.OwnerID = user.ID
 			worker.OwnerName = user.Name // GitHub username
 			ownerUser = user
 		} else {
 			// Fallback to email if user not found (shouldn't happen for valid tokens)
 			worker.OwnerName = email
 		}
+	} else {
+		// No valid owner source - this shouldn't happen with proper token validation
+		h.log.Warn("worker has no valid owner source", "worker_id", worker.ID)
 	}
 
 	// Check worker limit for this user

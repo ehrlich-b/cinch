@@ -1283,6 +1283,52 @@ func (s *PostgresStorage) GetOrCreateUserByEmail(ctx context.Context, email, nam
 	return nil, err
 }
 
+func (s *PostgresStorage) GetUserByID(ctx context.Context, id string) (*User, error) {
+	user := &User{}
+	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
+	var emailsJSON string
+	var tier sql.NullString
+	var storageUsed sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, email, emails, github_connected_at, gitlab_credentials, gitlab_credentials_at,
+		        forgejo_credentials, forgejo_credentials_at, tier, storage_used_bytes, created_at
+		 FROM users WHERE id = $1`, id).Scan(
+		&user.ID, &user.Name, &user.Email, &emailsJSON, &githubConnectedAt,
+		&user.GitLabCredentials, &gitlabCredentialsAt,
+		&user.ForgejoCredentials, &forgejoCredentialsAt, &tier, &storageUsed, &user.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if gitlabCredentialsAt.Valid {
+		user.GitLabCredentialsAt = gitlabCredentialsAt.Time
+	}
+	if forgejoCredentialsAt.Valid {
+		user.ForgejoCredentialsAt = forgejoCredentialsAt.Time
+	}
+	if githubConnectedAt.Valid {
+		user.GitHubConnectedAt = githubConnectedAt.Time
+	}
+	if emailsJSON != "" {
+		user.Emails = parseEmailsJSON(emailsJSON)
+	}
+	if tier.Valid {
+		user.Tier = UserTier(tier.String)
+	} else {
+		user.Tier = UserTierFree
+	}
+	if storageUsed.Valid {
+		user.StorageUsedBytes = storageUsed.Int64
+	}
+	// Decrypt credentials
+	if err := s.decryptUserCredentials(user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 func (s *PostgresStorage) GetUserByName(ctx context.Context, name string) (*User, error) {
 	user := &User{}
 	var gitlabCredentialsAt, forgejoCredentialsAt, githubConnectedAt sql.NullTime
@@ -1470,8 +1516,32 @@ func (s *PostgresStorage) ClearUserGitHubConnected(ctx context.Context, userID s
 }
 
 func (s *PostgresStorage) DeleteUser(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
-	return err
+	// Delete user and all associated data in a transaction
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Delete tokens owned by this user
+	_, err = tx.ExecContext(ctx, `DELETE FROM tokens WHERE owner_user_id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete user tokens: %w", err)
+	}
+
+	// Delete repos owned by this user
+	_, err = tx.ExecContext(ctx, `DELETE FROM repos WHERE owner_user_id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete user repos: %w", err)
+	}
+
+	// Delete the user record
+	_, err = tx.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // UpdateJobLogSize updates the log size for a job.

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
@@ -738,13 +739,14 @@ func (h *AuthHandler) renderEmailSelector(w http.ResponseWriter, emails []string
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 
-	// Build email options HTML
+	// Build email options HTML (escape to prevent XSS)
 	var emailOptionsHTML string
 	for _, email := range emails {
+		escapedEmail := html.EscapeString(email)
 		emailOptionsHTML += fmt.Sprintf(`
 			<button type="submit" name="email" value="%s" class="email-option">
 				<span class="email">%s</span>
-			</button>`, email, email)
+			</button>`, escapedEmail, escapedEmail)
 	}
 
 	fmt.Fprintf(w, `<!DOCTYPE html>
@@ -1132,10 +1134,11 @@ func (h *AuthHandler) renderDeviceVerifyPage(w http.ResponseWriter, userCode, me
 
 	messageHTML := ""
 	if message != "" {
+		escapedMsg := html.EscapeString(message)
 		if strings.Contains(message, "authorized") {
-			messageHTML = fmt.Sprintf(`<p class="success">%s</p>`, message)
+			messageHTML = fmt.Sprintf(`<p class="success">%s</p>`, escapedMsg)
 		} else {
-			messageHTML = fmt.Sprintf(`<p class="error">%s</p>`, message)
+			messageHTML = fmt.Sprintf(`<p class="error">%s</p>`, escapedMsg)
 		}
 	}
 
@@ -1224,7 +1227,7 @@ input[type="text"]::placeholder { color: #8b949e; }
   </form>
 </div>
 </body>
-</html>`, messageHTML, userCode)
+</html>`, messageHTML, html.EscapeString(userCode))
 }
 
 // handleDeviceToken handles polling for the device token (POST /auth/device/token).

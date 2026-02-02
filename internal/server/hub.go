@@ -18,9 +18,10 @@ type WorkerConn struct {
 	Version      string
 
 	// Worker trust model
-	Mode      protocol.WorkerMode // personal or shared
-	OwnerID   string              // User ID of the worker's owner
-	OwnerName string              // Username of the worker's owner
+	Mode         protocol.WorkerMode // personal or shared
+	OwnerID      string              // User ID of the worker's owner
+	OwnerName    string              // Username of the worker's owner
+	TokenOwnerID string              // Server-derived owner from token (trusted, for authorization)
 
 	// Connection state
 	ActiveJobs []string

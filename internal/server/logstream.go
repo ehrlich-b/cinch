@@ -87,7 +87,16 @@ func (h *LogStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "authentication required for private repo logs", http.StatusUnauthorized)
 			return
 		}
-		// TODO: check if user is collaborator on repo (design/16-worker-visibility.md)
+		// Check if user owns this repo
+		user, err := h.storage.GetUserByEmail(ctx, email)
+		if err != nil || user == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if repo.OwnerUserID != user.ID {
+			http.Error(w, "forbidden: you don't have access to this repo", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Upgrade to WebSocket (use UI upgrader with origin checks)
@@ -267,13 +276,19 @@ func (h *LogStreamHandler) BroadcastLog(jobID, stream, data string) {
 
 // BroadcastJobComplete sends job completion to all subscribers.
 func (h *LogStreamHandler) BroadcastJobComplete(jobID string, status string, exitCode *int) {
+	// Copy subscribers under read lock, then release before mutating
 	h.mu.RLock()
 	subs := h.subscribers[jobID]
-	h.mu.RUnlock()
-
 	if len(subs) == 0 {
+		h.mu.RUnlock()
 		return
 	}
+	// Copy the connections to avoid holding lock during I/O
+	conns := make([]*websocket.Conn, 0, len(subs))
+	for conn := range subs {
+		conns = append(conns, conn)
+	}
+	h.mu.RUnlock()
 
 	msg := statusMessage{
 		Type:     "status",
@@ -287,10 +302,8 @@ func (h *LogStreamHandler) BroadcastJobComplete(jobID string, status string, exi
 		return
 	}
 
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	for conn := range subs {
+	// Send to all connections (no lock held)
+	for _, conn := range conns {
 		if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
 			h.log.Warn("failed to broadcast status", "job_id", jobID, "error", err)
 		}

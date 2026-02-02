@@ -139,8 +139,8 @@ func (h *BadgeHandler) parsePath(path, prefix, suffix string) (forge, owner, rep
 	return parts[0], parts[1], parts[2], true
 }
 
-func (h *BadgeHandler) getRepoStatus(ctx context.Context, _, owner, repo, branch string) string {
-	// Find repo by owner/name
+func (h *BadgeHandler) getRepoStatus(ctx context.Context, forge, owner, repo, branch string) string {
+	// Find repo by forge/owner/name
 	repos, err := h.store.ListRepos(ctx)
 	if err != nil {
 		h.log.Error("failed to list repos", "error", err)
@@ -149,7 +149,12 @@ func (h *BadgeHandler) getRepoStatus(ctx context.Context, _, owner, repo, branch
 
 	var foundRepo *storage.Repo
 	for _, r := range repos {
+		// Match owner and repo name, and optionally forge if provided
 		if r.Owner == owner && r.Name == repo {
+			// If forge is provided, check it matches (forge can be github.com, gitlab.com, etc.)
+			if forge != "" && !strings.Contains(r.HTMLURL, forge) {
+				continue // Different forge, keep looking
+			}
 			foundRepo = r
 			break
 		}

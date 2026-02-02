@@ -101,6 +101,9 @@ func (h *GitHubAppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limit request body to 5MB to prevent DoS
+	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
+
 	// Read body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
