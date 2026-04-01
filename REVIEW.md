@@ -199,6 +199,38 @@ Invalidate cache entry on revoke, or shorten TTL + include revocation timestamp/
 
 ---
 
+## [HIGH] SSRF + org token exfil risk during webhook auto-create
+
+**File:** `internal/server/api.go:1183-1315`, `internal/forge/forge.go:62-86`, `internal/forge/gitlab.go`, `internal/forge/forgejo.go`  
+**Type:** Security
+
+**Problem:**
+`createRepo` accepts user-provided `html_url`. When org tokens are configured, `createWebhookForRepo` uses that URL to build a forge client and auto-create webhooks. For GitLab/Forgejo/Gitea, this results in outbound API calls to the user-supplied host with the org token in the `Authorization` header.
+
+**Impact:**
+Authenticated users can trigger SSRF and potentially exfiltrate org-level forge tokens by pointing `html_url` at attacker-controlled hosts.
+
+**Suggested Fix:**
+When org tokens are in use, validate `html_url`/`clone_url` host against a trusted allowlist (configured forge base URL for that type) or ignore user input and derive from trusted configuration.
+
+---
+
+## [LOW/MEDIUM] Forge HTTP clients lack default timeouts
+
+**File:** `internal/forge/github.go:17-28`, `internal/forge/gitlab.go`, `internal/forge/forgejo.go`  
+**Type:** Security / Reliability
+
+**Problem:**
+Forge implementations fall back to `http.DefaultClient`, which has no timeouts.
+
+**Impact:**
+Outbound requests can hang indefinitely under network failure or hostile endpoints, tying up goroutines and degrading service.
+
+**Suggested Fix:**
+Use a default client with sane timeouts (e.g., 10–30s), or inject a shared client with timeouts from the server.
+
+---
+
 ## [LOW] AI-smell/stale comments indicate drift from actual schema
 
 **File:** `internal/storage/sqlite.go:1525`  
@@ -234,7 +266,9 @@ Update comments + implement intended token cleanup behavior.
 
 ### 🚧 Remaining
 
-1. **[MEDIUM] Token cache doesn't invalidate on revoke** - 5-minute TTL means revoked tokens work briefly
+1. **[HIGH] SSRF + org token exfil risk** - `html_url` used with org tokens during webhook auto-create
+2. **[MEDIUM] Token cache doesn't invalidate on revoke** - 5-minute TTL means revoked tokens work briefly
+3. **[LOW/MEDIUM] Forge HTTP clients lack timeouts** - potential hang/DoS of outbound calls
 
 ---
 

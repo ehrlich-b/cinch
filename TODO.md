@@ -68,6 +68,7 @@ From simulated r/selfhosted feedback:
 - [ ] **Device login only offers GitHub** - `cinch login` device flow is hardcoded to GitHub OAuth. Should show forge picker (GitHub/GitLab/Codeberg) or accept `cinch login --forge gitlab`
 - [ ] **Invalid JWT shows "connection closed" instead of clear error** - Worker disconnects with generic "event stream error: connection closed" when JWT is invalid/expired. Should show "invalid credentials" or "token expired, run `cinch login`"
 - [ ] **Device login flow redirects twice** - Goes device code page → GitHub login → device code page again. Should go straight to success after GitHub auth
+- [ ] **`cinch retry` returns "you do not own this repo"** - Webhook-triggered builds are owned by the GitHub App, not the user. `cinch retry` checks ownership against the logged-in user and rejects. Should allow retry if user owns the repo on the forge.
 - [ ] Container config errors should fail with helpful message, not default to ubuntu:22.04
 - [ ] Missing Docker should fail with "install Docker or set `container: none`"
 
