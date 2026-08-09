@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"html"
+	"html/template"
 	"io"
 	"log/slog"
 	"net/http"
@@ -726,30 +726,9 @@ func (h *AuthHandler) completeLogin(w http.ResponseWriter, r *http.Request, emai
 	http.Redirect(w, r, returnTo, http.StatusFound)
 }
 
-// renderEmailSelector shows a page to choose which email to use.
-func (h *AuthHandler) renderEmailSelector(w http.ResponseWriter, emails []string, username, returnTo string) {
-	// Create a signed JWT containing the email options and username
-	selectionToken, err := h.createEmailSelectionToken(emails, username, returnTo)
-	if err != nil {
-		h.log.Error("failed to create selection token", "error", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-
-	// Build email options HTML (escape to prevent XSS)
-	var emailOptionsHTML string
-	for _, email := range emails {
-		escapedEmail := html.EscapeString(email)
-		emailOptionsHTML += fmt.Sprintf(`
-			<button type="submit" name="email" value="%s" class="email-option">
-				<span class="email">%s</span>
-			</button>`, escapedEmail, escapedEmail)
-	}
-
-	fmt.Fprintf(w, `<!DOCTYPE html>
+// emailSelectorPageHTML is the select-email page, rendered with html/template
+// so all dynamic values (emails, selection token) are automatically escaped.
+const emailSelectorPageHTML = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -783,7 +762,7 @@ p {
 form { display: flex; flex-direction: column; gap: 0.75rem; }
 .email-option {
   display: block;
-  width: 100%%;
+  width: 100%;
   padding: 1rem 1.5rem;
   background: #161b22;
   border: 1px solid #30363d;
@@ -811,13 +790,40 @@ form { display: flex; flex-direction: column; gap: 0.75rem; }
   <h1>Which email should we use?</h1>
   <p>This will be your Cinch account identity, used for billing and notifications.</p>
   <form method="POST" action="/auth/select-email">
-    <input type="hidden" name="token" value="%s">
-    %s
+    <input type="hidden" name="token" value="{{.Token}}">
+    {{range .Emails}}
+    <button type="submit" name="email" value="{{.}}" class="email-option">
+      <span class="email">{{.}}</span>
+    </button>
+    {{end}}
   </form>
   <p class="hint">You can change this later in account settings.</p>
 </div>
 </body>
-</html>`, selectionToken, emailOptionsHTML)
+</html>`
+
+var emailSelectorPageTemplate = template.Must(template.New("emailSelectorPage").Parse(emailSelectorPageHTML))
+
+// renderEmailSelector shows a page to choose which email to use.
+func (h *AuthHandler) renderEmailSelector(w http.ResponseWriter, emails []string, username, returnTo string) {
+	// Create a signed JWT containing the email options and username
+	selectionToken, err := h.createEmailSelectionToken(emails, username, returnTo)
+	if err != nil {
+		h.log.Error("failed to create selection token", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+
+	// Render via html/template so emails and token are auto-escaped.
+	if err := emailSelectorPageTemplate.Execute(w, struct {
+		Token  string
+		Emails []string
+	}{selectionToken, emails}); err != nil {
+		h.log.Error("failed to render email selector", "error", err)
+	}
 }
 
 // handleSelectEmail handles the email selection form submission.
@@ -1128,21 +1134,9 @@ func (h *AuthHandler) recordDeviceVerifyAttempt(ip string, success bool) {
 	}
 }
 
-func (h *AuthHandler) renderDeviceVerifyPage(w http.ResponseWriter, userCode, message string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-
-	messageHTML := ""
-	if message != "" {
-		escapedMsg := html.EscapeString(message)
-		if strings.Contains(message, "authorized") {
-			messageHTML = fmt.Sprintf(`<p class="success">%s</p>`, escapedMsg)
-		} else {
-			messageHTML = fmt.Sprintf(`<p class="error">%s</p>`, escapedMsg)
-		}
-	}
-
-	fmt.Fprintf(w, `<!DOCTYPE html>
+// deviceVerifyPageHTML is the device-verification page, rendered with
+// html/template so all dynamic values (message, user code) are auto-escaped.
+const deviceVerifyPageHTML = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -1192,7 +1186,7 @@ input[type="text"] {
   border: 1px solid #30363d;
   color: #c9d1d9;
   border-radius: 6px;
-  width: 100%%;
+  width: 100%;
   margin-bottom: 1rem;
   text-align: center;
   letter-spacing: 0.1em;
@@ -1209,7 +1203,7 @@ input[type="text"]::placeholder { color: #8b949e; }
   font-size: 1rem;
   font-weight: 500;
   cursor: pointer;
-  width: 100%%;
+  width: 100%;
 }
 .btn:hover { background: #2ea043; }
 .error { color: #f85149; }
@@ -1219,15 +1213,32 @@ input[type="text"]::placeholder { color: #8b949e; }
 <body>
 <div class="container">
   <h1>Verify Device</h1>
-  %s
+  {{if .Message}}
+  {{if .Success}}<p class="success">{{.Message}}</p>{{else}}<p class="error">{{.Message}}</p>{{end}}
+  {{end}}
   <p>Enter the code shown in your terminal to authorize the CLI.</p>
   <form method="POST">
-    <input type="text" name="code" placeholder="ABCD-1234" value="%s" autocomplete="off" autofocus>
+    <input type="text" name="code" placeholder="ABCD-1234" value="{{.UserCode}}" autocomplete="off" autofocus>
     <button type="submit" class="btn">Authorize Device</button>
   </form>
 </div>
 </body>
-</html>`, messageHTML, html.EscapeString(userCode))
+</html>`
+
+var deviceVerifyPageTemplate = template.Must(template.New("deviceVerifyPage").Parse(deviceVerifyPageHTML))
+
+func (h *AuthHandler) renderDeviceVerifyPage(w http.ResponseWriter, userCode, message string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+
+	// Render via html/template so message and userCode are auto-escaped.
+	if err := deviceVerifyPageTemplate.Execute(w, struct {
+		UserCode string
+		Message  string
+		Success  bool
+	}{userCode, message, strings.Contains(message, "authorized")}); err != nil {
+		h.log.Error("failed to render device verify page", "error", err)
+	}
 }
 
 // handleDeviceToken handles polling for the device token (POST /auth/device/token).
