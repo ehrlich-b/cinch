@@ -70,7 +70,11 @@ func (h *LogStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Authorization: require auth for private repo logs
+	// Authorization: same repo access policy as the REST endpoints.
+	// Anonymous access is refused and cross-tenant access (authenticated but
+	// not the repo owner) is forbidden — identical to getJob/getJobLogs in
+	// api.go. This must happen BEFORE the WebSocket upgrade so no log bytes
+	// are ever sent to a caller that lacks access.
 	repo, err := h.storage.GetRepo(ctx, job.RepoID)
 	if err != nil {
 		h.log.Error("failed to get repo for log auth", "error", err)
@@ -78,25 +82,14 @@ func (h *LogStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if repo.Private {
-		var email string
-		if h.auth != nil {
-			email = h.auth.GetUser(r)
-		}
-		if email == "" {
+	user := currentUserFromRequest(ctx, h.auth, h.storage, r)
+	if !canAccessRepo(user, repo) {
+		if user == nil {
 			http.Error(w, "authentication required for private repo logs", http.StatusUnauthorized)
-			return
-		}
-		// Check if user owns this repo
-		user, err := h.storage.GetUserByEmail(ctx, email)
-		if err != nil || user == nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if repo.OwnerUserID != user.ID {
+		} else {
 			http.Error(w, "forbidden: you don't have access to this repo", http.StatusForbidden)
-			return
 		}
+		return
 	}
 
 	// Upgrade to WebSocket (use UI upgrader with origin checks)

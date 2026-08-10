@@ -2127,14 +2127,21 @@ func (h *APIHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
 // getCurrentUser returns the authenticated user, or nil if not authenticated.
 // This handles the email -> user lookup that's needed for authorization.
 func (h *APIHandler) getCurrentUser(ctx context.Context, r *http.Request) *storage.User {
-	if h.auth == nil {
+	return currentUserFromRequest(ctx, h.auth, h.storage, r)
+}
+
+// currentUserFromRequest resolves the authenticated user for any handler that
+// holds an *AuthHandler and storage.Storage. Shared by the REST API handler and
+// WebSocket handlers so they enforce the exact same identity policy.
+func currentUserFromRequest(ctx context.Context, auth *AuthHandler, store storage.Storage, r *http.Request) *storage.User {
+	if auth == nil {
 		return nil
 	}
-	email := h.auth.GetUser(r)
+	email := auth.GetUser(r)
 	if email == "" {
 		return nil
 	}
-	user, err := h.storage.GetUserByEmail(ctx, email)
+	user, err := store.GetUserByEmail(ctx, email)
 	if err != nil {
 		return nil
 	}
@@ -2154,6 +2161,13 @@ func (h *APIHandler) requireAuth(w http.ResponseWriter, r *http.Request) *storag
 // canAccessRepo checks if the user owns or has access to a repo.
 // For MVP: user owns the repo OR repo is public.
 func (h *APIHandler) canAccessRepo(_ context.Context, user *storage.User, repo *storage.Repo) bool {
+	return canAccessRepo(user, repo)
+}
+
+// canAccessRepo reports whether the user can access a repo: public repos are
+// accessible to anyone, private repos require ownership. This is the single
+// repo-access policy used by both REST and WebSocket handlers.
+func canAccessRepo(user *storage.User, repo *storage.Repo) bool {
 	// Public repos are accessible to anyone
 	if !repo.Private {
 		return true
